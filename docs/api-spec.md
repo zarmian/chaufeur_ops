@@ -1,0 +1,240 @@
+# API Contracts
+
+Next.js App Router. Most reads happen in Server Components and Server Actions; the routes below exist where an external consumer, a client-side table or a webhook needs them.
+
+## Conventions
+
+- Base path `/api`
+- Auth by session cookie (dashboard) or `Authorization: Bearer` (cron and integrations)
+- All money in the payload is **integer pence**, in fields ending `_pence`
+- All timestamps are **ISO 8601 UTC** with a `Z` suffix
+- Errors return `{ error: { code, message, fields? } }` with the appropriate status
+- List endpoints return `{ data: [...], page, pageSize, total }`
+- Mutations are validated by the same Zod schema used by the form
+
+## Standard error codes
+
+| Code | Status | Meaning |
+|---|---|---|
+| `UNAUTHENTICATED` | 401 | No valid session |
+| `FORBIDDEN` | 403 | Role lacks permission |
+| `NOT_FOUND` | 404 | |
+| `VALIDATION_FAILED` | 422 | `fields` carries per-field messages |
+| `INVALID_TRANSITION` | 409 | Illegal status change |
+| `DOCUMENT_EXPIRED` | 409 | Driver or vehicle not compliant at `scheduledAt` |
+| `PRICE_REQUIRED` | 409 | Completing a job with no price and no `zeroValueReason` |
+| `INVOICE_LOCKED` | 409 | Editing a `SENT` or `PAID` invoice |
+
+---
+
+## Jobs
+
+### `GET /api/jobs`
+Server-side paginated list. This backs the main table — it must never return everything.
+
+Query: `page` `pageSize` (max 100) `q` `status` `jobType` `driverId` `clientId` `accountId` `from` `to` `unpriced=true` `sort` `dir`
+
+```json
+{
+  "data": [{
+    "id": "clx...", "reference": "WLX-000767",
+    "scheduledAt": "2026-08-02T13:30:00Z",
+    "jobType": "AIRPORT_TRANSFER", "status": "ASSIGNED",
+    "pickupText": "Heathrow T5", "dropoffText": "The Dorchester",
+    "client": { "id": "clx...", "name": "Mr Williams" },
+    "account": { "id": "clx...", "name": "Welux" },
+    "driver": { "id": "clx...", "name": "Nasir Hafeez" },
+    "vehicle": { "id": "clx...", "registration": "KR22 RRZ", "make": "Mercedes Benz", "model": "EQE" },
+    "clientPricePence": 12500, "driverPricePence": 8000,
+    "grossProfitPence": 4500, "isUnpriced": false
+  }],
+  "page": 1, "pageSize": 50, "total": 704
+}
+```
+
+### `POST /api/jobs`
+Creates a job. `clientPricePence` and `driverPricePence` are optional but the response warns when absent.
+
+```json
+{
+  "clientId": "clx...", "accountId": "clx...",
+  "jobType": "AIRPORT_TRANSFER",
+  "scheduledAt": "2026-08-02T13:30:00Z",
+  "pickupText": "Heathrow T5", "dropoffText": "The Dorchester",
+  "driverId": "clx...", "vehicleId": "clx...",
+  "flightNumber": "BA216",
+  "clientPricePence": 12500, "driverPricePence": 8000,
+  "notes": "Meet and greet"
+}
+```
+
+`201` with the created job. `409 DOCUMENT_EXPIRED` if the driver or vehicle is non-compliant at `scheduledAt`.
+
+### `PATCH /api/jobs/:id`
+Partial update. Writes an `EDITED` event and an audit entry.
+
+### `POST /api/jobs/:id/status`
+```json
+{ "status": "COMPLETED", "occurredAt": "2026-08-02T15:10:00Z", "zeroValueReason": null }
+```
+Validates the transition, appends a `JobEvent`, updates the cached `jobs.status`. `409 PRICE_REQUIRED` when completing an unpriced job without a reason.
+
+### `DELETE /api/jobs/:id`
+Soft delete. `ADMIN` only. Refuses if the job appears on a non-draft invoice.
+
+### `GET /api/jobs/:id/timeline`
+Ordered `JobEvent` list with computed durations, including waiting time from `ARRIVED` to `POB`.
+
+---
+
+## Job finances
+
+### `GET /api/jobs/:id/finance`
+### `PUT /api/jobs/:id/finance`
+Accepts the input fields only. Totals and gross profit are recomputed server-side and returned — anything the client sends for `totalClientPence`, `totalCostsPence` or `grossProfitPence` is ignored.
+
+```json
+{
+  "baseFarePence": 12500, "extraChargesPence": 1500,
+  "extraChargesNotes": "Gatwick drop charge",
+  "customerHours": null, "customerRatePence": 0,
+  "driverPaymentPence": 8000, "fuelCostPence": 0,
+  "driverPayStatus": "UNPAID"
+}
+```
+
+### `POST /api/jobs/:id/price-from-rate-card`
+Resolves the matching `RateCardRule` and returns a suggested price without saving.
+
+---
+
+## Drivers, vehicles, documents
+
+```
+GET    /api/drivers                 list, filters: status, q, expiringWithinDays
+POST   /api/drivers
+PATCH  /api/drivers/:id
+GET    /api/drivers/:id/schedule    ?from&to — jobs, for conflict checks
+GET    /api/drivers/:id/earnings    ?from&to — jobs, hours, amount due, paid status
+POST   /api/drivers/:id/telegram-link   → { url: "https://t.me/WeLuxOpsBot?start=drv_xxx" }
+
+GET    /api/vehicles
+POST   /api/vehicles
+PATCH  /api/vehicles/:id
+
+POST   /api/documents               multipart: file, type, driverId|vehicleId, issuedOn, expiresOn
+GET    /api/documents/:id/url       → short-lived signed R2 URL
+GET    /api/compliance/expiring     ?days=30 — drivers and vehicles with lapsing documents
+```
+
+`GET /api/compliance/expiring` response:
+
+```json
+{
+  "expired":  [{ "kind": "DRIVER", "id": "clx...", "name": "Aqeel Butt",
+                 "documentType": "PHV_BADGE", "expiresOn": "2026-07-14", "daysRemaining": -19 }],
+  "critical": [],
+  "warning":  [],
+  "counts": { "expired": 1, "critical": 0, "warning": 4 }
+}
+```
+
+Buckets: `expired` (past), `critical` (≤7 days), `warning` (≤30 days).
+
+---
+
+## Invoicing
+
+```
+GET    /api/invoices                ?status&clientId&accountId&overdue=true
+POST   /api/invoices                { jobIds[], clientId|accountId, issueDate, dueDate, vatRatePct, notes }
+GET    /api/invoices/:id
+PATCH  /api/invoices/:id            DRAFT only, else 409 INVOICE_LOCKED
+POST   /api/invoices/:id/send       renders PDF, emails it, sets SENT
+POST   /api/invoices/:id/payments   { amountPence, gateway, receivedAt, gatewayTxnId? }
+GET    /api/invoices/:id/pdf        signed URL
+GET    /api/invoices/aging          0-30 / 31-60 / 61-90 / 90+ totals by client
+```
+
+`POST /api/invoices` sums the selected jobs' `totalClientPence` server-side, computes VAT, allocates the next number from a sequence, and rejects any job already on a non-cancelled invoice.
+
+---
+
+## Driver payouts
+
+```
+GET    /api/payouts                 ?driverId&status&period
+POST   /api/payouts/generate        { periodStart, periodEnd, driverIds?[] } — drafts for all with unpaid completed jobs
+POST   /api/payouts/:id/approve
+POST   /api/payouts/:id/mark-paid   { paidAt, paymentReference }
+GET    /api/payouts/:id/statement   PDF signed URL
+```
+
+Marking a payout paid sets `driverPayStatus = FULLY_PAID` on every job in it, inside one transaction.
+
+---
+
+## Reports
+
+```
+GET /api/reports/summary     ?from&to&driverId&clientId&accountId&vehicleId
+GET /api/reports/jobs        same filters, paginated detail rows
+GET /api/reports/export      same filters + format=xlsx|pdf → signed URL
+```
+
+Summary response:
+
+```json
+{
+  "jobCount": 141, "pricedJobCount": 138, "unpricedJobCount": 3,
+  "revenuePence": 1842500, "costsPence": 1204000,
+  "grossProfitPence": 638500, "marginPct": 34.65,
+  "byJobType": [{ "jobType": "AIRPORT_TRANSFER", "jobCount": 88,
+                  "revenuePence": 1120000, "grossProfitPence": 402000 }]
+}
+```
+
+`unpricedJobCount` is deliberately prominent. A report that silently averages in zero-value jobs is how the legacy system reported £0 profit on 141 jobs.
+
+---
+
+## Telegram
+
+### `POST /api/telegram/webhook`
+Public but verified by the `X-Telegram-Bot-Api-Secret-Token` header against `TELEGRAM_WEBHOOK_SECRET`. Reject anything else with 401 before parsing.
+
+Handles:
+
+| Update | Action |
+|---|---|
+| `/start drv_<token>` | Validate `LinkToken`, bind `telegramChatId` to the driver, confirm |
+| `callback_query` `job:<id>:accept` / `decline` | Append event, update status, notify ops on decline |
+| `callback_query` `job:<id>:on_way\|arrived\|pob\|complete` | Append event with timestamp and location |
+| `message` with photo | Attach to the driver's current job as a receipt, prompt for amount |
+| `message` with location | Store as a position ping against the active job |
+| `message` text | Append to the job's internal notes, alert ops |
+
+Respond `200` within 5 seconds always; queue anything slow.
+
+### `POST /api/telegram/send`
+Internal. `{ driverId | chatId, template, params }`.
+
+---
+
+## Cron
+
+All require `Authorization: Bearer ${CRON_SECRET}`.
+
+| Route | Schedule | Does |
+|---|---|---|
+| `/api/cron/document-expiry` | daily 08:00 | Messages drivers at 30/14/7 days; emails ops the summary |
+| `/api/cron/unassigned-jobs` | hourly | Alerts ops to jobs within 24h with no driver |
+| `/api/cron/driver-statements` | Sundays 18:00 | Generates and sends weekly payout statements |
+| `/api/cron/invoice-reminders` | daily 09:00 | Chases invoices overdue by the configured number of days |
+| `/api/cron/unpriced-digest` | daily 07:00 | Emails ops the list of completed-but-unpriced jobs |
+
+## Rate limiting
+
+- Auth endpoints: 5 attempts per 15 minutes per IP
+- Telegram webhook: 30 updates per second per chat, then drop
+- Export endpoints: 10 per hour per user — they are expensive
