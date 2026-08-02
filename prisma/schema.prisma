@@ -1,0 +1,729 @@
+// WeLux Ops — schema implementing docs/data-model.md.
+//
+// Rules this file must never break:
+//   * money is integer pence, columns suffixed `Pence` — never Float or Decimal
+//   * timestamps are timestamptz stored in UTC, displayed in the configured zone
+//   * every primary entity has `deletedAt` — there is no hard delete
+//
+// DATABASE_URL is the pooled connection (Supabase pooler, pgbouncer).
+// DIRECT_URL is the direct 5432 connection, used for migrations only.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------------------------------------------------------------- enums
+
+enum UserRole {
+  ADMIN
+  OPS
+  ACCOUNTS
+  VIEWER
+}
+
+enum JobType {
+  AS_DIRECTED
+  TRANSFER
+  AIRPORT_TRANSFER
+}
+
+enum JobStatus {
+  DRAFT
+  PENDING
+  ASSIGNED
+  ACCEPTED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum JobEventType {
+  CREATED
+  ASSIGNED
+  ACCEPTED
+  DECLINED
+  ON_WAY
+  ARRIVED
+  POB
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+  EDITED
+  PRICE_SET
+}
+
+enum ActorType {
+  USER
+  DRIVER
+  SYSTEM
+}
+
+enum DriverStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum VehicleStatus {
+  ACTIVE
+  OFF_ROAD
+  RETIRED
+}
+
+enum VehicleClass {
+  SALOON
+  EXECUTIVE
+  LUXURY
+  MPV
+  SUV
+  ELECTRIC_EXECUTIVE
+}
+
+enum DocumentType {
+  DVLA_LICENCE
+  PHV_BADGE
+  PHV_VEHICLE
+  V5_LOGBOOK
+  INSURANCE
+  MOT
+  DBS
+  OTHER
+}
+
+enum PayStatus {
+  UNPAID
+  PARTIALLY_PAID
+  FULLY_PAID
+}
+
+enum PayMethod {
+  CASH
+  CARD
+  BANK_TRANSFER
+  INVOICE
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PAID
+  PART_PAID
+  OVERDUE
+  CANCELLED
+}
+
+enum AccountKind {
+  INTERNAL
+  AGENCY
+  CORPORATE
+  INDIVIDUAL
+}
+
+enum PayoutStatus {
+  DRAFT
+  APPROVED
+  PAID
+}
+
+enum ExpenseKind {
+  TOLL
+  PARKING
+  FUEL
+  CONGESTION_CHARGE
+  ULEZ
+  WAITING
+  OTHER
+}
+
+// ------------------------------------------------------- people and access
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  name         String
+  role         UserRole  @default(VIEWER)
+  active       Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  deletedAt    DateTime?
+
+  auditEntries AuditLog[]
+  createdJobs  Job[]      @relation("JobCreatedBy")
+  sessions     Session[]
+
+  @@index([deletedAt])
+}
+
+/// Auth.js database sessions. The credentials provider issues an opaque
+/// session token; the row here is the authority, so revoking access is a
+/// delete rather than waiting for a JWT to expire.
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expires])
+}
+
+/// Failed login attempts, keyed by IP, backing the 5-per-15-minutes limit.
+model LoginAttempt {
+  id          String   @id @default(cuid())
+  ip          String
+  email       String?
+  successful  Boolean  @default(false)
+  attemptedAt DateTime @default(now())
+
+  @@index([ip, attemptedAt])
+}
+
+// ------------------------------------------------ commercial relationships
+
+model Client {
+  id               String    @id @default(cuid())
+  name             String
+  /// lowercase, punctuation stripped, honorifics removed — for dedupe
+  normalisedName   String
+  contactPhone     String?
+  contactEmail     String?
+  billingEmail     String?
+  billingAddress   String?
+  vatNumber        String?
+  paymentTermsDays Int       @default(14)
+  defaultAccountId String?
+  notes            String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime?
+
+  defaultAccount Account?  @relation(fields: [defaultAccountId], references: [id])
+  jobs           Job[]
+  invoices       Invoice[]
+
+  @@index([normalisedName])
+  @@index([deletedAt])
+}
+
+/// The booker. Not the client — the client rides, the account placed the
+/// booking and is usually who gets invoiced.
+model Account {
+  id               String      @id @default(cuid())
+  name             String      @unique
+  kind             AccountKind @default(INTERNAL)
+  contactName      String?
+  contactPhone     String?
+  contactEmail     String?
+  billingEmail     String?
+  billingAddress   String?
+  vatNumber        String?
+  paymentTermsDays Int         @default(14)
+  rateCardId       String?
+  /// agency margin, not money — Decimal is correct here
+  commissionPct    Decimal?    @db.Decimal(5, 2)
+  active           Boolean     @default(true)
+  createdAt        DateTime    @default(now())
+  deletedAt        DateTime?
+
+  rateCard RateCard? @relation(fields: [rateCardId], references: [id])
+  jobs     Job[]
+  clients  Client[]
+  invoices Invoice[]
+
+  @@index([deletedAt])
+}
+
+// ---------------------------------------------------- fleet and drivers
+
+model Driver {
+  id        String  @id @default(cuid())
+  /// human-facing, e.g. DRV-0147
+  reference String  @unique
+  name      String
+  phone     String
+  email     String?
+  address   String?
+
+  dvlaLicenceNumber   String?
+  dvlaLicenceExpiry   DateTime? @db.Date
+  phvBadgeNumber      String?
+  phvBadgeExpiry      DateTime? @db.Date
+  phvIssuingAuthority String?
+
+  assignedVehicleId String?
+  telegramChatId    BigInt?   @unique
+  telegramLinkedAt  DateTime?
+
+  status    DriverStatus @default(ACTIVE)
+  notes     String?
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  deletedAt DateTime?
+
+  assignedVehicle Vehicle?       @relation(fields: [assignedVehicleId], references: [id])
+  documents       Document[]
+  jobs            Job[]
+  payouts         DriverPayout[]
+  linkTokens      LinkToken[]
+
+  @@index([status])
+  @@index([phvBadgeExpiry])
+  @@index([dvlaLicenceExpiry])
+  @@index([deletedAt])
+}
+
+model Vehicle {
+  id                     String       @id @default(cuid())
+  registration           String       @unique
+  /// registration with spaces stripped and uppercased — duplicate detection
+  normalisedRegistration String       @unique
+  make                   String
+  model                  String
+  variant                String?
+  vehicleClass           VehicleClass @default(EXECUTIVE)
+  colour                 String?
+  seats                  Int          @default(4)
+
+  phvLicenceNumber  String?
+  phvLicenceExpiry  DateTime? @db.Date
+  motExpiry         DateTime? @db.Date
+  insuranceExpiry   DateTime? @db.Date
+  insurancePolicyNo String?
+
+  status    VehicleStatus @default(ACTIVE)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  deletedAt DateTime?
+
+  documents Document[]
+  drivers   Driver[]
+  jobs      Job[]
+
+  @@index([status])
+  @@index([motExpiry])
+  @@index([insuranceExpiry])
+  @@index([phvLicenceExpiry])
+  @@index([deletedAt])
+}
+
+model Document {
+  id           String       @id @default(cuid())
+  type         DocumentType
+  driverId     String?
+  vehicleId    String?
+  /// R2 object key — never the binary itself
+  fileKey      String
+  fileName     String
+  mimeType     String
+  sizeBytes    Int
+  issuedOn     DateTime?    @db.Date
+  expiresOn    DateTime?    @db.Date
+  uploadedById String?
+  uploadedAt   DateTime     @default(now())
+  /// points at the renewal that replaced this one
+  supersededBy String?
+  verifiedAt   DateTime?
+  deletedAt    DateTime?
+
+  driver  Driver?  @relation(fields: [driverId], references: [id])
+  vehicle Vehicle? @relation(fields: [vehicleId], references: [id])
+
+  @@index([expiresOn])
+  @@index([driverId, type])
+  @@index([vehicleId, type])
+  @@index([deletedAt])
+}
+
+// -------------------------------------------------- locations and pricing
+
+model Location {
+  id        String    @id @default(cuid())
+  /// "Heathrow T5", "The Dorchester"
+  label     String
+  address   String
+  postcode  String?
+  zoneId    String?
+  lat       Float?
+  lng       Float?
+  isAirport Boolean   @default(false)
+  /// drives autocomplete ordering
+  useCount  Int       @default(0)
+  deletedAt DateTime?
+
+  zone Zone? @relation(fields: [zoneId], references: [id])
+
+  pickupForJobs  Job[] @relation("JobPickupLocation")
+  dropoffForJobs Job[] @relation("JobDropoffLocation")
+
+  @@index([useCount])
+  @@index([deletedAt])
+}
+
+model Zone {
+  id        String   @id @default(cuid())
+  /// "Heathrow", "Gatwick", "Central London"
+  name      String   @unique
+  /// prefixes matched against pickup/dropoff postcodes
+  postcodes String[]
+  active    Boolean  @default(true)
+
+  locations     Location[]
+  rulesFromZone RateCardRule[] @relation("RuleFromZone")
+  rulesToZone   RateCardRule[] @relation("RuleToZone")
+}
+
+model RateCard {
+  id         String    @id @default(cuid())
+  name       String
+  activeFrom DateTime  @db.Date
+  activeTo   DateTime? @db.Date
+  isDefault  Boolean   @default(false)
+  deletedAt  DateTime?
+
+  rules    RateCardRule[]
+  accounts Account[]
+
+  @@index([deletedAt])
+}
+
+model RateCardRule {
+  id           String        @id @default(cuid())
+  rateCardId   String
+  jobType      JobType
+  /// null = any class
+  vehicleClass VehicleClass?
+  /// null = any origin
+  fromZoneId   String?
+  /// null = any destination
+  toZoneId     String?
+
+  baseFarePence      Int      @default(0)
+  perHourPence       Int      @default(0)
+  minimumHours       Decimal? @db.Decimal(4, 2)
+  freeWaitMinutes    Int      @default(15)
+  waitPerMinutePence Int      @default(0)
+
+  driverBasePence    Int      @default(0)
+  driverPerHourPence Int      @default(0)
+  /// alternative to a fixed driver rate — never both
+  driverPctOfFare    Decimal? @db.Decimal(5, 2)
+
+  /// higher wins when several rules match
+  priority Int @default(0)
+
+  rateCard RateCard @relation(fields: [rateCardId], references: [id])
+  fromZone Zone?    @relation("RuleFromZone", fields: [fromZoneId], references: [id])
+  toZone   Zone?    @relation("RuleToZone", fields: [toZoneId], references: [id])
+  jobs     Job[]
+
+  @@index([rateCardId, jobType])
+}
+
+// ------------------------------------------------------------------ jobs
+
+model Job {
+  id        String @id @default(cuid())
+  /// WLX-000767 — prefix comes from settings, never hardcoded
+  reference String @unique
+  /// maps to a legacy #766 style id when one was imported
+  legacyId  Int?   @unique
+
+  clientId  String?
+  accountId String?
+  jobType   JobType
+  status    JobStatus @default(PENDING)
+
+  /// UTC. Displayed in the configured timezone.
+  scheduledAt      DateTime
+  estimatedMinutes Int?
+
+  /// as typed
+  pickupText        String
+  pickupLocationId  String?
+  dropoffText       String
+  dropoffLocationId String?
+  viaText           String?
+
+  driverId  String?
+  vehicleId String?
+
+  /// when different from the client
+  passengerName  String?
+  passengerPhone String?
+  passengerCount Int?
+  luggageCount   Int?
+  flightNumber   String?
+
+  /// captured at booking — the commercial agreement
+  clientPricePence Int?
+  driverPricePence Int?
+  rateCardRuleId   String?
+  /// required to complete a zero-value job
+  zeroValueReason  String?
+
+  notes         String?
+  internalNotes String?
+
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  client          Client?       @relation(fields: [clientId], references: [id])
+  account         Account?      @relation(fields: [accountId], references: [id])
+  driver          Driver?       @relation(fields: [driverId], references: [id])
+  vehicle         Vehicle?      @relation(fields: [vehicleId], references: [id])
+  createdBy       User?         @relation("JobCreatedBy", fields: [createdById], references: [id])
+  pickupLocation  Location?     @relation("JobPickupLocation", fields: [pickupLocationId], references: [id])
+  dropoffLocation Location?     @relation("JobDropoffLocation", fields: [dropoffLocationId], references: [id])
+  rateCardRule    RateCardRule? @relation(fields: [rateCardRuleId], references: [id])
+
+  finance      JobFinance?
+  events       JobEvent[]
+  expenses     JobExpense[]
+  invoiceLines InvoiceLine[]
+  payoutLines  DriverPayoutLine[]
+
+  @@index([scheduledAt])
+  @@index([status, scheduledAt])
+  @@index([driverId, scheduledAt])
+  @@index([vehicleId, scheduledAt])
+  @@index([clientId])
+  @@index([accountId])
+  @@index([deletedAt])
+}
+
+model JobFinance {
+  id    String @id @default(cuid())
+  jobId String @unique
+
+  // Revenue
+  baseFarePence     Int      @default(0)
+  waitTimePence     Int      @default(0)
+  waitMinutesBilled Int      @default(0)
+  extraChargesPence Int      @default(0)
+  extraChargesNotes String?
+  customerHours     Decimal? @db.Decimal(5, 2)
+  customerRatePence Int      @default(0)
+  totalClientPence  Int      @default(0)
+
+  // Costs
+  driverPaymentPence Int      @default(0)
+  fuelCostPence      Int      @default(0)
+  otherExpensesPence Int      @default(0)
+  expenseNotes       String?
+  driverHours        Decimal? @db.Decimal(5, 2)
+  driverRatePence    Int      @default(0)
+  totalCostsPence    Int      @default(0)
+
+  grossProfitPence Int @default(0)
+
+  // Driver settlement
+  driverPayStatus PayStatus  @default(UNPAID)
+  driverPayMethod PayMethod?
+  driverPaidAt    DateTime?
+  paymentNotes    String?
+
+  /// set once wait time is derived from ARRIVED -> POB events
+  waitAutoCalculated Boolean @default(false)
+
+  updatedAt DateTime @updatedAt
+
+  job Job @relation(fields: [jobId], references: [id])
+
+  @@index([driverPayStatus])
+}
+
+/// The append-only record of what happened and when. `jobs.status` is a
+/// denormalised cache of the newest event, written in the same transaction.
+model JobEvent {
+  id         String       @id @default(cuid())
+  jobId      String
+  type       JobEventType
+  actorType  ActorType
+  /// user id or driver id
+  actorId    String?
+  occurredAt DateTime     @default(now())
+  lat        Float?
+  lng        Float?
+  metadata   Json?
+
+  job Job @relation(fields: [jobId], references: [id])
+
+  @@index([jobId, occurredAt])
+  @@index([type, occurredAt])
+}
+
+model JobExpense {
+  id                  String      @id @default(cuid())
+  jobId               String
+  kind                ExpenseKind
+  amountPence         Int
+  note                String?
+  receiptFileKey      String?
+  submittedByDriverId String?
+  approvedById        String?
+  approvedAt          DateTime?
+  rejectedAt          DateTime?
+  rejectionReason     String?
+  rechargeToClient    Boolean     @default(true)
+  createdAt           DateTime    @default(now())
+  deletedAt           DateTime?
+
+  job Job @relation(fields: [jobId], references: [id])
+
+  @@index([jobId])
+}
+
+// ------------------------------------------------- invoicing and payouts
+
+model Invoice {
+  id        String   @id @default(cuid())
+  /// INV-2026-0001 — prefix from settings
+  number    String   @unique
+  clientId  String?
+  accountId String?
+  issueDate DateTime @db.Date
+  dueDate   DateTime @db.Date
+
+  netPence   Int
+  vatRatePct Decimal @default(20) @db.Decimal(5, 2)
+  vatPence   Int
+  grossPence Int
+  paidPence  Int     @default(0)
+
+  status           InvoiceStatus @default(DRAFT)
+  notes            String?
+  pdfFileKey       String?
+  sentAt           DateTime?
+  paidAt           DateTime?
+  /// set on a credit note, pointing at the invoice it reverses
+  creditsInvoiceId String?
+  createdAt        DateTime      @default(now())
+  deletedAt        DateTime?
+
+  client   Client?       @relation(fields: [clientId], references: [id])
+  account  Account?      @relation(fields: [accountId], references: [id])
+  lines    InvoiceLine[]
+  payments Payment[]
+
+  @@index([status, dueDate])
+  @@index([deletedAt])
+}
+
+model InvoiceLine {
+  id          String  @id @default(cuid())
+  invoiceId   String
+  jobId       String?
+  description String
+  amountPence Int
+  sortOrder   Int     @default(0)
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id])
+  job     Job?    @relation(fields: [jobId], references: [id])
+
+  @@index([invoiceId])
+  @@index([jobId])
+}
+
+model Payment {
+  id           String   @id @default(cuid())
+  invoiceId    String
+  /// revolut | sumup | manual
+  gateway      String
+  gatewayTxnId String?
+  amountPence  Int
+  status       String
+  receivedAt   DateTime
+  raw          Json?
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id])
+
+  @@index([invoiceId])
+}
+
+model DriverPayout {
+  id               String       @id @default(cuid())
+  driverId         String
+  periodStart      DateTime     @db.Date
+  periodEnd        DateTime     @db.Date
+  totalPence       Int
+  status           PayoutStatus @default(DRAFT)
+  paidAt           DateTime?
+  paymentReference String?
+  statementFileKey String?
+  createdAt        DateTime     @default(now())
+  deletedAt        DateTime?
+
+  driver Driver             @relation(fields: [driverId], references: [id])
+  lines  DriverPayoutLine[]
+
+  @@unique([driverId, periodStart, periodEnd])
+  @@index([status])
+}
+
+model DriverPayoutLine {
+  id          String  @id @default(cuid())
+  payoutId    String
+  jobId       String
+  amountPence Int
+  description String?
+
+  payout DriverPayout @relation(fields: [payoutId], references: [id])
+  job    Job          @relation(fields: [jobId], references: [id])
+
+  @@index([payoutId])
+  @@index([jobId])
+}
+
+// ---------------------------------------------------------------- system
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  /// "Job", "Invoice", ...
+  entity    String
+  entityId  String
+  /// create | update | delete | restore
+  action    String
+  before    Json?
+  after     Json?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+  @@index([userId])
+}
+
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+model LinkToken {
+  id        String    @id @default(cuid())
+  token     String    @unique
+  driverId  String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  driver Driver @relation(fields: [driverId], references: [id])
+
+  @@index([driverId])
+}
