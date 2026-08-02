@@ -73,6 +73,53 @@ async function seedAdmin(): Promise<void> {
   }
 }
 
+/**
+ * Non-admin users for the end-to-end suite, which has to prove that a role
+ * is refused a screen — something a single admin account cannot demonstrate.
+ * Off unless asked for, so a production seed never creates a spare login.
+ */
+async function seedE2EUsers(): Promise<void> {
+  if (process.env.SEED_E2E_USERS !== 'true') return;
+
+  const users = [
+    {
+      email: 'viewer@example.com',
+      name: 'Test Viewer',
+      role: 'VIEWER' as const,
+      password: process.env.SEED_VIEWER_PASSWORD ?? 'ci-viewer-password',
+    },
+    {
+      email: 'ops@example.com',
+      name: 'Test Ops',
+      role: 'OPS' as const,
+      password: process.env.SEED_OPS_PASSWORD ?? 'ci-ops-password',
+    },
+    {
+      email: 'accounts@example.com',
+      name: 'Test Accounts',
+      role: 'ACCOUNTS' as const,
+      password: process.env.SEED_ACCOUNTS_PASSWORD ?? 'ci-accounts-password',
+    },
+  ];
+
+  for (const user of users) {
+    const passwordHash = await hashPassword(user.password);
+    await prisma.user.upsert({
+      where: { email: user.email },
+      update: { name: user.name, role: user.role, passwordHash, active: true },
+      create: {
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        passwordHash,
+      },
+    });
+  }
+
+  console.log(`✓ ${users.length} test users (SEED_E2E_USERS=true)`);
+  console.log('  Do not enable this on a production install.');
+}
+
 async function seedZones(): Promise<void> {
   for (const zone of ZONES) {
     await prisma.zone.upsert({
@@ -136,6 +183,7 @@ async function seedRateCard(): Promise<void> {
 async function main(): Promise<void> {
   console.log('Seeding…');
   await seedAdmin();
+  await seedE2EUsers();
   await seedZones();
   await seedRateCard();
   console.log('Done.');

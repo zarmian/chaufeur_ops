@@ -1,4 +1,4 @@
-// WeLux Ops — schema implementing docs/data-model.md.
+// Schema implementing docs/data-model.md.
 //
 // Rules this file must never break:
 //   * money is integer pence, columns suffixed `Pence` — never Float or Decimal

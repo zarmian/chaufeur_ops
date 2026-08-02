@@ -1,0 +1,140 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Static checks and unit tests never open a connection, but Prisma insists
+  # on the variables being present to load the schema.
+  DATABASE_URL: postgresql://postgres:postgres@localhost:5432/welux_test
+  DIRECT_URL: postgresql://postgres:postgres@localhost:5432/welux_test
+  AUTH_SECRET: ci-only-secret-not-used-for-anything-real
+  CRON_SECRET: ci-only-cron-secret
+
+jobs:
+  static:
+    name: Types, lint, unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run test
+
+  database:
+    name: Database-backed tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: welux_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      # Proves the checked-in migration applies cleanly to an empty database —
+      # the Phase 0.2 acceptance criterion, asserted on every push rather than
+      # taken on trust.
+      - name: Apply migrations
+        run: npx prisma migrate deploy
+
+      - name: Seed
+        run: npm run db:seed
+        env:
+          SEED_ADMIN_PASSWORD: ci-admin-password
+          SEED_E2E_USERS: 'true'
+
+      # The soft-delete and audit guarantees are only meaningful against real
+      # Postgres, so this is where those suites actually run.
+      - name: Test with a database
+        run: npm run test
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/welux_test
+
+  e2e:
+    name: End-to-end
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: welux_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma migrate deploy
+      - run: npm run db:seed
+        env:
+          SEED_ADMIN_PASSWORD: ci-admin-password
+          SEED_E2E_USERS: 'true'
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+        env:
+          E2E_ADMIN_EMAIL: admin@example.com
+          E2E_ADMIN_PASSWORD: ci-admin-password
+          E2E_VIEWER_EMAIL: viewer@example.com
+          E2E_VIEWER_PASSWORD: ci-viewer-password
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+  white-label:
+    name: No hardcoded company identity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # This system is white-label: each customer gets their own install, and
+      # the only thing that should differ is configuration. Application code
+      # must never name a customer. `docs/` and `reference/` are excluded —
+      # they describe the first customer's system on purpose.
+      - name: Grep application code for a customer name
+        run: |
+          if grep -rniE 'welux' \
+              --include='*.ts' --include='*.tsx' --include='*.prisma' \
+              --include='*.css' --include='*.json' \
+              app/ components/ lib/ prisma/ scripts/ tests/ \
+              package.json package-lock.json 2>/dev/null; then
+            echo "::error::A customer name appears in application code. Move it into settings."
+            exit 1
+          fi
+          echo "Clean — nothing in application code names a customer."
