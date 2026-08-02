@@ -1,5 +1,5 @@
 {
-  "name": "welux-ops",
+  "name": "chauffeur-ops",
   "version": "0.1.0",
   "private": true,
   "engines": {
@@ -20,6 +20,7 @@
     "db:studio": "prisma studio",
     "db:seed": "tsx prisma/seed.ts",
     "setup": "tsx scripts/setup.ts",
+    "verify": "tsx scripts/verify-install.ts",
     "postinstall": "prisma generate"
   },
   "prisma": {

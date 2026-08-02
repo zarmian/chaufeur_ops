@@ -68,6 +68,7 @@ app runs without them.
 | `npm run db:deploy` | `prisma migrate deploy` — what Vercel runs |
 | `npm run db:seed` | Idempotent seed |
 | `npm run db:studio` | Prisma Studio |
+| `npm run verify` | Preflight check on a new install — connection, migrations, seed |
 
 ### Running the database-backed tests
 
@@ -80,23 +81,41 @@ TEST_DATABASE_URL=postgresql://…/scratch_db npm run test
 
 Point it at a scratch database — the suites create and delete rows.
 
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every push and pull request:
+
+- **static** — typecheck, lint, unit tests
+- **database** — spins up Postgres 16, applies `prisma/migrations` to an empty
+  database, seeds it, and runs the suite with `TEST_DATABASE_URL` set, so the
+  soft-delete and audit guarantees are proven rather than assumed
+- **e2e** — Playwright against a real build with seeded users
+- **white-label** — greps application code for a customer name and fails if it
+  appears outside `docs/` and `reference/`
+
+The database job is the one that matters: it is where the migration is proven
+to apply cleanly, which is otherwise only discovered on a real deploy.
+
 ## Deployment
 
-Vercel plus Supabase, one install per customer.
+Vercel plus Supabase, one install per customer. Full runbook, including the
+two-connection-string setup and the failure modes it prevents, is in
+[`docs/deployment.md`](docs/deployment.md).
 
-1. Create the Supabase project; copy both connection strings
-2. Import the repository into Vercel
-3. Set environment variables from `.env.example` — `DATABASE_URL`,
-   `DIRECT_URL`, `AUTH_SECRET`, `CRON_SECRET`, and the R2 keys once Phase 1
-   lands. `AUTH_URL` is inferred on Vercel
-4. Deploy. `vercel.json` runs `prisma migrate deploy` as part of the build,
-   so migrations apply automatically
-5. Run the seed once against the production database
-6. Check `/api/health` returns `{"status":"ok"}`
-7. Point uptime monitoring at `/api/health`
+The short version:
 
-Preview deployments should get their own branch database — Supabase branching
-or a separate Neon branch — so a preview never migrates production.
+1. Create the Supabase project; copy **both** connection strings — pooled
+   (6543, with `?pgbouncer=true`) for `DATABASE_URL`, direct (5432) for
+   `DIRECT_URL`. Migrations cannot run through pgbouncer, which is why there
+   are two
+2. `npm run db:deploy && npm run db:seed`, then `npm run verify`
+3. Import into Vercel; set the same variables plus `AUTH_SECRET` and
+   `CRON_SECRET`
+4. Deploy — `vercel.json` applies migrations as part of the build
+5. Check `/api/health` returns `{"status":"ok","database":"ok"}`
+
+Preview deployments should get their own branch database so a preview never
+migrates production.
 
 ## Contents
 
