@@ -42,14 +42,13 @@ Ten steps, assuming Node 20+ and a Postgres 16 database you can reach
 3. Set `DATABASE_URL` to the **pooled** connection string and `DIRECT_URL` to
    the direct one. On Supabase these are the port 6543 and port 5432 URLs —
    Prisma Migrate cannot run through pgbouncer, which is why there are two.
-4. Set `AUTH_SECRET` — `openssl rand -base64 32`
-5. Set `CRON_SECRET` — `openssl rand -hex 32`
-6. `npm run db:migrate` — applies `prisma/migrations` to the database
-7. `npm run db:seed` — creates the admin user, the London zones and a default
+4. Set `CRON_SECRET` — `openssl rand -hex 32`
+5. `npm run db:migrate` — applies `prisma/migrations` to the database
+6. `npm run db:seed` — creates the admin user, the London zones and a default
    rate card. The generated admin password is printed once; save it.
-8. `npm run dev`
-9. Open <http://localhost:3000> and sign in as the seeded admin
-10. `npm run typecheck && npm run lint && npm run test` should be clean
+7. `npm run dev`
+8. Open <http://localhost:3000> and sign in as the seeded admin
+9. `npm run typecheck && npm run lint && npm run test` should be clean
 
 R2 credentials are only needed once document upload arrives in Phase 1; the
 app runs without them.
@@ -109,8 +108,7 @@ The short version:
    `DIRECT_URL`. Migrations cannot run through pgbouncer, which is why there
    are two
 2. `npm run db:deploy && npm run db:seed`, then `npm run verify`
-3. Import into Vercel; set the same variables plus `AUTH_SECRET` and
-   `CRON_SECRET`
+3. Import into Vercel; set the same variables plus `CRON_SECRET`
 4. Deploy — `vercel.json` applies migrations as part of the build
 5. Check `/api/health` returns `{"status":"ok","database":"ok"}`
 
@@ -134,7 +132,8 @@ lib/
   dates.ts                             UTC <-> configured timezone
   prisma.ts                            client with the soft-delete extension
   audit.ts                             transactional audit log
-  auth.ts  auth-adapter.ts  permissions.ts  authz.ts
+  session.ts                 database-backed sessions
+  auth.ts  permissions.ts  authz.ts
   storage.ts                           R2
 prisma/
   schema.prisma

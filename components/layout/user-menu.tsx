@@ -49,17 +49,20 @@ export function UserMenu({
           <span className="block text-xs text-muted-foreground">{email}</span>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem asChild>
-          <form action={signOutAction} className="w-full">
+        {/* The form wraps the item so the menu item *is* the submit button —
+            with the form inside, `asChild` would put role="menuitem" on the
+            form and a click would never submit. */}
+        <form action={signOutAction}>
+          <DropdownMenuItem asChild>
             <button
               type="submit"
-              className="flex w-full items-center gap-2 text-left"
+              className="flex w-full cursor-pointer items-center gap-2 text-left"
             >
               <LogOut className="size-4" aria-hidden />
               Sign out
             </button>
-          </form>
-        </DropdownMenuItem>
+          </DropdownMenuItem>
+        </form>
       </DropdownMenuContent>
     </DropdownMenu>
   );

@@ -1,5 +1,4 @@
 import type { UserRole } from '@prisma/client';
-import { auth } from './auth';
 import {
   can,
   describeCapability,
@@ -8,6 +7,7 @@ import {
   type Capability,
   type SessionUser,
 } from './permissions';
+import { getSessionUser } from './session';
 
 /**
  * Session-bound role checks. Server-side and authoritative.
@@ -30,17 +30,7 @@ export {
 
 /** The signed-in user, or null. Never throws — for optional-auth rendering. */
 export async function getCurrentUser(): Promise<SessionUser | null> {
-  const session = await auth();
-  const user = session?.user;
-  if (!user?.id || !user.email || !user.role) return null;
-  if (!user.active) return null;
-  return {
-    id: user.id,
-    name: user.name ?? user.email,
-    email: user.email,
-    role: user.role,
-    active: user.active,
-  };
+  return getSessionUser();
 }
 
 /** The signed-in user, or throw. Use at the top of any protected surface. */

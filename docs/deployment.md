@@ -36,8 +36,8 @@ DIRECT_URL="postgresql://postgres.abcdefgh:PASSWORD@aws-0-eu-west-2.pooler.supab
 ### What this project does not use Supabase for
 
 Auth, storage and row-level security are all handled in the application:
-Auth.js owns sessions, R2 owns files, and access control is the capability
-model in `lib/permissions.ts`, enforced server-side. Supabase here is managed
+sessions live in our own `Session` table, R2 owns files, and access control
+is the capability model in `lib/permissions.ts`, enforced server-side. Supabase here is managed
 Postgres and nothing more. Do not enable RLS on these tables — Prisma
 connects as the owner and RLS would silently filter rows the application
 expects to see.
@@ -90,13 +90,9 @@ You still need `npm run db:seed` for the admin user.
    |---|---|
    | `DATABASE_URL` | pooled string, with `pgbouncer=true` |
    | `DIRECT_URL` | direct string |
-   | `AUTH_SECRET` | `openssl rand -base64 32` |
    | `CRON_SECRET` | `openssl rand -hex 32` |
    | `SESSION_MAX_AGE_DAYS` | `30` (optional) |
    | `R2_*` | once document upload lands in Phase 1 |
-
-   `AUTH_URL` is inferred on Vercel. Set it only for a custom domain that
-   differs from the deployment URL.
 
 3. Deploy.
 4. Check `https://<deployment>/api/health` returns
@@ -127,8 +123,8 @@ For each new install:
 
 - [ ] Supabase project in the customer's region; both connection strings saved
 - [ ] Vercel project from the same repository
-- [ ] `AUTH_SECRET` and `CRON_SECRET` generated fresh — never reused between
-      customers, since one leaking would compromise the others
+- [ ] `CRON_SECRET` generated fresh — never reused between customers, since
+      one leaking would compromise the others
 - [ ] `npm run db:deploy` and `npm run db:seed`
 - [ ] `scripts/verify-install.ts` reports `Ready.`
 - [ ] `/api/health` returns 200
@@ -151,9 +147,11 @@ password. Percent-encode it.
 **Migrations hang** — Prisma Migrate is waiting on an advisory lock through
 the pooler. `DIRECT_URL` must be the direct connection.
 
-**Login always fails with correct credentials** — check `AUTH_SECRET` is set
-and identical across deployments, and that the `Session` table exists. Sessions
-live in Postgres, so a missing table fails the login rather than the request.
+**Login succeeds but every page bounces back to /login** — the cookie was
+set but does not resolve to a `Session` row. Check the `Session` table exists
+and that the app and migrations point at the same database. There is no
+signing secret to get wrong: the cookie holds a random token and the table
+stores its SHA-256 hash.
 
 **Locked out by the rate limiter** — five failed attempts per IP per fifteen
 minutes. Clear it with `DELETE FROM "LoginAttempt" WHERE ip = '…';` or wait.

@@ -10,15 +10,13 @@ import { NextResponse, type NextRequest } from 'next/server';
  * Action via `requireUser`. A forged cookie gets past here and no further.
  */
 
-const SESSION_COOKIES = [
-  'authjs.session-token',
-  '__Secure-authjs.session-token',
-];
+// Kept in step with lib/session.ts. Not imported from there, because that
+// module reaches Postgres and middleware runs on the edge.
+const SESSION_COOKIES = ['ops_session', '__Secure-ops_session'];
 
 /** Paths that must stay reachable without a session. */
 const PUBLIC_PREFIXES = [
   '/login',
-  '/api/auth',
   '/api/health',
   '/api/cron',
   '/api/telegram',

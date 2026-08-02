@@ -15,7 +15,6 @@ env:
   # on the variables being present to load the schema.
   DATABASE_URL: postgresql://postgres:postgres@localhost:5432/welux_test
   DIRECT_URL: postgresql://postgres:postgres@localhost:5432/welux_test
-  AUTH_SECRET: ci-only-secret-not-used-for-anything-real
   CRON_SECRET: ci-only-cron-secret
 
 jobs:
