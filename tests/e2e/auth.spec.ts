@@ -1,11 +1,10 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 /**
  * Phase 0 acceptance: authentication, role enforcement and the shell.
  *
- * These need seeded users. Create them with `npm run db:seed` and set:
- *   E2E_ADMIN_EMAIL / E2E_ADMIN_PASSWORD
- *   E2E_VIEWER_EMAIL / E2E_VIEWER_PASSWORD
+ * Needs seeded users. Create them with `SEED_E2E_USERS=true npm run db:seed`
+ * and set E2E_ADMIN_EMAIL / E2E_ADMIN_PASSWORD and the VIEWER pair.
  */
 
 const ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL ?? 'admin@example.com';
@@ -15,16 +14,24 @@ const VIEWER_PASSWORD = process.env.E2E_VIEWER_PASSWORD ?? '';
 
 const CREDENTIALS_SET = ADMIN_PASSWORD !== '' && VIEWER_PASSWORD !== '';
 
-async function signIn(
-  page: import('@playwright/test').Page,
-  email: string,
-  password: string,
-) {
+/**
+ * Sign in, and assert we actually arrived on the dashboard.
+ *
+ * The landing assertion matters: a session cookie that is set but does not
+ * resolve produces a redirect back to /login, and without this check every
+ * later assertion fails somewhere confusing instead of here.
+ */
+async function signIn(page: Page, email: string, password: string) {
   await page.goto('/login');
   await page.getByLabel('Email').fill(email);
   await page.getByLabel('Password').fill(password);
   await page.getByRole('button', { name: 'Sign in' }).click();
-  await page.waitForURL('/');
+
+  await expect(
+    page.getByRole('navigation', { name: 'Main' }),
+    'signed in but the dashboard shell did not render — the session cookie did not resolve',
+  ).toBeVisible();
+  await expect(page).toHaveURL(/\/$/);
 }
 
 test.describe('unauthenticated access', () => {
@@ -35,10 +42,18 @@ test.describe('unauthenticated access', () => {
     }
   });
 
+  test('remembers where the user was heading', async ({ page }) => {
+    await page.goto('/jobs');
+    await expect(page).toHaveURL(/\/login\?next=%2Fjobs/);
+  });
+
   test('health check answers without a session', async ({ request }) => {
     const response = await request.get('/api/health');
     expect(response.status()).toBe(200);
-    expect(await response.json()).toMatchObject({ status: 'ok' });
+    expect(await response.json()).toMatchObject({
+      status: 'ok',
+      database: 'ok',
+    });
   });
 
   test('cron routes refuse a request with no bearer token', async ({
@@ -68,47 +83,65 @@ test.describe('sign in', () => {
     await page.getByLabel('Password').fill('wrong-password');
     await page.getByRole('button', { name: 'Sign in' }).click();
 
-    const alert = page.getByRole('alert');
-    await expect(alert).toBeVisible();
-    // The same wording whether the account exists or not.
-    await expect(alert).toContainText('not recognised');
-    await expect(alert).not.toContainText('password');
+    // Scoped to the form: Next renders its own role="alert" route announcer
+    // on every page, which an unscoped getByRole('alert') matches first.
+    const error = page.getByTestId('login-error');
+    await expect(error).toBeVisible();
+    await expect(error).toContainText('not recognised');
+    // The wording must not distinguish a wrong password from an unknown
+    // address — no "no such user", no "incorrect password".
+    await expect(error).not.toContainText(/no such|does not exist|incorrect/i);
     await expect(page).toHaveURL(/\/login/);
   });
 
-  test.skip(!CREDENTIALS_SET, 'seeded credentials not configured');
+  test.describe('with seeded users', () => {
+    test.skip(!CREDENTIALS_SET, 'seeded credentials not configured');
 
-  test('an admin reaches the dashboard and sees every section', async ({
-    page,
-  }) => {
-    await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+    test('an admin reaches the dashboard and sees every section', async ({
+      page,
+    }) => {
+      await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
 
-    const nav = page.getByRole('navigation', { name: 'Main' });
-    for (const label of [
-      'Dashboard',
-      'Jobs',
-      'Dispatch',
-      'Drivers',
-      'Vehicles',
-      'Clients',
-      'Accounts',
-      'Invoices',
-      'Payouts',
-      'Reports',
-      'Settings',
-    ]) {
-      await expect(nav.getByRole('link', { name: label })).toBeVisible();
-    }
-  });
+      const nav = page.getByRole('navigation', { name: 'Main' });
+      for (const label of [
+        'Dashboard',
+        'Jobs',
+        'Dispatch',
+        'Drivers',
+        'Vehicles',
+        'Clients',
+        'Accounts',
+        'Invoices',
+        'Payouts',
+        'Reports',
+        'Settings',
+      ]) {
+        await expect(nav.getByRole('link', { name: label })).toBeVisible();
+      }
+    });
 
-  test('signing out ends the session', async ({ page }) => {
-    await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
-    await page.getByRole('button', { name: /Administrator|admin/i }).click();
-    await page.getByRole('button', { name: 'Sign out' }).click();
-    await page.waitForURL(/\/login/);
+    test('the session survives a full page load', async ({ page }) => {
+      // Proves the cookie resolves against the Session table on a fresh
+      // request, not just immediately after the sign-in redirect.
+      await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+      await page.reload();
+      await expect(
+        page.getByRole('navigation', { name: 'Main' }),
+      ).toBeVisible();
+    });
 
-    await page.goto('/jobs');
-    await expect(page).toHaveURL(/\/login/);
+    test('signing out ends the session', async ({ page }) => {
+      await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+
+      await page.getByRole('button', { name: /Administrator/i }).click();
+      await page.getByRole('menuitem', { name: 'Sign out' }).click();
+      await page.waitForURL(/\/login/);
+
+      // The cookie is gone and the session row deleted, so a protected route
+      // bounces rather than serving from a stale cookie.
+      await page.goto('/jobs');
+      await expect(page).toHaveURL(/\/login/);
+    });
   });
 });
 

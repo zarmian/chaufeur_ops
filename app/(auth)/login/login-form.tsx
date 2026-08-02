@@ -20,13 +20,15 @@ function SubmitButton() {
   );
 }
 
-export function LoginForm() {
+export function LoginForm({ next }: { next?: string }) {
   const [state, formAction] = useActionState(loginAction, INITIAL);
 
   return (
     <form action={formAction} className="space-y-4">
+      {next ? <input type="hidden" name="next" value={next} /> : null}
+
       {state.error ? (
-        <Alert variant="destructive">
+        <Alert variant="destructive" data-testid="login-error">
           <AlertCircle />
           <AlertDescription>{state.error}</AlertDescription>
         </Alert>

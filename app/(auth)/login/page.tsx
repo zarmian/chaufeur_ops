@@ -13,11 +13,18 @@ import { LoginForm } from './login-form';
 
 export const metadata: Metadata = { title: 'Sign in' };
 
-export default async function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string }>;
+}) {
   const existing = await getCurrentUser();
   if (existing) redirect('/');
 
-  const branding = await getBranding();
+  const [branding, params] = await Promise.all([
+    getBranding(),
+    searchParams,
+  ]);
 
   return (
     <Card className="w-full max-w-sm">
@@ -26,7 +33,7 @@ export default async function LoginPage() {
         <CardDescription>Sign in to continue</CardDescription>
       </CardHeader>
       <CardContent>
-        <LoginForm />
+        <LoginForm next={params.next} />
       </CardContent>
     </Card>
   );

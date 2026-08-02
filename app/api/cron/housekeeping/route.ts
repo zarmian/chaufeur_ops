@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { purgeExpiredSessions } from '@/lib/auth-adapter';
+import { purgeExpiredSessions } from '@/lib/session';
 import { apiError, isAuthorisedCronRequest } from '@/lib/api';
 import { purgeOldLoginAttempts } from '@/lib/rate-limit';
 

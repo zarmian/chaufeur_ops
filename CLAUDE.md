@@ -19,7 +19,7 @@ The first customer is a UK chauffeur company running ~195 owner-drivers, each wi
 | Framework | Next.js 15, App Router, TypeScript strict | Server Components by default; Client Components only where interactivity requires it |
 | Database | PostgreSQL 16 | |
 | ORM | Prisma | Migrations checked into `prisma/migrations` |
-| Auth | Auth.js v5 (NextAuth), credentials provider, database sessions | Roles enforced server-side, never only in the UI |
+| Auth | Email/password over argon2id, **database sessions** (`lib/session.ts`) | Roles enforced server-side, never only in the UI |
 | UI | Tailwind CSS + shadcn/ui | |
 | Forms | react-hook-form + Zod | The same Zod schema validates client and server |
 | Tables | TanStack Table, **server-side** pagination and filtering | Never load a full table into the client |
@@ -46,6 +46,22 @@ Every create, update and delete on `jobs`, `job_finances`, `invoices`, `drivers`
 
 ### Money must never be silently zero
 A job with no client price is a data-quality defect, not a free job. The UI surfaces unpriced jobs everywhere, and the API refuses to mark a job `COMPLETED` without either a client price or an explicit `zero_value_reason`.
+
+### Sessions live in the database
+
+Auth.js v5 was the original choice, but it cannot deliver a credentials
+provider *and* database sessions together: under `strategy: 'database'` it
+never runs the `jwt` callback for credentials, so no session row is created
+and the cookie holds a JWT the adapter cannot resolve. The Phase 0 E2E run
+caught it — sign-in set a cookie and every page then bounced to `/login`.
+
+Between the two constraints, the behaviour won. Sessions exist in Postgres
+so that deactivating a user takes effect on their **next request**, not
+whenever a token happens to expire. `lib/session.ts` owns issue, resolve and
+revoke; the cookie carries a random token and the table stores only its
+SHA-256 hash. There is no signing secret to configure or leak.
+
+Do not reintroduce a JWT session strategy for convenience.
 
 ### Server-side authority
 Prices, totals, gross profit and status transitions are computed and validated **on the server**. The client may show a calculated total for feedback, but never sends a total the server trusts.

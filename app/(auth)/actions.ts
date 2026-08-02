@@ -3,10 +3,8 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
-import { signIn, signOut } from '@/lib/auth';
+import { signInWithCredentials, signOut } from '@/lib/auth';
 import {
-  checkLoginRateLimit,
-  clearLoginFailures,
   clientIpFrom,
   LOGIN_MAX_ATTEMPTS,
   LOGIN_WINDOW_MINUTES,
@@ -19,12 +17,13 @@ export interface LoginState {
 const loginSchema = z.object({
   email: z.string().trim().min(1, 'Enter your email address'),
   password: z.string().min(1, 'Enter your password'),
+  next: z.string().optional(),
 });
 
 /**
- * The message on failure is deliberately identical whether the email exists,
- * the password is wrong, or the account is deactivated. Anything more
- * specific turns the login form into an account enumeration oracle.
+ * Identical wording whether the email exists, the password is wrong, or the
+ * account is deactivated. Anything more specific turns the login form into
+ * an account-enumeration oracle.
  */
 const GENERIC_FAILURE = 'That email and password combination is not recognised';
 
@@ -35,6 +34,7 @@ export async function loginAction(
   const parsed = loginSchema.safeParse({
     email: formData.get('email'),
     password: formData.get('password'),
+    next: formData.get('next') ?? undefined,
   });
 
   if (!parsed.success) {
@@ -42,41 +42,35 @@ export async function loginAction(
   }
 
   const ip = clientIpFrom(await headers());
-  const limit = await checkLoginRateLimit(ip);
-  if (!limit.allowed) {
-    const minutes = Math.ceil(limit.retryAfterSeconds / 60);
-    return {
-      error: `Too many failed attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}. (${LOGIN_MAX_ATTEMPTS} attempts per ${LOGIN_WINDOW_MINUTES} minutes.)`,
-    };
-  }
+  const result = await signInWithCredentials(
+    { email: parsed.data.email, password: parsed.data.password },
+    { ip },
+  );
 
-  try {
-    await signIn('credentials', {
-      email: parsed.data.email,
-      password: parsed.data.password,
-      redirect: false,
-    });
-  } catch (error) {
-    // `signIn` throws NEXT_REDIRECT on success in some configurations; let
-    // that propagate rather than reporting it as a failed login.
-    if (isRedirectError(error)) throw error;
+  if (!result.ok) {
+    if (result.reason === 'rate_limited') {
+      const minutes = Math.ceil(result.retryAfterSeconds / 60);
+      return {
+        error: `Too many failed attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}. (${LOGIN_MAX_ATTEMPTS} attempts per ${LOGIN_WINDOW_MINUTES} minutes.)`,
+      };
+    }
     return { error: GENERIC_FAILURE };
   }
 
-  await clearLoginFailures(ip);
-  redirect('/');
+  // Only ever redirect within this application — an open redirect here would
+  // let a phishing link bounce a freshly authenticated user off-site.
+  const destination = safeInternalPath(parsed.data.next);
+  redirect(destination);
 }
 
 export async function signOutAction(): Promise<void> {
-  await signOut({ redirectTo: '/login' });
+  await signOut();
+  redirect('/login');
 }
 
-function isRedirectError(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'digest' in error &&
-    typeof (error as { digest?: unknown }).digest === 'string' &&
-    (error as { digest: string }).digest.startsWith('NEXT_REDIRECT')
-  );
+function safeInternalPath(candidate: string | undefined): string {
+  if (!candidate) return '/';
+  if (!candidate.startsWith('/')) return '/';
+  if (candidate.startsWith('//')) return '/';
+  return candidate;
 }

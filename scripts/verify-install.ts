@@ -24,7 +24,7 @@ function record(level: Level, label: string, detail: string): void {
 }
 
 function checkEnvironment(): void {
-  const required = ['DATABASE_URL', 'DIRECT_URL', 'AUTH_SECRET', 'CRON_SECRET'];
+  const required = ['DATABASE_URL', 'DIRECT_URL', 'CRON_SECRET'];
   for (const key of required) {
     const value = process.env[key];
     if (!value) {
@@ -34,15 +34,6 @@ function checkEnvironment(): void {
     } else {
       record('ok', key, 'set');
     }
-  }
-
-  const secret = process.env.AUTH_SECRET ?? '';
-  if (secret && secret.length < 32) {
-    record(
-      'fail',
-      'AUTH_SECRET',
-      `only ${secret.length} characters — generate one with: openssl rand -base64 32`,
-    );
   }
 
   // Supabase's pooled connection needs pgbouncer mode declared, or Prisma
