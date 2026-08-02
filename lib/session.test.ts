@@ -27,12 +27,14 @@ describe('session cookie names', () => {
     // middleware.ts cannot import this module — it runs on the edge and this
     // one reaches Postgres — so the two lists are kept in step by hand and
     // asserted here.
-    expect(SESSION_COOKIE_NAMES).toEqual(['ops_session', '__Secure-ops_session']);
-  });
-
-  it('carry no company name, so the cookie survives white-labelling', () => {
-    for (const name of SESSION_COOKIE_NAMES) {
-      expect(name.toLowerCase()).not.toMatch(/welux|chauffeur/);
-    }
+    //
+    // Pinning the exact strings also pins them as generic: this system is
+    // white-label, and a cookie named after one customer would follow every
+    // other install. The CI grep enforces the same rule repo-wide, which is
+    // why this assertion names no company even to reject one.
+    expect(SESSION_COOKIE_NAMES).toEqual([
+      'ops_session',
+      '__Secure-ops_session',
+    ]);
   });
 });
