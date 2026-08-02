@@ -1,0 +1,32 @@
+import { NextResponse } from 'next/server';
+import { purgeExpiredSessions } from '@/lib/auth-adapter';
+import { apiError, isAuthorisedCronRequest } from '@/lib/api';
+import { purgeOldLoginAttempts } from '@/lib/rate-limit';
+
+/**
+ * The pattern every scheduled route follows: verify the bearer token before
+ * doing anything at all, then act.
+ *
+ * Phase 0's cron does housekeeping only — expired sessions and stale login
+ * attempts. The expiry chasing, statements and reminders arrive with the
+ * records they operate on.
+ */
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+export async function GET(request: Request) {
+  if (!isAuthorisedCronRequest(request)) {
+    return apiError('UNAUTHENTICATED', 'Missing or invalid cron credentials');
+  }
+
+  const [sessions, attempts] = await Promise.all([
+    purgeExpiredSessions(),
+    purgeOldLoginAttempts(),
+  ]);
+
+  return NextResponse.json({
+    ok: true,
+    purged: { expiredSessions: sessions, oldLoginAttempts: attempts },
+    ranAt: new Date().toISOString(),
+  });
+}
