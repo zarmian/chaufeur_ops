@@ -44,37 +44,52 @@ expects to see.
 
 ---
 
-## 2. First migration
+## 2. Tables and the first administrator
 
-From your own machine, with `.env` filled in:
+**You do not need to run anything locally.** Vercel's build command is
+`prisma generate && prisma migrate deploy && next build`, so deploying creates
+the tables. What a fresh database still lacks is a user — without one there is
+no way to sign in.
+
+Two ways to create that first administrator. Pick one.
+
+### Option A — the `/setup` page (no terminal)
+
+After the first deploy, visit `https://<deployment>/setup`. It asks for:
+
+- the **setup token** — your `SETUP_TOKEN`, or `CRON_SECRET` if you did not
+  set one
+- your name, email and a password of at least 12 characters
+
+It creates the administrator, seeds the zones and default rate card, signs you
+in, and then **permanently disables itself**. The page 404s from that moment
+on, and a second submission is refused even if two people submit at the same
+instant — the marker row's primary key is the mutex.
+
+The page is public before it is used, which is unavoidable for a bootstrap.
+That is why it needs the token, why failed token attempts count against the
+same five-per-fifteen-minutes limit as failed logins, and why it is inert the
+moment an administrator exists. Deploy and complete setup in the same sitting
+rather than leaving a fresh deployment unclaimed.
+
+### Option B — the seed script (terminal)
+
+If you would rather not expose a bootstrap page at all:
 
 ```bash
 npm ci
-npm run db:deploy     # applies prisma/migrations — never `migrate dev` against production
-npm run db:seed       # admin user, London zones, default rate card
-npx tsx scripts/verify-install.ts
+cp .env.example .env   # fill in the two connection strings
+npm run db:deploy      # only if you have not deployed yet — Vercel does this
+npm run db:seed        # admin user, zones, default rate card
+npm run verify
 ```
 
-The seed prints the generated admin password once. Save it before closing the
-terminal.
+The seed prints a generated password once. Save it before closing the
+terminal. It also writes the same completion marker, so `/setup` is inert
+before the deployment is ever reachable.
 
-`verify-install` should end with `Ready.` It checks the pooler flags, that
-migrations finished, and that an admin exists — the three things that
-otherwise surface as a login failure at the worst moment.
-
-### Alternative: the Supabase SQL editor
-
-If you would rather not run Prisma locally, paste
-`prisma/migrations/*/migration.sql` into the SQL editor and run it. Then
-record it as applied so Prisma does not try again:
-
-```sql
-INSERT INTO _prisma_migrations
-  (id, checksum, migration_name, started_at, finished_at, applied_steps_count)
-VALUES (gen_random_uuid(), '', '20260802000000_init', now(), now(), 1);
-```
-
-You still need `npm run db:seed` for the admin user.
+`npm run verify` should end with `Ready.` It checks the pooler flags, that
+migrations finished rather than merely started, and that an admin exists.
 
 ---
 
@@ -95,11 +110,13 @@ You still need `npm run db:seed` for the admin user.
    | `R2_*` | once document upload lands in Phase 1 |
 
 3. Deploy.
-4. Check `https://<deployment>/api/health` returns
+4. If you have not created an administrator yet, visit
+   `https://<deployment>/setup` now and do it.
+5. Check `https://<deployment>/api/health` returns
    `{"status":"ok","database":"ok"}`. A 503 means the app is up but cannot
    reach Postgres — almost always a wrong or unpooled `DATABASE_URL`.
-5. Sign in as the seeded admin.
-6. Point uptime monitoring at `/api/health`.
+6. Sign in.
+7. Point uptime monitoring at `/api/health`.
 
 ### Cron
 
@@ -125,10 +142,10 @@ For each new install:
 - [ ] Vercel project from the same repository
 - [ ] `CRON_SECRET` generated fresh — never reused between customers, since
       one leaking would compromise the others
-- [ ] `npm run db:deploy` and `npm run db:seed`
-- [ ] `scripts/verify-install.ts` reports `Ready.`
+- [ ] First administrator created — via `/setup` or `npm run db:seed`
+- [ ] `/setup` returns 404 afterwards
 - [ ] `/api/health` returns 200
-- [ ] Admin password handed over and changed
+- [ ] Admin password recorded somewhere safe
 - [ ] Branding, locale and reference prefixes configured (Phase 3)
 - [ ] Real users created; the seeded admin retired or renamed
 - [ ] Uptime monitoring and daily backups on
@@ -154,4 +171,14 @@ signing secret to get wrong: the cookie holds a random token and the table
 stores its SHA-256 hash.
 
 **Locked out by the rate limiter** — five failed attempts per IP per fifteen
-minutes. Clear it with `DELETE FROM "LoginAttempt" WHERE ip = '…';` or wait.
+minutes, counting failed setup-token attempts too. Clear it with
+`DELETE FROM "LoginAttempt" WHERE ip = '…';` or wait.
+
+**`/setup` returns 404 on a brand new install** — something already created a
+user, or the completion marker is present. Check with
+`SELECT * FROM "Setting" WHERE key = 'install.completed';` and
+`SELECT count(*) FROM "User";`. If you genuinely need to redo it, delete both.
+
+**`/setup` says the token is not correct** — neither `SETUP_TOKEN` nor
+`CRON_SECRET` is set in the deployment, or you are comparing against a
+different environment's value. A missing token fails closed by design.

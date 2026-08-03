@@ -17,6 +17,9 @@ const SESSION_COOKIES = ['ops_session', '__Secure-ops_session'];
 /** Paths that must stay reachable without a session. */
 const PUBLIC_PREFIXES = [
   '/login',
+  // The first-run bootstrap. It guards itself: the page 404s the moment an
+  // administrator exists, and creating one requires the setup token.
+  '/setup',
   '/api/health',
   '/api/cron',
   '/api/telegram',
