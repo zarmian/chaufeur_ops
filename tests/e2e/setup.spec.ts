@@ -20,14 +20,21 @@ test.describe('first-run bootstrap', () => {
     await expect(page.getByRole('button', { name: /Create administrator/i })).toHaveCount(0);
   });
 
-  test('does not hint at the install state to an anonymous caller', async ({
-    page,
-  }) => {
-    // Same response as any other unknown URL — no "already set up" message
-    // that would confirm a live deployment sitting behind the URL.
-    const setup = await page.goto('/setup');
-    const nonsense = await page.goto('/definitely-not-a-route');
-    expect(setup?.status()).toBe(nonsense?.status());
+  test('says nothing about why it is gone', async ({ page }) => {
+    // A claimed install renders the ordinary not-found page — no "already set
+    // up" message, and nothing that would help someone decide whether it is
+    // worth guessing the token.
+    //
+    // Note this is *not* indistinguishable from any other unknown URL: an
+    // unknown path redirects an anonymous visitor to /login (200), whereas
+    // /setup is public and 404s. That difference reveals only that the
+    // bootstrap has been used, which an unclaimed install would advertise far
+    // more loudly by showing the form.
+    await page.goto('/setup');
+
+    const body = (await page.textContent('body')) ?? '';
+    expect(body).not.toMatch(/already|token|administrator exists/i);
+    await expect(page.getByText('Page not found')).toBeVisible();
   });
 
   test('is reachable without a session, unlike the dashboard', async ({

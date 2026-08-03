@@ -69,8 +69,15 @@ instant — the marker row's primary key is the mutex.
 The page is public before it is used, which is unavoidable for a bootstrap.
 That is why it needs the token, why failed token attempts count against the
 same five-per-fifteen-minutes limit as failed logins, and why it is inert the
-moment an administrator exists. Deploy and complete setup in the same sitting
-rather than leaving a fresh deployment unclaimed.
+moment an administrator exists.
+
+Once claimed it returns a plain 404 with no explanation. That is not
+indistinguishable from any other unknown URL — an unknown path redirects an
+anonymous visitor to `/login`, while `/setup` is public and 404s — so a
+determined observer can tell the bootstrap has been used. What they cannot do
+is use it. An *unclaimed* install, by contrast, advertises itself by showing
+the form, which is the real reason to deploy and complete setup in the same
+sitting rather than leaving a fresh deployment unattended.
 
 ### Option B — the seed script (terminal)
 
