@@ -32,9 +32,19 @@ The order below differs deliberately from the enhancement roadmap in the origina
 
 Phases 0–3 get you a branded, usable system with expiry tracking and real pricing. Phases 4–6 are where it overtakes the legacy one.
 
+## Deploying without a terminal
+
+The shortest path to a running install needs no local checkout at all:
+create the database, set three environment variables in Vercel, deploy, then
+visit `/setup` once to create the first administrator. Vercel applies the
+migrations during its build. Full runbook in
+[`docs/deployment.md`](docs/deployment.md).
+
+`/setup` disables itself permanently the moment an administrator exists.
+
 ## Local setup
 
-Ten steps, assuming Node 20+ and a Postgres 16 database you can reach
+For development. Assumes Node 20+ and a Postgres 16 database you can reach
 (Supabase, Neon or local).
 
 1. `npm install`
@@ -45,7 +55,8 @@ Ten steps, assuming Node 20+ and a Postgres 16 database you can reach
 4. Set `CRON_SECRET` — `openssl rand -hex 32`
 5. `npm run db:migrate` — applies `prisma/migrations` to the database
 6. `npm run db:seed` — creates the admin user, the London zones and a default
-   rate card. The generated admin password is printed once; save it.
+   rate card. The generated admin password is printed once; save it. (Or skip
+   this and use `/setup` in the browser instead.)
 7. `npm run dev`
 8. Open <http://localhost:3000> and sign in as the seeded admin
 9. `npm run typecheck && npm run lint && npm run test` should be clean
@@ -68,6 +79,7 @@ app runs without them.
 | `npm run db:seed` | Idempotent seed |
 | `npm run db:studio` | Prisma Studio |
 | `npm run verify` | Preflight check on a new install — connection, migrations, seed |
+| `/setup` | One-time browser bootstrap for the first administrator |
 
 ### Running the database-backed tests
 
@@ -107,9 +119,9 @@ The short version:
    (6543, with `?pgbouncer=true`) for `DATABASE_URL`, direct (5432) for
    `DIRECT_URL`. Migrations cannot run through pgbouncer, which is why there
    are two
-2. `npm run db:deploy && npm run db:seed`, then `npm run verify`
-3. Import into Vercel; set the same variables plus `CRON_SECRET`
-4. Deploy — `vercel.json` applies migrations as part of the build
+2. Import into Vercel; set those two plus `CRON_SECRET`
+3. Deploy — `vercel.json` applies migrations as part of the build
+4. Visit `/setup` and create the first administrator
 5. Check `/api/health` returns `{"status":"ok","database":"ok"}`
 
 Preview deployments should get their own branch database so a preview never
@@ -132,7 +144,8 @@ lib/
   dates.ts                             UTC <-> configured timezone
   prisma.ts                            client with the soft-delete extension
   audit.ts                             transactional audit log
-  session.ts                 database-backed sessions
+  session.ts                           database-backed sessions
+  install.ts                           first-run bootstrap, shared with the seed
   auth.ts  permissions.ts  authz.ts
   storage.ts                           R2
 prisma/
