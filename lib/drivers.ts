@@ -18,12 +18,6 @@ import { emptyToNull, normalisePhone, tidy } from './text';
  * operator keeps about them — identity, licensing, and which car they drive.
  */
 
-export const DRIVER_STATUSES = [
-  { value: 'ACTIVE', label: 'Active' },
-  { value: 'INACTIVE', label: 'Inactive' },
-  { value: 'SUSPENDED', label: 'Suspended' },
-] as const;
-
 const optionalDate = z
   .string()
   .trim()

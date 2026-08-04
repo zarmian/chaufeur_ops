@@ -14,7 +14,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { ACCOUNT_KINDS, listAccounts } from '@/lib/accounts';
+import { listAccounts } from '@/lib/accounts';
+import { ACCOUNT_KINDS } from '@/lib/enum-options';
 import { can } from '@/lib/authz';
 import {
   filterFlag,

@@ -15,6 +15,19 @@ import { LoginForm } from './login-form';
 
 export const metadata: Metadata = { title: 'Sign in' };
 
+/**
+ * Never prerendered.
+ *
+ * The database check below returns early, before the page touches cookies or
+ * `searchParams`. If the build machine cannot reach Postgres — a pooled
+ * connection string that only resolves at runtime is enough — Next sees a
+ * component with no dynamic dependency and freezes the "not configured yet"
+ * screen into the build output. Every visitor then gets that page, from a
+ * working install, until someone redeploys. Sign-in depends on live database
+ * state by definition, so it is always rendered per request.
+ */
+export const dynamic = 'force-dynamic';
+
 export default async function LoginPage({
   searchParams,
 }: {

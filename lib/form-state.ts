@@ -1,5 +1,5 @@
 import { ZodError } from 'zod';
-import { zodFields } from './api';
+import { zodFields } from './zod-fields';
 import { ForbiddenError, UnauthenticatedError } from './permissions';
 
 /**
@@ -8,6 +8,12 @@ import { ForbiddenError, UnauthenticatedError } from './permissions';
  * Kept in `lib/` rather than beside the actions because a `'use server'`
  * module may export only async functions — every export there becomes a
  * callable endpoint.
+ *
+ * Client Components import `INITIAL_FORM_STATE` from here, so everything this
+ * module reaches ends up in the browser bundle. It must not import anything
+ * that touches Postgres, `next/server` or `node:*`. `zodFields` lives in its
+ * own leaf module for exactly that reason, and the Prisma check below is
+ * duck-typed rather than done with `instanceof`.
  */
 
 export interface FormState {
@@ -40,7 +46,51 @@ export function toFormState(
     return { error: error.message };
   }
 
+  // A unique-constraint violation that got past the explicit duplicate check —
+  // two operators saving the same registration in the same second, say. It is
+  // a collision the operator can act on, not a fault, so it belongs on the
+  // form rather than on the error page.
+  const conflict = uniqueConstraintTarget(error);
+  if (conflict) {
+    return { error: `That ${conflict} is already in use on another record` };
+  }
+
   throw error instanceof Error ? error : new Error(fallback);
+}
+
+/**
+ * The field named by a Prisma P2002, or null.
+ *
+ * Recognised by shape rather than `instanceof
+ * Prisma.PrismaClientKnownRequestError`, because importing `@prisma/client`
+ * here would put the Prisma runtime in the browser bundle — see the note at
+ * the top of this module.
+ */
+function uniqueConstraintTarget(error: unknown): string | null {
+  if (typeof error !== 'object' || error === null) return null;
+  const candidate = error as { name?: unknown; code?: unknown; meta?: unknown };
+
+  if (
+    candidate.name !== 'PrismaClientKnownRequestError' ||
+    candidate.code !== 'P2002'
+  ) {
+    return null;
+  }
+
+  const target = (candidate.meta as { target?: unknown } | undefined)?.target;
+  const fields = Array.isArray(target)
+    ? target.filter((entry): entry is string => typeof entry === 'string')
+    : typeof target === 'string'
+      ? [target]
+      : [];
+
+  if (fields.length === 0) return 'value';
+  // `normalisedRegistration` is an implementation detail; the operator typed
+  // a registration.
+  return fields
+    .map((field) => field.replace(/^normalised/, '').replace(/Id$/, ''))
+    .map((field) => field.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase())
+    .join(' and ');
 }
 
 /** `redirect()` throws by design; never treat that as a failure. */

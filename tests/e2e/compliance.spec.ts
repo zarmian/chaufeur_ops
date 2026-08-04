@@ -100,10 +100,20 @@ test.describe('compliance', () => {
   test('the expiring API returns the documented buckets', async ({ page }) => {
     await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
 
-    const response = await page.request.get('/api/compliance/expiring?days=60');
-    expect(response.status()).toBe(200);
+    // Issued from inside the page rather than through `page.request`.
+    // A production build names the cookie `__Secure-ops_session` and sets
+    // `Secure`, and Playwright's Node-side HTTP client will not send a Secure
+    // cookie over the plain-HTTP loopback the test server runs on — so the
+    // call arrives anonymous and middleware redirects it to /login, which
+    // answers 200 with HTML. Chromium treats loopback as trustworthy and
+    // sends the cookie, which is also how the app really calls this route.
+    const response = await page.evaluate(async () => {
+      const r = await fetch('/api/compliance/expiring?days=60');
+      return { status: r.status, body: (await r.json()) as unknown };
+    });
+    expect(response.status).toBe(200);
 
-    const body = await response.json();
+    const body = response.body as Record<string, unknown>;
     expect(body).toHaveProperty('expired');
     expect(body).toHaveProperty('critical');
     expect(body).toHaveProperty('warning');

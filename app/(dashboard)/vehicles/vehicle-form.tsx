@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { INITIAL_FORM_STATE, type FormState } from '@/lib/form-state';
-import { VEHICLE_CLASSES, VEHICLE_STATUSES } from '@/lib/vehicles';
+import { VEHICLE_CLASSES, VEHICLE_STATUSES } from '@/lib/enum-options';
 
 export interface VehicleFormValues {
   registration: string;
