@@ -25,7 +25,8 @@ import {
 } from '@/lib/list-params';
 import { pageRequireCapability } from '@/lib/page-guards';
 import { getComplianceThresholds } from '@/lib/settings';
-import { listVehicles, VEHICLE_CLASSES, VEHICLE_STATUSES } from '@/lib/vehicles';
+import { VEHICLE_CLASSES, VEHICLE_STATUSES } from '@/lib/enum-options';
+import { listVehicles } from '@/lib/vehicles';
 
 export const metadata = { title: 'Vehicles' };
 

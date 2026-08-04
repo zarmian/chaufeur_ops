@@ -19,21 +19,6 @@ import { emptyToNull, normaliseRegistration, tidy } from './text';
  * the fix; the scanned documents are evidence attached alongside them.
  */
 
-export const VEHICLE_CLASSES = [
-  { value: 'SALOON', label: 'Saloon' },
-  { value: 'EXECUTIVE', label: 'Executive' },
-  { value: 'LUXURY', label: 'Luxury' },
-  { value: 'MPV', label: 'MPV' },
-  { value: 'SUV', label: 'SUV' },
-  { value: 'ELECTRIC_EXECUTIVE', label: 'Electric executive' },
-] as const;
-
-export const VEHICLE_STATUSES = [
-  { value: 'ACTIVE', label: 'Active' },
-  { value: 'OFF_ROAD', label: 'Off road' },
-  { value: 'RETIRED', label: 'Retired' },
-] as const;
-
 const optionalDate = z
   .string()
   .trim()

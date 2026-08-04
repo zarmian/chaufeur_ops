@@ -14,13 +14,6 @@ import { emptyToNull, tidy } from './text';
  * is why "which accounts are actually worth having" was unanswerable.
  */
 
-export const ACCOUNT_KINDS = [
-  { value: 'INTERNAL', label: 'Internal' },
-  { value: 'AGENCY', label: 'Agency' },
-  { value: 'CORPORATE', label: 'Corporate' },
-  { value: 'INDIVIDUAL', label: 'Individual' },
-] as const;
-
 export const accountSchema = z.object({
   name: z.string().trim().min(1, 'Enter the account name').max(200),
   kind: z.enum(['INTERNAL', 'AGENCY', 'CORPORATE', 'INDIVIDUAL']),

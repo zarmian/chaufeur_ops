@@ -16,7 +16,8 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { can } from '@/lib/authz';
-import { DRIVER_STATUSES, listDrivers } from '@/lib/drivers';
+import { listDrivers } from '@/lib/drivers';
+import { DRIVER_STATUSES } from '@/lib/enum-options';
 import {
   filterFlag,
   filterValue,

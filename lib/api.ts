@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { ZodError } from 'zod';
 import { ForbiddenError, UnauthenticatedError } from './permissions';
+import { zodFields } from './zod-fields';
 
 /**
  * The error envelope from `docs/api-spec.md`:
@@ -59,15 +60,7 @@ export function apiError(
   );
 }
 
-/** Flatten a Zod error into the `fields` map the API contract specifies. */
-export function zodFields(error: ZodError): Record<string, string[]> {
-  const fields: Record<string, string[]> = {};
-  for (const issue of error.issues) {
-    const key = issue.path.join('.') || '_';
-    (fields[key] ??= []).push(issue.message);
-  }
-  return fields;
-}
+export { zodFields } from './zod-fields';
 
 /**
  * Wrap a route handler so thrown auth, validation and API errors become the

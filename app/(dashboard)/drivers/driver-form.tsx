@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { DRIVER_STATUSES } from '@/lib/drivers';
+import { DRIVER_STATUSES } from '@/lib/enum-options';
 import { INITIAL_FORM_STATE, type FormState } from '@/lib/form-state';
 
 export interface DriverFormValues {
