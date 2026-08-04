@@ -65,6 +65,13 @@ export const NAVIGATION: NavSection[] = [
         capability: 'viewJobs',
         matchPrefix: true,
       },
+      {
+        href: '/compliance',
+        label: 'Compliance',
+        icon: 'ShieldCheck',
+        capability: 'viewJobs',
+        matchPrefix: true,
+      },
     ],
   },
   {

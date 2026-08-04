@@ -61,8 +61,9 @@ For development. Assumes Node 20+ and a Postgres 16 database you can reach
 8. Open <http://localhost:3000> and sign in as the seeded admin
 9. `npm run typecheck && npm run lint && npm run test` should be clean
 
-R2 credentials are only needed once document upload arrives in Phase 1; the
-app runs without them.
+A Vercel Blob store is only needed for document upload; the app runs without
+one, and compliance expiry dates live on the driver and vehicle records
+regardless.
 
 ### Commands
 
@@ -147,7 +148,7 @@ lib/
   session.ts                           database-backed sessions
   install.ts                           first-run bootstrap, shared with the seed
   auth.ts  permissions.ts  authz.ts
-  storage.ts                           R2
+  storage.ts                           Vercel Blob, private + signed URLs
 prisma/
   schema.prisma
   migrations/

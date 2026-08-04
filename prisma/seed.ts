@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import { INSTALL_COMPLETE_KEY, seedBaseline, ZONES } from '../lib/install';
 import { hashPassword } from '../lib/password';
+import { seedSampleData } from './seed-phase1';
 
 /**
  * Seeds the minimum a fresh install needs: one administrator, the standard
@@ -126,6 +127,8 @@ async function main(): Promise<void> {
   });
   console.log(`✓ ${ZONES.length} zones and the default rate card`);
   console.log('  Fares are zero — set the real rates in Phase 4.');
+
+  await seedSampleData(prisma);
 
   await markInstalled();
   console.log('✓ Install marked complete — /setup is now inert');
