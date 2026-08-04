@@ -23,7 +23,7 @@ The first customer is a UK chauffeur company running ~195 owner-drivers, each wi
 | UI | Tailwind CSS + shadcn/ui | |
 | Forms | react-hook-form + Zod | The same Zod schema validates client and server |
 | Tables | TanStack Table, **server-side** pagination and filtering | Never load a full table into the client |
-| File storage | S3-compatible (Cloudflare R2) | Never store binaries in Postgres |
+| File storage | Vercel Blob, private | Never store binaries in Postgres; reads go through short-lived signed URLs |
 | PDF | Puppeteer (invoices, driver statements) | Render from an HTML template |
 | Spreadsheet | SheetJS | Exports only |
 | Telegram | grammY | Webhook mode, not polling |

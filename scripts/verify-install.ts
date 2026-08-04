@@ -60,23 +60,14 @@ function checkEnvironment(): void {
     }
   }
 
-  const storageKeys = [
-    'R2_ACCOUNT_ID',
-    'R2_ACCESS_KEY_ID',
-    'R2_SECRET_ACCESS_KEY',
-    'R2_BUCKET',
-  ];
-  const storageSet = storageKeys.filter((key) => process.env[key]).length;
-  if (storageSet === 0) {
+  if (process.env.BLOB_READ_WRITE_TOKEN) {
+    record('ok', 'File storage', 'Vercel Blob token present');
+  } else {
     record(
       'warn',
       'File storage',
-      'not configured — fine until document upload arrives in Phase 1',
+      'BLOB_READ_WRITE_TOKEN not set — document upload will be unavailable',
     );
-  } else if (storageSet < storageKeys.length) {
-    record('fail', 'File storage', 'partially configured — uploads will fail');
-  } else {
-    record('ok', 'File storage', 'configured');
   }
 }
 

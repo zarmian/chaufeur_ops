@@ -1,20 +1,17 @@
 import { randomUUID } from 'node:crypto';
-import {
-  DeleteObjectCommand,
-  GetObjectCommand,
-  HeadObjectCommand,
-  PutObjectCommand,
-  S3Client,
-} from '@aws-sdk/client-s3';
-import { getSignedUrl as presign } from '@aws-sdk/s3-request-presigner';
+import { del, head, issueSignedToken, presignUrl, put } from '@vercel/blob';
 
 /**
- * File storage on Cloudflare R2, S3-compatible.
+ * File storage on Vercel Blob, private.
  *
- * Binaries never go in Postgres — the database holds the object key and
- * nothing else. The bucket is private: every read is a short-lived signed
- * URL, so a leaked link to someone's DVLA licence expires in minutes rather
- * than being public forever.
+ * These are DVLA licences and PHV badges — identity documents for every
+ * driver on the fleet — so `access: 'private'` is not optional. A private
+ * blob is unreachable without a signed URL, and every signed URL here is
+ * scoped to one pathname, one operation and a short expiry. Nothing is ever
+ * uploaded with public access.
+ *
+ * Binaries never go in Postgres. The database holds the pathname and nothing
+ * else, which is what makes a document's owner obvious from its key alone.
  */
 
 export const ALLOWED_MIME_TYPES = [
@@ -39,49 +36,24 @@ export class StorageValidationError extends Error {
 export class StorageNotConfiguredError extends Error {
   constructor() {
     super(
-      'File storage is not configured. Set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY and R2_BUCKET.',
+      'File storage is not configured. Create a Vercel Blob store and set BLOB_READ_WRITE_TOKEN.',
     );
     this.name = 'StorageNotConfiguredError';
   }
 }
 
-interface StorageConfig {
-  bucket: string;
-  client: S3Client;
-}
-
-let cached: StorageConfig | null = null;
-
-/** True when the environment carries enough to talk to R2. */
+/**
+ * True when the environment can reach a Blob store.
+ *
+ * On Vercel the token is injected by the Blob integration. Locally it has to
+ * be pulled down with `vercel env pull`.
+ */
 export function isStorageConfigured(): boolean {
-  return Boolean(
-    process.env.R2_ACCOUNT_ID &&
-      process.env.R2_ACCESS_KEY_ID &&
-      process.env.R2_SECRET_ACCESS_KEY &&
-      process.env.R2_BUCKET,
-  );
+  return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
 }
 
-function storage(): StorageConfig {
-  if (cached) return cached;
+function assertConfigured(): void {
   if (!isStorageConfigured()) throw new StorageNotConfiguredError();
-
-  const accountId = process.env.R2_ACCOUNT_ID!;
-  const endpoint =
-    process.env.R2_ENDPOINT || `https://${accountId}.r2.cloudflarestorage.com`;
-
-  cached = {
-    bucket: process.env.R2_BUCKET!,
-    client: new S3Client({
-      region: 'auto',
-      endpoint,
-      credentials: {
-        accessKeyId: process.env.R2_ACCESS_KEY_ID!,
-        secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
-      },
-    }),
-  };
-  return cached;
 }
 
 function assertAllowed(mimeType: string, sizeBytes: number): void {
@@ -122,7 +94,8 @@ export function sanitiseFileName(fileName: string): string {
  * `documents/driver/clx123/9f8e-phv-badge.pdf`
  *
  * Namespaced by entity so an object's owner is obvious from the key alone,
- * which matters when auditing or cleaning up orphans.
+ * which matters when auditing or cleaning up orphans. The UUID makes the key
+ * unguessable and lets the same filename be uploaded twice.
  */
 export function buildObjectKey(
   entityType: string,
@@ -138,53 +111,82 @@ export async function upload(
   key: string,
   mimeType: string,
 ): Promise<{ key: string; sizeBytes: number }> {
+  // Validated before the network call, so a rejected file costs nothing.
   assertAllowed(mimeType, buffer.byteLength);
+  assertConfigured();
 
-  const { client, bucket } = storage();
-  await client.send(
-    new PutObjectCommand({
-      Bucket: bucket,
-      Key: key,
-      Body: buffer,
-      ContentType: mimeType,
-    }),
-  );
+  // The SDK takes a Buffer, a Blob or a stream; a bare Uint8Array is not one
+  // of them, and wrapping is a view rather than a copy.
+  const body = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
+
+  await put(key, body, {
+    access: 'private',
+    contentType: mimeType,
+    // The key already carries a UUID, so a second suffix would only make the
+    // stored pathname differ from the one recorded in Postgres.
+    addRandomSuffix: false,
+    // Keys are unique by construction; overwriting would mean a bug upstream.
+    allowOverwrite: false,
+  });
 
   return { key, sizeBytes: buffer.byteLength };
 }
 
-/** A time-limited read URL. Defaults to 15 minutes. */
+/**
+ * A time-limited read URL for one object. Defaults to 15 minutes.
+ *
+ * Two steps by design: a delegation token scoped to this pathname and to
+ * `get` alone, then a URL signed against it. The long-lived read-write token
+ * never leaves the server, and a leaked link grants nothing but this one file
+ * until it expires.
+ */
 export async function getSignedUrl(
   key: string,
   ttlSeconds: number = DEFAULT_SIGNED_URL_TTL_SECONDS,
 ): Promise<string> {
-  const { client, bucket } = storage();
-  return presign(client, new GetObjectCommand({ Bucket: bucket, Key: key }), {
-    expiresIn: ttlSeconds,
+  assertConfigured();
+
+  const validUntil = Date.now() + ttlSeconds * 1000;
+
+  const signedToken = await issueSignedToken({
+    pathname: key,
+    operations: ['get'],
+    validUntil,
   });
+
+  const { presignedUrl } = await presignUrl(signedToken, {
+    access: 'private',
+    operation: 'get',
+    pathname: key,
+    validUntil,
+  });
+
+  return presignedUrl;
 }
 
 /**
- * Remove an object. Note this *is* a hard delete — the soft-delete rule
- * applies to database records, and the `Document` row survives. Only call
- * this when purging, never as part of the normal delete path.
+ * Remove an object.
+ *
+ * Note this *is* a hard delete — the soft-delete rule applies to database
+ * records, and the `Document` row survives. Only call it when purging, never
+ * as part of the normal delete path.
  */
 export async function remove(key: string): Promise<void> {
-  const { client, bucket } = storage();
-  await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+  assertConfigured();
+  await del(key);
 }
 
 export async function exists(key: string): Promise<boolean> {
-  const { client, bucket } = storage();
+  assertConfigured();
   try {
-    await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+    await head(key);
     return true;
   } catch {
     return false;
   }
 }
 
-/** Validate an uploaded `File` before it reaches R2. */
+/** Validate an uploaded `File` before it reaches storage. */
 export function assertUploadable(file: File): void {
   assertAllowed(file.type, file.size);
 }

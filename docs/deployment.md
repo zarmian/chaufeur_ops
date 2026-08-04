@@ -35,10 +35,10 @@ DIRECT_URL="postgresql://postgres.abcdefgh:PASSWORD@aws-0-eu-west-2.pooler.supab
 
 ### What this project does not use Supabase for
 
-Auth, storage and row-level security are all handled in the application:
-sessions live in our own `Session` table, R2 owns files, and access control
-is the capability model in `lib/permissions.ts`, enforced server-side. Supabase here is managed
-Postgres and nothing more. Do not enable RLS on these tables — Prisma
+Auth, storage and row-level security are all handled elsewhere: sessions live
+in our own `Session` table, Vercel Blob owns files, and access control is the
+capability model in `lib/permissions.ts`, enforced server-side. Supabase here
+is managed Postgres and nothing more. Do not enable RLS on these tables — Prisma
 connects as the owner and RLS would silently filter rows the application
 expects to see.
 
@@ -114,7 +114,7 @@ migrations finished rather than merely started, and that an admin exists.
    | `DIRECT_URL` | direct string |
    | `CRON_SECRET` | `openssl rand -hex 32` |
    | `SESSION_MAX_AGE_DAYS` | `30` (optional) |
-   | `R2_*` | once document upload lands in Phase 1 |
+   | `BLOB_READ_WRITE_TOKEN` | added automatically when you create a Blob store |
 
 3. Deploy.
 4. If you have not created an administrator yet, visit
@@ -124,6 +124,22 @@ migrations finished rather than merely started, and that an admin exists.
    reach Postgres — almost always a wrong or unpooled `DATABASE_URL`.
 6. Sign in.
 7. Point uptime monitoring at `/api/health`.
+
+### File storage
+
+Documents — driver licences, PHV badges, MOT certificates — go to Vercel
+Blob. In the Vercel dashboard: **Storage → Create → Blob**, connect it to the
+project, and `BLOB_READ_WRITE_TOKEN` is added to the environment for you.
+Redeploy afterwards so the running deployment picks it up.
+
+Every object is written with `access: 'private'` and read through a signed URL
+scoped to one pathname, one operation and fifteen minutes. There is no public
+bucket to misconfigure, which matters because these are identity documents for
+every driver on the fleet.
+
+The app runs without a Blob store; only document upload is unavailable, and
+the expiry dates that drive compliance live on the driver and vehicle records
+regardless.
 
 ### Cron
 
