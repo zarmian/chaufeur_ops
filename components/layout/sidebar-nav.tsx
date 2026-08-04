@@ -10,6 +10,7 @@ import {
   FileText,
   LayoutDashboard,
   Settings,
+  ShieldCheck,
   Users,
   Wallet,
   type LucideIcon,
@@ -31,6 +32,7 @@ const ICONS: Record<string, LucideIcon> = {
   Wallet,
   ChartNoAxesColumn,
   Settings,
+  ShieldCheck,
 };
 
 export function SidebarNav({

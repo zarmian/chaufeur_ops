@@ -103,6 +103,7 @@ jobs:
         env:
           SEED_ADMIN_PASSWORD: ci-admin-password
           SEED_E2E_USERS: 'true'
+          SEED_SAMPLE_DATA: 'true'
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
         env:
