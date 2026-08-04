@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
+import { ConfigurationError } from '@/components/configuration-error';
 import {
   Card,
   CardContent,
@@ -8,6 +9,7 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { getBranding } from '@/lib/branding';
+import { checkDatabase } from '@/lib/db-health';
 import { isInstallComplete, MIN_PASSWORD_LENGTH } from '@/lib/install';
 import { SetupForm } from './setup-form';
 
@@ -24,6 +26,15 @@ export const dynamic = 'force-dynamic';
  * administrator, and disappears the moment one exists.
  */
 export default async function SetupPage() {
+  // The most likely reason someone reaches /setup on a broken deployment is
+  // that the database is not wired up, so say that rather than crashing.
+  const database = await checkDatabase();
+  if (!database.ok) {
+    return (
+      <ConfigurationError summary={database.summary} remedy={database.remedy} />
+    );
+  }
+
   if (await isInstallComplete()) notFound();
 
   const branding = await getBranding();

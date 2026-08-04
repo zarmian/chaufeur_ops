@@ -1,35 +1,46 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { checkDatabase } from '@/lib/db-health';
 
 /**
- * Uptime monitoring hits this. It checks the database rather than just
- * returning 200, because an app that renders but cannot reach Postgres is
- * down as far as the ops team is concerned.
+ * Uptime monitoring hits this, and so does anyone diagnosing a fresh install.
+ *
+ * It checks the database rather than just returning 200, because an app that
+ * renders but cannot reach Postgres is down as far as the ops team is
+ * concerned — and it distinguishes "unreachable" from "reachable but no
+ * tables", which are different mistakes with different fixes.
+ *
+ * Deliberately says nothing about credentials, hosts or install state.
  */
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  const startedAt = Date.now();
+  const database = await checkDatabase();
+  const timestamp = new Date().toISOString();
 
-  try {
-    await prisma.$queryRaw`SELECT 1`;
+  if (database.ok) {
     return NextResponse.json({
       status: 'ok',
       database: 'ok',
-      latencyMs: Date.now() - startedAt,
-      timestamp: new Date().toISOString(),
+      schema: 'ok',
+      latencyMs: database.latencyMs,
+      timestamp,
     });
-  } catch (error) {
-    console.error('Health check failed', error);
-    return NextResponse.json(
-      {
-        status: 'error',
-        database: 'unreachable',
-        latencyMs: Date.now() - startedAt,
-        timestamp: new Date().toISOString(),
-      },
-      { status: 503 },
-    );
   }
+
+  console.error('Health check failed', database.reason, database.summary);
+
+  return NextResponse.json(
+    {
+      status: 'error',
+      database: database.reason === 'no_schema' ? 'ok' : 'unreachable',
+      schema: database.reason === 'no_schema' ? 'missing' : 'unknown',
+      reason: database.reason,
+      detail: database.summary,
+      remedy: database.remedy,
+      latencyMs: database.latencyMs,
+      timestamp,
+    },
+    { status: 503 },
+  );
 }
