@@ -161,6 +161,13 @@ For each new install:
 
 ## Troubleshooting
 
+**"The application could not start. Nothing has been changed."** — the
+global boundary, meaning the failure was above every route-level one. Check
+`/api/health` first: it distinguishes an unreachable database from a
+reachable one with no tables, and prints the remedy for each. If `/api/health`
+itself fails, the deployment is not booting — check the Vercel build and
+function logs for the digest shown on the screen.
+
 **`prepared statement "s0" already exists`** — `pgbouncer=true` is missing
 from `DATABASE_URL`.
 
