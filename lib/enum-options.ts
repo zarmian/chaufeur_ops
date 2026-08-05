@@ -43,3 +43,33 @@ export const ACCOUNT_KINDS = [
   { value: 'CORPORATE', label: 'Corporate' },
   { value: 'INDIVIDUAL', label: 'Individual' },
 ] as const;
+
+export const JOB_TYPES = [
+  { value: 'TRANSFER', label: 'Transfer' },
+  { value: 'AIRPORT_TRANSFER', label: 'Airport transfer' },
+  { value: 'AS_DIRECTED', label: 'As directed (hourly)' },
+] as const;
+
+export const JOB_STATUSES = [
+  { value: 'DRAFT', label: 'Draft' },
+  { value: 'PENDING', label: 'Pending' },
+  { value: 'ASSIGNED', label: 'Assigned' },
+  { value: 'ACCEPTED', label: 'Accepted' },
+  { value: 'IN_PROGRESS', label: 'In progress' },
+  { value: 'COMPLETED', label: 'Completed' },
+  { value: 'CANCELLED', label: 'Cancelled' },
+  { value: 'NO_SHOW', label: 'No show' },
+] as const;
+
+export const PAY_STATUSES = [
+  { value: 'UNPAID', label: 'Unpaid' },
+  { value: 'PARTIALLY_PAID', label: 'Partially paid' },
+  { value: 'FULLY_PAID', label: 'Fully paid' },
+] as const;
+
+export const PAY_METHODS = [
+  { value: 'BANK_TRANSFER', label: 'Bank transfer' },
+  { value: 'CASH', label: 'Cash' },
+  { value: 'CARD', label: 'Card' },
+  { value: 'INVOICE', label: 'Invoice' },
+] as const;

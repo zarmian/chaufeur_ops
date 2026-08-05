@@ -19,16 +19,28 @@ import {
 export interface AppSettings {
   complianceWarningDays: number;
   complianceCriticalDays: number;
+  /**
+   * Minutes either side of a pickup within which a second job for the same
+   * driver counts as a clash. It is a warning, not a block — an operator can
+   * see that two airport runs an hour apart are fine, and the system cannot.
+   */
+  driverConflictBufferMinutes: number;
+  /** Completed-but-unpriced count at which the dashboard tile turns red. */
+  unpricedAlertThreshold: number;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
   complianceWarningDays: DEFAULT_WARNING_DAYS,
   complianceCriticalDays: DEFAULT_CRITICAL_DAYS,
+  driverConflictBufferMinutes: 90,
+  unpricedAlertThreshold: 5,
 };
 
 const SETTING_KEYS: Record<keyof AppSettings, string> = {
   complianceWarningDays: 'compliance.warningDays',
   complianceCriticalDays: 'compliance.criticalDays',
+  driverConflictBufferMinutes: 'jobs.driverConflictBufferMinutes',
+  unpricedAlertThreshold: 'jobs.unpricedAlertThreshold',
 };
 
 function asPositiveInt(value: unknown, fallback: number): number {
@@ -63,6 +75,14 @@ export const getSettings = cache(async (): Promise<AppSettings> => {
       // Critical must sit inside warning, or the amber band disappears and
       // every expiring document jumps straight to red.
       complianceCriticalDays: Math.min(critical, warning),
+      driverConflictBufferMinutes: asPositiveInt(
+        byKey.get(SETTING_KEYS.driverConflictBufferMinutes),
+        DEFAULT_SETTINGS.driverConflictBufferMinutes,
+      ),
+      unpricedAlertThreshold: asPositiveInt(
+        byKey.get(SETTING_KEYS.unpricedAlertThreshold),
+        DEFAULT_SETTINGS.unpricedAlertThreshold,
+      ),
     };
   } catch {
     // Before migrations run, or if the database blinks, the defaults are

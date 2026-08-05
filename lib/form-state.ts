@@ -19,6 +19,14 @@ import { ForbiddenError, UnauthenticatedError } from './permissions';
 export interface FormState {
   error: string | null;
   fields?: Record<string, string[]>;
+  /**
+   * Set only by an action that completed successfully and stays on the same
+   * page. Needed because `{ error: null }` is also the *initial* state, so
+   * without it a client cannot distinguish "nothing has happened yet" from
+   * "that worked" — and a status change that leaves the screen unchanged
+   * reads as a system that ignored the click.
+   */
+  ok?: true;
 }
 
 export const INITIAL_FORM_STATE: FormState = { error: null };

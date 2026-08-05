@@ -21,6 +21,7 @@
     "db:seed": "tsx prisma/seed.ts",
     "setup": "tsx scripts/setup.ts",
     "verify": "tsx scripts/verify-install.ts",
+    "perf:jobs": "tsx scripts/perf-jobs.ts",
     "postinstall": "prisma generate"
   },
   "prisma": {

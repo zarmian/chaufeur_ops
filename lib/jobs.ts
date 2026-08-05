@@ -1,0 +1,694 @@
+import type { JobStatus, JobType, Prisma } from '@prisma/client';
+import { z } from 'zod';
+import { withAudit, type AuditContext } from './audit';
+import { isDriverCompliantAt } from './compliance';
+import { toUTC } from './dates';
+import {
+  canTransition,
+  eventTypeForStatus,
+  hasPriceOrReason,
+  type TransitionResult,
+} from './job-status';
+import type { ListParams } from './list-params';
+import { parseMoney } from './money';
+import { prisma } from './prisma';
+import { withJobReference } from './references';
+import { emptyToNull, tidy } from './text';
+
+/**
+ * Jobs — the operational core.
+ *
+ * The one thing this module exists to prevent: a job quietly reaching the end
+ * of its life worth nothing. In the legacy system 140 of 141 jobs had no
+ * price, because pricing was a modal nobody opened. Here the price is on the
+ * booking form, unpriced jobs are visible in every list, and `COMPLETED` is
+ * refused without either a price or a written reason.
+ */
+
+/**
+ * Money arrives from the form as pounds ("125.50"), not pence.
+ *
+ * Blank becomes null rather than 0, and the difference is the whole point: a
+ * null price is a question nobody answered, which the UI must chase. A zero
+ * is a deliberate statement that the job was free, which needs a reason.
+ */
+const priceField = z
+  .string()
+  .trim()
+  .optional()
+  .transform((value) => (value === undefined || value === '' ? null : value))
+  .superRefine((value, ctx) => {
+    if (value === null) return;
+    try {
+      const pence = parseMoney(value);
+      if (pence < 0) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'That cannot be negative' });
+      }
+    } catch {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Enter an amount like 125.50' });
+    }
+  })
+  .transform((value) => (value === null ? null : parseMoney(value)));
+
+const optionalId = z
+  .string()
+  .trim()
+  .optional()
+  .transform((value) => (value === undefined || value === '' ? null : value));
+
+/**
+ * A blank count is null, never 0.
+ *
+ * The blank is mapped before coercion: `z.coerce.number()` turns `''` into 0,
+ * so a union that tried it first would record "0 passengers" for every job
+ * where nobody filled the field in.
+ */
+const optionalCount = z.preprocess(
+  (value) =>
+    value === '' || value === null || value === undefined ? null : value,
+  z.coerce.number().int().min(0).max(99).nullable(),
+);
+
+export const jobSchema = z
+  .object({
+    clientId: optionalId,
+    accountId: optionalId,
+    jobType: z.enum(['AS_DIRECTED', 'TRANSFER', 'AIRPORT_TRANSFER']),
+
+    // Entered in the operator's local time; converted to UTC on save.
+    scheduledDate: z
+      .string()
+      .trim()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use the date picker'),
+    scheduledTime: z
+      .string()
+      .trim()
+      .regex(/^\d{2}:\d{2}$/, 'Use a time like 14:30'),
+
+    pickupText: z.string().trim().min(1, 'Enter the pickup').max(500),
+    dropoffText: z.string().trim().min(1, 'Enter the destination').max(500),
+    viaText: z.string().trim().max(500).optional().or(z.literal('')),
+    pickupLocationId: optionalId,
+    dropoffLocationId: optionalId,
+
+    driverId: optionalId,
+    vehicleId: optionalId,
+
+    passengerName: z.string().trim().max(200).optional().or(z.literal('')),
+    passengerPhone: z.string().trim().max(40).optional().or(z.literal('')),
+    passengerCount: optionalCount,
+    luggageCount: optionalCount,
+    flightNumber: z.string().trim().max(20).optional().or(z.literal('')),
+
+    clientPricePence: priceField,
+    driverPricePence: priceField,
+    zeroValueReason: z.string().trim().max(500).optional().or(z.literal('')),
+
+    notes: z.string().trim().max(5000).optional().or(z.literal('')),
+    internalNotes: z.string().trim().max(5000).optional().or(z.literal('')),
+
+    estimatedMinutes: z.preprocess(
+      (value) =>
+        value === '' || value === null || value === undefined ? null : value,
+      z.coerce
+        .number()
+        .int()
+        .min(0)
+        .max(24 * 60)
+        .nullable(),
+    ),
+  })
+  .superRefine((input, ctx) => {
+    // A flight number on a non-airport job is almost always a mis-selected
+    // job type, and it would never be displayed — so say so rather than
+    // silently dropping it.
+    if (input.flightNumber && input.jobType !== 'AIRPORT_TRANSFER') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['flightNumber'],
+        message: 'Flight numbers belong to airport transfers',
+      });
+    }
+  });
+
+export type JobInput = z.infer<typeof jobSchema>;
+
+/** Combine the two form fields into the single UTC instant the schema stores. */
+export function scheduledAtFrom(
+  input: Pick<JobInput, 'scheduledDate' | 'scheduledTime'>,
+  timeZone?: string,
+): Date {
+  return toUTC(`${input.scheduledDate}T${input.scheduledTime}`, timeZone);
+}
+
+function toData(input: JobInput, timeZone?: string) {
+  return {
+    clientId: input.clientId,
+    accountId: input.accountId,
+    jobType: input.jobType,
+    scheduledAt: scheduledAtFrom(input, timeZone),
+    estimatedMinutes: input.estimatedMinutes,
+
+    pickupText: tidy(input.pickupText),
+    pickupLocationId: input.pickupLocationId,
+    dropoffText: tidy(input.dropoffText),
+    dropoffLocationId: input.dropoffLocationId,
+    viaText: emptyToNull(input.viaText),
+
+    driverId: input.driverId,
+    vehicleId: input.vehicleId,
+
+    passengerName: emptyToNull(input.passengerName),
+    passengerPhone: emptyToNull(input.passengerPhone),
+    passengerCount: input.passengerCount,
+    luggageCount: input.luggageCount,
+    // Only airport transfers carry one; the schema refuses it elsewhere.
+    flightNumber:
+      input.jobType === 'AIRPORT_TRANSFER' ? emptyToNull(input.flightNumber) : null,
+
+    clientPricePence: input.clientPricePence,
+    driverPricePence: input.driverPricePence,
+    zeroValueReason: emptyToNull(input.zeroValueReason),
+
+    notes: emptyToNull(input.notes),
+    internalNotes: emptyToNull(input.internalNotes),
+  };
+}
+
+// ------------------------------------------------------------------ listing
+
+export interface JobListFilters {
+  status: string | null;
+  jobType: string | null;
+  driverId: string | null;
+  clientId: string | null;
+  accountId: string | null;
+  vehicleId: string | null;
+  /** Inclusive, as local date strings. */
+  from: string | null;
+  to: string | null;
+  unpricedOnly: boolean;
+}
+
+/** Columns the list may be sorted by, mapped to Prisma order clauses. */
+const SORTABLE = {
+  scheduledAt: (dir: 'asc' | 'desc') => ({ scheduledAt: dir }),
+  reference: (dir: 'asc' | 'desc') => ({ reference: dir }),
+  client: (dir: 'asc' | 'desc') => ({ client: { name: dir } }),
+  driver: (dir: 'asc' | 'desc') => ({ driver: { name: dir } }),
+  clientPrice: (dir: 'asc' | 'desc') => ({ clientPricePence: dir }),
+  grossProfit: (dir: 'asc' | 'desc') => ({ finance: { grossProfitPence: dir } }),
+} as const;
+
+export type JobSortKey = keyof typeof SORTABLE;
+
+export function isSortableJobKey(key: string | null): key is JobSortKey {
+  // `in` walks the prototype chain, so `?sort=__proto__` would pass and then
+  // resolve to Object.prototype rather than an order-by builder. The sort key
+  // comes straight from the URL, so own-property is the only safe test.
+  return key !== null && Object.hasOwn(SORTABLE, key);
+}
+
+/**
+ * "Unpriced" in SQL: no positive client price, and no written reason.
+ *
+ * Kept beside `hasPriceOrReason` in `job-status.ts` deliberately — the two
+ * must agree, and a comment is cheaper than a divergence. `zeroValueReason`
+ * is stored trimmed-or-null, so an empty-string check is not needed here.
+ */
+export const UNPRICED_WHERE = {
+  AND: [
+    { OR: [{ clientPricePence: null }, { clientPricePence: { lte: 0 } }] },
+    { zeroValueReason: null },
+  ],
+} satisfies Prisma.JobWhereInput;
+
+export function buildJobWhere(
+  params: Pick<ListParams, 'q'>,
+  filters: JobListFilters,
+  timeZone?: string,
+): Prisma.JobWhereInput {
+  const where: Prisma.JobWhereInput = {};
+
+  if (filters.status) where.status = filters.status as JobStatus;
+  if (filters.jobType) where.jobType = filters.jobType as JobType;
+  if (filters.driverId) where.driverId = filters.driverId;
+  if (filters.clientId) where.clientId = filters.clientId;
+  if (filters.accountId) where.accountId = filters.accountId;
+  if (filters.vehicleId) where.vehicleId = filters.vehicleId;
+
+  if (filters.from || filters.to) {
+    where.scheduledAt = {
+      // The operator types a London date; the boundary has to be the start of
+      // that day in London, which is not midnight UTC for half the year.
+      ...(filters.from ? { gte: toUTC(`${filters.from}T00:00`, timeZone) } : {}),
+      ...(filters.to ? { lte: toUTC(`${filters.to}T23:59:59`, timeZone) } : {}),
+    };
+  }
+
+  const and: Prisma.JobWhereInput[] = [];
+  if (filters.unpricedOnly) and.push(UNPRICED_WHERE);
+
+  if (params.q) {
+    const contains = { contains: params.q, mode: 'insensitive' as const };
+    and.push({
+      OR: [
+        { reference: contains },
+        { pickupText: contains },
+        { dropoffText: contains },
+        { client: { name: contains } },
+        { driver: { name: contains } },
+        { account: { name: contains } },
+      ],
+    });
+  }
+
+  if (and.length > 0) where.AND = and;
+  return where;
+}
+
+const LIST_SELECT = {
+  id: true,
+  reference: true,
+  scheduledAt: true,
+  jobType: true,
+  status: true,
+  pickupText: true,
+  dropoffText: true,
+  clientPricePence: true,
+  driverPricePence: true,
+  zeroValueReason: true,
+  client: { select: { id: true, name: true } },
+  account: { select: { id: true, name: true } },
+  driver: { select: { id: true, name: true } },
+  vehicle: { select: { id: true, registration: true } },
+  finance: { select: { grossProfitPence: true, totalClientPence: true } },
+} satisfies Prisma.JobSelect;
+
+export type JobListRow = Prisma.JobGetPayload<{ select: typeof LIST_SELECT }>;
+
+/**
+ * One page of jobs, plus the counts the header needs.
+ *
+ * The unpriced count is a separate aggregate over the same filter rather than
+ * a count of the current page — "12 unpriced" has to mean twelve in this
+ * view, not twelve on this screen.
+ */
+export async function listJobs(
+  params: ListParams,
+  filters: JobListFilters,
+  timeZone?: string,
+): Promise<{ rows: JobListRow[]; total: number; unpriced: number }> {
+  const where = buildJobWhere(params, filters, timeZone);
+
+  const sortKey = isSortableJobKey(params.sort) ? params.sort : 'scheduledAt';
+  const orderBy = SORTABLE[sortKey](params.dir);
+
+  const [rows, total, unpriced] = await Promise.all([
+    prisma.job.findMany({
+      where,
+      orderBy,
+      skip: params.skip,
+      take: params.take,
+      select: LIST_SELECT,
+    }),
+    prisma.job.count({ where }),
+    prisma.job.count({ where: { ...where, ...UNPRICED_WHERE } }),
+  ]);
+
+  return { rows, total, unpriced };
+}
+
+export async function getJob(id: string) {
+  return prisma.job.findUnique({
+    where: { id },
+    include: {
+      client: true,
+      account: true,
+      driver: { select: { id: true, name: true, reference: true, phone: true } },
+      vehicle: { select: { id: true, registration: true, make: true, model: true } },
+      finance: true,
+      events: { orderBy: { occurredAt: 'asc' } },
+      expenses: true,
+      createdBy: { select: { id: true, name: true } },
+      invoiceLines: {
+        select: {
+          invoice: { select: { id: true, number: true, status: true } },
+        },
+      },
+    },
+  });
+}
+
+// ----------------------------------------------------------------- mutation
+
+/**
+ * Create a job, allocating its reference and writing the `CREATED` event in
+ * the same transaction as the row.
+ *
+ * A job that exists without a creation event would leave a gap in the
+ * timeline that nothing could later reconstruct, so the two are atomic.
+ */
+export async function createJob(
+  input: JobInput,
+  context: AuditContext,
+  timeZone?: string,
+): Promise<{ id: string; reference: string }> {
+  return withJobReference((reference) =>
+    withAudit(
+      'Job',
+      'create',
+      async (tx) => {
+        const created = await tx.job.create({
+          data: {
+            ...toData(input, timeZone),
+            reference,
+            status: 'PENDING',
+            createdById: context.userId ?? null,
+          },
+        });
+
+        await tx.jobEvent.create({
+          data: {
+            jobId: created.id,
+            type: 'CREATED',
+            actorType: 'USER',
+            actorId: context.userId ?? null,
+          },
+        });
+
+        // A price agreed at booking is itself a recorded decision.
+        if (hasPriceOrReason(created)) {
+          await tx.jobEvent.create({
+            data: {
+              jobId: created.id,
+              type: 'PRICE_SET',
+              actorType: 'USER',
+              actorId: context.userId ?? null,
+              metadata: {
+                clientPricePence: created.clientPricePence,
+                driverPricePence: created.driverPricePence,
+              },
+            },
+          });
+        }
+
+        return {
+          entityId: created.id,
+          after: created,
+          result: { id: created.id, reference: created.reference },
+        };
+      },
+      context,
+    ),
+  );
+}
+
+export async function updateJob(
+  id: string,
+  input: JobInput,
+  context: AuditContext,
+  timeZone?: string,
+): Promise<{ id: string }> {
+  return withAudit(
+    'Job',
+    'update',
+    async (tx) => {
+      const before = await tx.job.findUniqueOrThrow({ where: { id } });
+      const after = await tx.job.update({
+        where: { id },
+        data: toData(input, timeZone),
+      });
+
+      await tx.jobEvent.create({
+        data: {
+          jobId: id,
+          type: 'EDITED',
+          actorType: 'USER',
+          actorId: context.userId ?? null,
+        },
+      });
+
+      // Surfaced separately from a general edit, because "who set this price
+      // and when" is the question the legacy system could never answer.
+      if (before.clientPricePence !== after.clientPricePence) {
+        await tx.jobEvent.create({
+          data: {
+            jobId: id,
+            type: 'PRICE_SET',
+            actorType: 'USER',
+            actorId: context.userId ?? null,
+            metadata: {
+              fromPence: before.clientPricePence,
+              toPence: after.clientPricePence,
+            },
+          },
+        });
+      }
+
+      return { entityId: id, before, after, result: { id } };
+    },
+    context,
+  );
+}
+
+/**
+ * Move a job to `next`, or explain why not.
+ *
+ * The guards run against freshly-read state inside the transaction, so a
+ * price removed in another tab between the button rendering and the click
+ * cannot slip a £0 job through to `COMPLETED`.
+ */
+export async function transitionJob(
+  id: string,
+  next: JobStatus,
+  context: AuditContext,
+  options: { zeroValueReason?: string | null } = {},
+): Promise<TransitionResult & { reference?: string }> {
+  const job = await prisma.job.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      reference: true,
+      status: true,
+      driverId: true,
+      vehicleId: true,
+      scheduledAt: true,
+      clientPricePence: true,
+      zeroValueReason: true,
+      invoiceLines: {
+        select: { invoice: { select: { number: true, status: true } } },
+      },
+    },
+  });
+
+  if (!job) {
+    return { ok: false, code: 'INVALID_TRANSITION', message: 'That job no longer exists' };
+  }
+
+  // A reason supplied with the click counts, so completing an unpriced job is
+  // one step rather than "save, then retry".
+  const zeroValueReason =
+    options.zeroValueReason !== undefined && options.zeroValueReason !== null
+      ? emptyToNull(options.zeroValueReason)
+      : job.zeroValueReason;
+
+  const locked = job.invoiceLines
+    .map((line) => line.invoice)
+    .find((invoice) => invoice && ['SENT', 'PAID'].includes(invoice.status));
+
+  // Only fetched when assignment is actually in play — it costs two queries.
+  const compliance =
+    next === 'ASSIGNED' && job.driverId
+      ? await isDriverCompliantAt(job.driverId, job.scheduledAt, {
+          vehicleId: job.vehicleId,
+        })
+      : null;
+
+  const verdict = canTransition(
+    {
+      status: job.status,
+      driverId: job.driverId,
+      vehicleId: job.vehicleId,
+      clientPricePence: job.clientPricePence,
+      zeroValueReason,
+      lockedByInvoice: locked
+        ? { reference: locked.number, status: locked.status }
+        : null,
+      compliance: compliance
+        ? { compliant: compliance.compliant, reasons: compliance.reasons }
+        : null,
+    },
+    next,
+  );
+
+  if (!verdict.ok) return verdict;
+
+  const eventType = eventTypeForStatus(next);
+
+  await withAudit(
+    'Job',
+    'update',
+    async (tx) => {
+      const before = await tx.job.findUniqueOrThrow({ where: { id } });
+      const after = await tx.job.update({
+        where: { id },
+        data: {
+          status: next,
+          ...(zeroValueReason !== job.zeroValueReason ? { zeroValueReason } : {}),
+        },
+      });
+
+      // Same transaction as the status write, so the log can never disagree
+      // with the column it explains.
+      if (eventType) {
+        await tx.jobEvent.create({
+          data: {
+            jobId: id,
+            type: eventType,
+            actorType: 'USER',
+            actorId: context.userId ?? null,
+            ...(zeroValueReason ? { metadata: { zeroValueReason } } : {}),
+          },
+        });
+      }
+
+      return { entityId: id, before, after, result: null };
+    },
+    context,
+  );
+
+  return { ok: true, reference: job.reference };
+}
+
+// ---------------------------------------------------------------- conflicts
+
+export interface DriverConflict {
+  id: string;
+  reference: string;
+  scheduledAt: Date;
+  pickupText: string;
+  dropoffText: string;
+}
+
+/**
+ * Other live jobs for this driver near `scheduledAt`.
+ *
+ * A warning, never a block (spec 2.1.8). Two airport runs ninety minutes
+ * apart may be perfectly workable, and the operator knows the traffic and the
+ * driver; the system does not. Blocking here would teach people to route
+ * around the system, which is how the legacy spreadsheet happened.
+ */
+export async function findDriverConflicts(
+  driverId: string,
+  scheduledAt: Date,
+  bufferMinutes: number,
+  excludeJobId?: string,
+): Promise<DriverConflict[]> {
+  const window = bufferMinutes * 60 * 1000;
+
+  return prisma.job.findMany({
+    where: {
+      driverId,
+      status: { notIn: ['CANCELLED', 'COMPLETED', 'NO_SHOW'] },
+      scheduledAt: {
+        gte: new Date(scheduledAt.getTime() - window),
+        lte: new Date(scheduledAt.getTime() + window),
+      },
+      ...(excludeJobId ? { id: { not: excludeJobId } } : {}),
+    },
+    select: {
+      id: true,
+      reference: true,
+      scheduledAt: true,
+      pickupText: true,
+      dropoffText: true,
+    },
+    orderBy: { scheduledAt: 'asc' },
+    take: 5,
+  });
+}
+
+/**
+ * The compliance verdict for a proposed driver/vehicle pairing at a proposed
+ * time — what the create form calls before allowing submission (spec 2.1.7).
+ */
+export async function checkAssignmentCompliance(
+  driverId: string | null,
+  vehicleId: string | null,
+  scheduledAt: Date,
+) {
+  if (!driverId) return null;
+  return isDriverCompliantAt(driverId, scheduledAt, { vehicleId });
+}
+
+/** Completed jobs that were never priced — the dashboard tile and the digest. */
+export async function countUnpricedCompleted(): Promise<number> {
+  return prisma.job.count({
+    where: { status: 'COMPLETED', ...UNPRICED_WHERE },
+  });
+}
+
+export async function listUnpricedCompleted(limit = 100) {
+  return prisma.job.findMany({
+    where: { status: 'COMPLETED', ...UNPRICED_WHERE },
+    orderBy: { scheduledAt: 'desc' },
+    take: limit,
+    select: {
+      id: true,
+      reference: true,
+      scheduledAt: true,
+      pickupText: true,
+      dropoffText: true,
+      client: { select: { name: true } },
+      driver: { select: { name: true } },
+    },
+  });
+}
+
+/**
+ * Pre-fill for "duplicate job" and "create return journey" (spec 2.3.8–9).
+ *
+ * The date is deliberately cleared on a duplicate: a copied job with its
+ * original date silently books something for last Tuesday.
+ */
+export function duplicateDefaults(
+  job: {
+    clientId: string | null;
+    accountId: string | null;
+    jobType: JobType;
+    pickupText: string;
+    dropoffText: string;
+    viaText: string | null;
+    driverId: string | null;
+    vehicleId: string | null;
+    passengerName: string | null;
+    passengerPhone: string | null;
+    passengerCount: number | null;
+    luggageCount: number | null;
+    clientPricePence: number | null;
+    driverPricePence: number | null;
+    notes: string | null;
+  },
+  options: { swap?: boolean } = {},
+) {
+  return {
+    clientId: job.clientId ?? '',
+    accountId: job.accountId ?? '',
+    jobType: job.jobType,
+    scheduledDate: '',
+    scheduledTime: '',
+    pickupText: options.swap ? job.dropoffText : job.pickupText,
+    dropoffText: options.swap ? job.pickupText : job.dropoffText,
+    viaText: job.viaText ?? '',
+    driverId: job.driverId ?? '',
+    vehicleId: job.vehicleId ?? '',
+    passengerName: job.passengerName ?? '',
+    passengerPhone: job.passengerPhone ?? '',
+    passengerCount: job.passengerCount ?? '',
+    luggageCount: job.luggageCount ?? '',
+    clientPricePence: job.clientPricePence,
+    driverPricePence: job.driverPricePence,
+    notes: job.notes ?? '',
+  };
+}

@@ -3,9 +3,10 @@ import Link from 'next/link';
 import { PageHeader } from '@/components/page-header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { buildComplianceReport } from '@/lib/compliance-report';
+import { countUnpricedCompleted } from '@/lib/jobs';
 import { pageRequireUser } from '@/lib/page-guards';
 import { prisma } from '@/lib/prisma';
-import { getComplianceThresholds } from '@/lib/settings';
+import { getComplianceThresholds, getSettings } from '@/lib/settings';
 import { cn } from '@/lib/utils';
 
 export const metadata = { title: 'Dashboard' };
@@ -13,14 +14,18 @@ export const metadata = { title: 'Dashboard' };
 export default async function DashboardPage() {
   const user = await pageRequireUser();
 
-  const thresholds = await getComplianceThresholds();
-  const [report, counts] = await Promise.all([
+  const [thresholds, settings] = await Promise.all([
+    getComplianceThresholds(),
+    getSettings(),
+  ]);
+  const [report, counts, unpricedCompleted] = await Promise.all([
     buildComplianceReport(thresholds),
     Promise.all([
       prisma.driver.count({ where: { status: 'ACTIVE' } }),
       prisma.vehicle.count({ where: { status: 'ACTIVE' } }),
       prisma.client.count(),
     ]),
+    countUnpricedCompleted(),
   ]);
 
   const [activeDrivers, activeVehicles, clients] = counts;
@@ -63,6 +68,46 @@ export default async function DashboardPage() {
           tone="muted"
         />
       </div>
+
+      {unpricedCompleted > 0 ? (
+        <Card
+          className={cn(
+            'mb-6',
+            // Red once the backlog is big enough to be a reporting problem
+            // rather than a couple of jobs someone is mid-way through.
+            unpricedCompleted >= settings.unpricedAlertThreshold
+              ? 'border-destructive/50 bg-destructive/5'
+              : 'border-warning/50 bg-warning/5',
+          )}
+          data-testid="unpriced-tile"
+        >
+          <CardContent className="flex items-center justify-between gap-4 p-4">
+            <div>
+              <p
+                className={cn(
+                  'text-sm font-medium',
+                  unpricedCompleted >= settings.unpricedAlertThreshold &&
+                    'text-destructive',
+                )}
+              >
+                {unpricedCompleted} completed job
+                {unpricedCompleted === 1 ? '' : 's'} without a price
+              </p>
+              <p className="text-sm text-muted-foreground">
+                Work that was delivered and never billed. These are invisible to
+                every revenue report until someone prices them.
+              </p>
+            </div>
+            <Link
+              href="/jobs?unpriced=true&all=true&status=COMPLETED"
+              className="inline-flex shrink-0 items-center gap-1 text-sm font-medium hover:underline"
+            >
+              Price them
+              <ArrowRight className="size-4" aria-hidden />
+            </Link>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {blocking > 0 ? (
         <Card className="mb-6 border-destructive/50 bg-destructive/5">

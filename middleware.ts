@@ -37,7 +37,14 @@ export function middleware(request: NextRequest) {
   );
   if (hasSession) return NextResponse.next();
 
-  const loginUrl = new URL('/login', request.url);
+  // Cloned from `nextUrl` rather than built with `new URL(path, request.url)`.
+  // The latter resolves against a host Next reconstructs, which is not
+  // necessarily the host the browser is on — locally it turned 127.0.0.1 into
+  // localhost, a different origin, so the session cookie stopped being sent.
+  // Cloning keeps the origin the visitor actually used.
+  const loginUrl = request.nextUrl.clone();
+  loginUrl.pathname = '/login';
+  loginUrl.search = '';
   // Remember where they were headed so sign-in can return them there.
   if (pathname !== '/') {
     loginUrl.searchParams.set('next', `${pathname}${search}`);
