@@ -1,6 +1,7 @@
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { withAudit } from './audit';
 import { includeDeleted, prisma } from './prisma';
+import { hashPassword } from './password';
 
 /**
  * The transactional guarantee in Phase 0.3: a failed mutation leaves no
@@ -14,9 +15,37 @@ const DATABASE_AVAILABLE = Boolean(process.env.TEST_DATABASE_URL);
 describe.skipIf(!DATABASE_AVAILABLE)('withAudit', () => {
   const createdClients: string[] = [];
 
+  /**
+   * The actor this file audits against.
+   *
+   * Created here rather than taken from the seeded data. The install tests
+   * run in parallel against the same database and hard-delete the users they
+   * create, so a `findFirst({ role: 'ADMIN' })` can hand back a row that is
+   * gone by the time the audit write reaches Postgres — a foreign-key
+   * violation that looks like an audit bug and is really a test racing
+   * another file's fixture.
+   */
+  let actorId = '';
+
+  beforeAll(async () => {
+    const user = await prisma.user.create({
+      data: {
+        email: `audit-actor-${Date.now()}-${Math.random()}@example.test`,
+        name: 'Audit Actor',
+        passwordHash: await hashPassword('audit-actor-password'),
+        role: 'ADMIN',
+      },
+    });
+    actorId = user.id;
+  });
+
   afterAll(async () => {
     for (const id of createdClients) {
       await prisma.auditLog.deleteMany({ where: { entityId: id } });
+    }
+    if (actorId) {
+      await prisma.auditLog.deleteMany({ where: { userId: actorId } });
+      await prisma.$executeRaw`DELETE FROM "User" WHERE id = ${actorId}`;
     }
     await prisma.$disconnect();
   });
@@ -68,7 +97,6 @@ describe.skipIf(!DATABASE_AVAILABLE)('withAudit', () => {
 
   it('records the acting user and IP', async () => {
     const name = `audit-actor-${Date.now()}`;
-    const admin = await prisma.user.findFirst({ where: { role: 'ADMIN' } });
 
     const client = await withAudit(
       'Client',
@@ -79,7 +107,7 @@ describe.skipIf(!DATABASE_AVAILABLE)('withAudit', () => {
         });
         return { entityId: created.id, after: created, result: created };
       },
-      { userId: admin?.id ?? null, ip: '203.0.113.7' },
+      { userId: actorId, ip: '203.0.113.7' },
     );
     createdClients.push(client.id);
 
@@ -87,7 +115,7 @@ describe.skipIf(!DATABASE_AVAILABLE)('withAudit', () => {
       where: { entityId: client.id },
     });
     expect(entry.ip).toBe('203.0.113.7');
-    if (admin) expect(entry.userId).toBe(admin.id);
+    expect(entry.userId).toBe(actorId);
   });
 
   it('rolls the audit entry back when the mutation fails', async () => {
