@@ -112,3 +112,21 @@ export function isRedirectError(error: unknown): boolean {
       (error as { digest: string }).digest.includes('NEXT_HTTP_ERROR_FALLBACK'))
   );
 }
+
+/**
+ * A path with a changing marker, for redirecting back to the page a mutation
+ * was submitted from.
+ *
+ * Redirecting a Server Action to the *same* URL does not reliably re-render:
+ * the write lands and the browser stays put showing the state before it. That
+ * cost hours on the job status control, and it looks to the operator like a
+ * system that ignored the click. Every mutation that returns to its own page
+ * goes through here, so the navigation is always real.
+ *
+ * The marker is dropped from what the page reads — it exists only to make the
+ * URL differ.
+ */
+export function redirectTarget(path: string): string {
+  const separator = path.includes('?') ? '&' : '?';
+  return `${path}${separator}updated=${Date.now()}`;
+}

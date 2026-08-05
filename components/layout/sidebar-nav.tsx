@@ -8,9 +8,11 @@ import {
   ClipboardList,
   Contact,
   FileText,
+  KeyRound,
   LayoutDashboard,
   Settings,
   ShieldCheck,
+  Timer,
   Users,
   Wallet,
   type LucideIcon,
@@ -33,6 +35,8 @@ const ICONS: Record<string, LucideIcon> = {
   ChartNoAxesColumn,
   Settings,
   ShieldCheck,
+  Timer,
+  KeyRound,
 };
 
 export function SidebarNav({

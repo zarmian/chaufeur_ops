@@ -209,6 +209,146 @@ function emptyToNull(value: string | undefined): string | null {
 }
 
 /**
+ * Everything that moves a job's money, beyond the finance panel's own fields.
+ *
+ * Phase 2's totals came only from the panel. Three things were missing, and
+ * each of them changes the answer:
+ *
+ * - **Stop charges** are revenue the panel never saw.
+ * - **Itemised expenses** split three ways by who bears them. Recharged ones
+ *   are revenue; company-borne ones are cost; driver-borne ones are neither,
+ *   and counting them would understate profit on every owner-driver job.
+ * - **Shift-paid work.** When a hired driver's time is covered by a shift,
+ *   the job has no driver payment of its own. Leaving the panel's figure in
+ *   would double-count the driver, or — worse, and more likely — leave a
+ *   stale per-job fee sitting on a job nobody was paid per-job for.
+ */
+export interface JobEconomicsInput {
+  finance: FinanceAmounts | null;
+  /** Falls back to the booking price when no finance record exists yet. */
+  clientPricePence?: number | null;
+  driverPricePence?: number | null;
+  stops?: Array<{ chargePence: number | null }>;
+  expenses?: Array<{ amountPence: number; borneBy: 'CLIENT' | 'COMPANY' | 'DRIVER' }>;
+  /** True when a shift covers the driver's pay for this job. */
+  paidByShift?: boolean;
+}
+
+export interface JobEconomics extends FinanceTotals {
+  stopChargePence: number;
+  rechargedExpensePence: number;
+  companyExpensePence: number;
+  driverBorneExpensePence: number;
+  paidByShift: boolean;
+}
+
+/**
+ * A stored `JobFinance` row as plain numbers.
+ *
+ * `customerHours` and `driverHours` come back from Prisma as `Decimal`, which
+ * is right for the column and wrong for arithmetic here — everything else is
+ * integer pence and hours are the one fractional input. Converting in one
+ * place stops a `Decimal` reaching a multiplication and silently
+ * stringifying.
+ */
+export function financeAmountsFrom(
+  row: {
+    baseFarePence: number;
+    waitTimePence: number;
+    extraChargesPence: number;
+    customerHours: { toNumber(): number } | number | null;
+    customerRatePence: number;
+    driverPaymentPence: number;
+    fuelCostPence: number;
+    otherExpensesPence: number;
+    driverHours: { toNumber(): number } | number | null;
+    driverRatePence: number;
+  } | null,
+): FinanceAmounts | null {
+  if (!row) return null;
+  return {
+    baseFarePence: row.baseFarePence,
+    waitTimePence: row.waitTimePence,
+    extraChargesPence: row.extraChargesPence,
+    customerHours: toNumber(row.customerHours),
+    customerRatePence: row.customerRatePence,
+    driverPaymentPence: row.driverPaymentPence,
+    fuelCostPence: row.fuelCostPence,
+    otherExpensesPence: row.otherExpensesPence,
+    driverHours: toNumber(row.driverHours),
+    driverRatePence: row.driverRatePence,
+  };
+}
+
+function toNumber(value: { toNumber(): number } | number | null): number | null {
+  if (value === null) return null;
+  return typeof value === 'number' ? value : value.toNumber();
+}
+
+export function jobEconomics(input: JobEconomicsInput): JobEconomics {
+  const stopChargePence = sumPence(
+    ...(input.stops ?? []).map((stop) => stop.chargePence),
+  );
+
+  const expenses = input.expenses ?? [];
+  const by = (bearer: 'CLIENT' | 'COMPANY' | 'DRIVER') =>
+    sumPence(
+      ...expenses
+        .filter((expense) => expense.borneBy === bearer)
+        .map((expense) => expense.amountPence),
+    );
+
+  const rechargedExpensePence = by('CLIENT');
+  const companyExpensePence = by('COMPANY');
+  const driverBorneExpensePence = by('DRIVER');
+
+  // With no finance record the booking prices stand in, so a job priced at
+  // the phone and never opened in the panel still reports honestly.
+  const amounts: FinanceAmounts = input.finance ?? {
+    baseFarePence: input.clientPricePence ?? 0,
+    driverPaymentPence: input.driverPricePence ?? 0,
+  };
+
+  const base = calculateFinance({
+    ...amounts,
+    // Driver pay lives on the shift, not here.
+    ...(input.paidByShift ? { driverPaymentPence: 0, driverHours: null } : {}),
+  });
+
+  const totalClientPence =
+    base.totalClientPence + stopChargePence + rechargedExpensePence;
+  const totalCostsPence = base.totalCostsPence + companyExpensePence;
+  const grossProfitPence = totalClientPence - totalCostsPence;
+
+  return {
+    totalClientPence,
+    totalCostsPence,
+    grossProfitPence,
+    marginPct: marginPct(totalClientPence, grossProfitPence),
+    stopChargePence,
+    rechargedExpensePence,
+    companyExpensePence,
+    driverBorneExpensePence,
+    paidByShift: Boolean(input.paidByShift),
+  };
+}
+
+/**
+ * Billed hours for an as-directed job.
+ *
+ * The minimum-hours rule is the point (spec 2.5.6.2): a two-hour booking on a
+ * four-hour minimum bills four. Applying it here rather than in the form
+ * means the quote, the invoice and the report cannot disagree.
+ */
+export function billedHours(
+  hoursBooked: number | null,
+  minimumHours: number | null,
+): number | null {
+  if (hoursBooked === null) return null;
+  return Math.max(hoursBooked, minimumHours ?? 0);
+}
+
+/**
  * Free waiting-time allowance before the clock starts billing.
  *
  * Airport arrivals get longer because the wait is largely outside the

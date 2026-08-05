@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   billableWaitMinutes,
+  billedHours,
   calculateFinance,
   DEFAULT_FREE_WAIT_MINUTES,
   financeSchema,
   freeWaitMinutesFor,
   hourlyCharge,
+  jobEconomics,
   prefillFromBooking,
   toFinanceData,
 } from './job-finance';
@@ -263,5 +265,122 @@ describe('waiting time', () => {
 
   it('rounds part-minutes down, in the passenger’s favour', () => {
     expect(billableWaitMinutes(60.9, 45)).toBe(15);
+  });
+});
+
+describe('jobEconomics', () => {
+  const finance = { baseFarePence: 20000, driverPaymentPence: 12000 };
+
+  it('adds stop charges to revenue', () => {
+    // Revenue the Phase 2 panel never saw.
+    const result = jobEconomics({
+      finance,
+      stops: [{ chargePence: 1500 }, { chargePence: 1000 }],
+    });
+    expect(result.stopChargePence).toBe(2500);
+    expect(result.totalClientPence).toBe(22500);
+  });
+
+  it('ignores stops with no charge', () => {
+    const result = jobEconomics({
+      finance,
+      stops: [{ chargePence: null }, { chargePence: 1000 }],
+    });
+    expect(result.stopChargePence).toBe(1000);
+  });
+
+  it('splits expenses three ways by who bears them', () => {
+    const result = jobEconomics({
+      finance,
+      expenses: [
+        { amountPence: 1500, borneBy: 'CLIENT' },
+        { amountPence: 4000, borneBy: 'COMPANY' },
+        { amountPence: 900, borneBy: 'DRIVER' },
+      ],
+    });
+    // Recharged is revenue.
+    expect(result.totalClientPence).toBe(21500);
+    // Company-borne is cost.
+    expect(result.totalCostsPence).toBe(16000);
+    // Driver-borne is neither — counting it would understate profit on every
+    // owner-driver job.
+    expect(result.driverBorneExpensePence).toBe(900);
+    expect(result.grossProfitPence).toBe(5500);
+  });
+
+  it('drops the per-job driver payment when a shift covers it', () => {
+    // Leaving it in would double-count the driver, or leave a stale per-job
+    // fee on a job nobody was paid per-job for.
+    const result = jobEconomics({ finance, paidByShift: true });
+    expect(result.totalCostsPence).toBe(0);
+    expect(result.grossProfitPence).toBe(20000);
+    expect(result.paidByShift).toBe(true);
+  });
+
+  it('keeps company expenses on a shift-paid job', () => {
+    // The fuel was still bought; only the driver's time moved to the shift.
+    const result = jobEconomics({
+      finance,
+      paidByShift: true,
+      expenses: [{ amountPence: 4000, borneBy: 'COMPANY' }],
+    });
+    expect(result.totalCostsPence).toBe(4000);
+  });
+
+  it('falls back to the booking prices when there is no finance record', () => {
+    // A job priced on the phone and never opened in the panel still reports
+    // honestly.
+    const result = jobEconomics({
+      finance: null,
+      clientPricePence: 12550,
+      driverPricePence: 8000,
+    });
+    expect(result.totalClientPence).toBe(12550);
+    expect(result.totalCostsPence).toBe(8000);
+  });
+
+  it('reports nothing for an unpriced job with no finance record', () => {
+    const result = jobEconomics({
+      finance: null,
+      clientPricePence: null,
+      driverPricePence: null,
+    });
+    expect(result.totalClientPence).toBe(0);
+    expect(result.marginPct).toBeNull();
+  });
+
+  it('combines stops, expenses and hourly revenue', () => {
+    const result = jobEconomics({
+      finance: {
+        baseFarePence: 5000,
+        customerHours: 4,
+        customerRatePence: 4500,
+        driverPaymentPence: 10000,
+      },
+      stops: [{ chargePence: 1000 }],
+      expenses: [{ amountPence: 1500, borneBy: 'CLIENT' }],
+    });
+    // 5000 base + 18000 hourly + 1000 stop + 1500 recharged.
+    expect(result.totalClientPence).toBe(25500);
+    expect(result.totalCostsPence).toBe(10000);
+  });
+});
+
+describe('billedHours', () => {
+  it('applies the minimum-hours rule', () => {
+    // A two-hour booking on a four-hour minimum bills four.
+    expect(billedHours(2, 4)).toBe(4);
+  });
+
+  it('bills the actual hours when they exceed the minimum', () => {
+    expect(billedHours(6, 4)).toBe(6);
+  });
+
+  it('bills the booked hours when there is no minimum', () => {
+    expect(billedHours(2, null)).toBe(2);
+  });
+
+  it('is null when no hours were booked — not an hourly job', () => {
+    expect(billedHours(null, 4)).toBeNull();
   });
 });

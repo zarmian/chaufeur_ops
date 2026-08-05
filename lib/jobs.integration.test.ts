@@ -271,6 +271,26 @@ describe.skipIf(!DATABASE_AVAILABLE)('the unpriced filter', () => {
     await raw.$disconnect();
   });
 
+  it('counts unpriced within the current filter, not across the database', async () => {
+    // The spread that used to build this count replaced the filter's own AND
+    // clause, so the tally ignored the search and described the whole table.
+    const marker = `Unpriced Scope Fixture ${Date.now()}`;
+    const unpricedJob = await createJob(jobInput({ pickupText: marker }), audit);
+    const priced = await createJob(
+      jobInput({ pickupText: marker, clientPricePence: '125.50' }),
+      audit,
+    );
+    jobIds.push(unpricedJob.id, priced.id);
+
+    // No unpriced filter — just a search. The count must describe the search.
+    const { total, unpriced } = await listJobs(
+      { ...listParams, q: marker },
+      noFilters,
+    );
+    expect(total).toBe(2);
+    expect(unpriced).toBe(1);
+  });
+
   it('matches exactly the jobs the predicate calls unpriced', async () => {
     // A unique pickup so the assertion sees only these three rows. Without it
     // the query returns page one of every unpriced job in the database, and
@@ -305,14 +325,25 @@ describe.skipIf(!DATABASE_AVAILABLE)('the unpriced filter', () => {
   });
 
   it('counts unpriced jobs across the whole filter, not just the page', async () => {
+    // Creates its own, so the assertion holds on an empty database as well as
+    // a seeded one.
+    const marker = `Unpriced Count Fixture ${Date.now()}`;
+    for (let i = 0; i < 3; i += 1) {
+      const created = await createJob(jobInput({ pickupText: marker }), audit);
+      jobIds.push(created.id);
+    }
+
     const { rows, total, unpriced } = await listJobs(
-      { ...listParams, pageSize: 1, take: 1 },
+      { ...listParams, pageSize: 1, take: 1, q: marker },
       { ...noFilters, unpricedOnly: true },
     );
+
     // One row comes back, but the counts describe the whole filter — "12
     // unpriced" has to mean twelve in this view, not twelve on this screen.
+    // The invariant is that relationship, not an exact tally: the suite runs
+    // in parallel against a shared database.
     expect(rows).toHaveLength(1);
-    expect(unpriced).toBeGreaterThan(1);
+    expect(unpriced).toBe(3);
     expect(total).toBe(unpriced);
   });
 
