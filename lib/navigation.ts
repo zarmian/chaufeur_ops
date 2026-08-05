@@ -59,9 +59,23 @@ export const NAVIGATION: NavSection[] = [
         matchPrefix: true,
       },
       {
+        href: '/shifts',
+        label: 'Shifts',
+        icon: 'Timer',
+        capability: 'viewJobs',
+        matchPrefix: true,
+      },
+      {
         href: '/vehicles',
         label: 'Vehicles',
         icon: 'Car',
+        capability: 'viewJobs',
+        matchPrefix: true,
+      },
+      {
+        href: '/rentals',
+        label: 'Rentals',
+        icon: 'KeyRound',
         capability: 'viewJobs',
         matchPrefix: true,
       },
