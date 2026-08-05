@@ -20,9 +20,13 @@ import { formatDate, formatDateTime } from '@/lib/dates';
 import { buildTimeline, ACTOR_LABELS } from '@/lib/job-events';
 import { allowedTransitions, hasPriceOrReason } from '@/lib/job-status';
 import { JOB_TYPES } from '@/lib/enum-options';
-import { formatGBP, marginPct } from '@/lib/money';
+import { formatGBP } from '@/lib/money';
 import { filterValue, type SearchParams } from '@/lib/list-params';
 import { pageRequireCapability } from '@/lib/page-guards';
+import { defaultExpenseBearer, resolveEngagement } from '@/lib/engagement';
+import { financeAmountsFrom, jobEconomics } from '@/lib/job-finance';
+import { engagementPeriodsFor } from '@/lib/shift-store';
+import { ExpensesPanel } from './expenses-panel';
 import { StatusControl } from './status-control';
 
 export const metadata = { title: 'Job' };
@@ -40,6 +44,7 @@ export default async function JobDetailPage({
   // A refused transition comes back on the URL, so the message survives the
   // navigation and can be linked to.
   const statusError = filterValue(query, 'statusError');
+  const expenseError = filterValue(query, 'expenseError');
 
   const job = await getJob(id);
   if (!job) notFound();
@@ -56,9 +61,22 @@ export default async function JobDetailPage({
       : null;
 
   const invoice = job.invoiceLines[0]?.invoice ?? null;
-  const revenue = job.finance?.totalClientPence ?? job.clientPricePence ?? 0;
-  const profit = job.finance?.grossProfitPence ?? null;
-  const margin = profit === null ? null : marginPct(revenue, profit);
+
+  // The terms this job was worked under decide who bears an expense by
+  // default, and whether the driver was paid per job at all.
+  const engagement = job.driverId
+    ? resolveEngagement(job, await engagementPeriodsFor(job.driverId))
+    : null;
+
+  const economics = jobEconomics({
+    finance: financeAmountsFrom(job.finance),
+    clientPricePence: job.clientPricePence,
+    driverPricePence: job.driverPricePence,
+    stops: job.stops,
+    expenses: job.expenses,
+    paidByShift: Boolean(job.shiftId),
+  });
+  const margin = economics.marginPct;
 
   return (
     <>
@@ -209,6 +227,68 @@ export default async function JobDetailPage({
             </CardContent>
           </Card>
 
+          {job.stops.length > 0 ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Stops</CardTitle>
+                <CardDescription>
+                  Between the pickup and the destination. Stop charges are
+                  revenue on top of the fare.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ol className="divide-y">
+                  {job.stops.map((stop) => (
+                    <li
+                      key={stop.id}
+                      className="flex items-center justify-between gap-4 py-2.5"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium">
+                          {stop.sequence}. {stop.address}
+                        </p>
+                        {stop.waitMinutes ? (
+                          <p className="text-xs text-muted-foreground">
+                            Waited {stop.waitMinutes} minutes
+                          </p>
+                        ) : null}
+                      </div>
+                      <span className="tabular whitespace-nowrap text-sm">
+                        {stop.chargePence === null
+                          ? '—'
+                          : formatGBP(stop.chargePence)}
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {maySeeFinance ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Expenses</CardTitle>
+                <CardDescription>
+                  Parking, congestion charges and tolls. Who bears each one
+                  decides whether it is revenue, cost, or neither.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ExpensesPanel
+                  jobId={job.id}
+                  expenses={job.expenses}
+                  defaultBearer={defaultExpenseBearer(
+                    engagement?.kind ?? 'OWNER_DRIVER',
+                    'PARKING',
+                  )}
+                  mayEdit={can(user, 'editJobFinances')}
+                  error={expenseError}
+                />
+              </CardContent>
+            </Card>
+          ) : null}
+
           <Card>
             <CardHeader>
               <CardTitle>Timeline</CardTitle>
@@ -291,32 +371,43 @@ export default async function JobDetailPage({
                   <Row label="Zero-value reason">{job.zeroValueReason}</Row>
                 ) : null}
 
-                {job.finance ? (
-                  <>
-                    <div className="border-t pt-3" />
-                    <Row label="Revenue">
-                      {formatGBP(job.finance.totalClientPence)}
-                    </Row>
-                    <Row label="Costs">{formatGBP(job.finance.totalCostsPence)}</Row>
-                    <Row label="Gross profit">
-                      <span
-                        className={
-                          job.finance.grossProfitPence < 0
-                            ? 'font-medium text-destructive'
-                            : 'font-medium'
-                        }
-                      >
-                        {formatGBP(job.finance.grossProfitPence)}
-                        {margin !== null ? ` · ${margin.toFixed(1)}%` : ''}
-                      </span>
-                    </Row>
-                  </>
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    No finance record yet. Opening the panel pre-fills it from
-                    the booking prices.
+                <div className="border-t pt-3" />
+                {economics.stopChargePence > 0 ? (
+                  <Row label="Stop charges">
+                    {formatGBP(economics.stopChargePence)}
+                  </Row>
+                ) : null}
+                {economics.rechargedExpensePence > 0 ? (
+                  <Row label="Recharged expenses">
+                    {formatGBP(economics.rechargedExpensePence)}
+                  </Row>
+                ) : null}
+                <Row label="Revenue">{formatGBP(economics.totalClientPence)}</Row>
+                <Row label="Costs">{formatGBP(economics.totalCostsPence)}</Row>
+                {economics.paidByShift && job.shift ? (
+                  <p className="text-xs text-muted-foreground">
+                    The driver was paid for{' '}
+                    <Link
+                      href={`/shifts/${job.shift.id}`}
+                      className="underline hover:no-underline"
+                    >
+                      {job.shift.reference}
+                    </Link>
+                    , not for this job, so no driver fee is counted here.
                   </p>
-                )}
+                ) : null}
+                <Row label="Gross profit">
+                  <span
+                    className={
+                      economics.grossProfitPence < 0
+                        ? 'font-medium text-destructive'
+                        : 'font-medium'
+                    }
+                  >
+                    {formatGBP(economics.grossProfitPence)}
+                    {margin !== null ? ` · ${margin.toFixed(1)}%` : ''}
+                  </span>
+                </Row>
 
                 {can(user, 'editJobFinances') ? (
                   <Button asChild variant="outline" className="w-full">

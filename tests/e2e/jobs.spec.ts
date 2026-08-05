@@ -294,21 +294,98 @@ test.describe('jobs', () => {
   test('filter state survives a reload, so a view can be shared', async ({ page }) => {
     await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
 
-    await page.goto('/jobs?all=true&sort=reference&dir=desc');
+    // The requirement is that the whole view lives in the URL (spec 2.2.8):
+    // the legacy Overview kept its search in memory and lost it on refresh.
+    // Asserted on the controls rather than on rows, because other tests
+    // running in parallel are creating jobs the whole time.
+    await page.goto(
+      '/jobs?all=true&status=COMPLETED&jobType=TRANSFER&sort=reference&dir=desc&q=Heathrow',
+    );
 
-    // The reference link of the first row — not the first cell, which is the
-    // bulk-selection checkbox and has no text.
-    const firstRow = page.locator('tbody tr').first().getByRole('link').first();
-    const firstReference = await firstRow.textContent();
-    expect(firstReference).toBeTruthy();
+    await expect(page.locator('#status')).toHaveValue('COMPLETED');
+    await expect(page.locator('#jobType')).toHaveValue('TRANSFER');
+    await expect(page.locator('#q')).toHaveValue('Heathrow');
 
     await page.reload();
 
-    // The legacy Overview kept its search in memory and lost it on refresh.
-    await expect(
-      page.locator('tbody tr').first().getByRole('link').first(),
-    ).toHaveText(firstReference ?? '');
+    await expect(page.locator('#status')).toHaveValue('COMPLETED');
+    await expect(page.locator('#jobType')).toHaveValue('TRANSFER');
+    await expect(page.locator('#q')).toHaveValue('Heathrow');
     await expect(page).toHaveURL(/sort=reference/);
+    await expect(page).toHaveURL(/dir=desc/);
+  });
+
+  test('an as-directed job totals hourly work, a stop and a recharged expense', async ({
+    page,
+  }) => {
+    await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+
+    const pickup = `As Directed ${Date.now()}`;
+    await page.goto('/jobs/new');
+    await page.locator('#jobType').selectOption('AS_DIRECTED');
+    await page.getByLabel('Date').fill(dateIn(5));
+    await page.getByLabel('Time').fill('09:00');
+    await page.getByLabel('Pickup').fill(pickup);
+    await page.getByLabel('Destination').fill('As directed');
+
+    // Two hours booked against a four-hour minimum bills four.
+    await page.locator('#customerHours').fill('2');
+    await page.locator('#customerRate').fill('45.00');
+    await page.locator('#minimumHours').fill('4');
+    await expect(page.getByTestId('hourly-total')).toContainText('£180.00');
+    await expect(page.getByTestId('hourly-total')).toContainText('minimum applied');
+
+    // A stop with its own charge, which is revenue on top of the hourly work.
+    await page.getByRole('button', { name: 'Add a stop' }).click();
+    await page.locator('input[name="stopAddress"]').fill('The Ritz');
+    await page.locator('input[name="stopWait"]').fill('20');
+    await page.locator('input[name="stopCharge"]').fill('15.00');
+
+    await page.getByRole('button', { name: 'Book job' }).click();
+    await expect(page.getByText('The Ritz')).toBeVisible();
+
+    // £180 hourly plus the £15 stop.
+    await expect(page.getByText('£195.00').first()).toBeVisible();
+
+    // A congestion charge recharged to the client is revenue too.
+    await page.locator('#kind').selectOption('CONGESTION_CHARGE');
+    await page.locator('#amount').fill('15.00');
+    await page.locator('#borneBy').selectOption('CLIENT');
+    await Promise.all([
+      page.waitForURL(/[?&](updated|expenseError)=/, { timeout: 15_000 }),
+      page.getByRole('button', { name: 'Add' }).click(),
+    ]);
+
+    await expect(page.getByTestId('expenses-panel')).toContainText(
+      'Congestion charge',
+    );
+    await expect(page.getByText('Recharged').first()).toBeVisible();
+    await expect(page.getByText('£210.00').first()).toBeVisible();
+  });
+
+  test('an expense the driver bears is neither revenue nor cost', async ({ page }) => {
+    await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+
+    await page.goto('/jobs/new');
+    await fillBooking(page, {
+      pickup: `Driver Borne ${Date.now()}`,
+      dropoff: 'Heathrow T5',
+    });
+    await page.getByLabel('Client price').fill('100.00');
+    await page.getByRole('button', { name: 'Book job' }).click();
+    await expect(page.getByTestId('expenses-panel')).toBeVisible();
+
+    await page.locator('#kind').selectOption('FUEL');
+    await page.locator('#amount').fill('40.00');
+    await page.locator('#borneBy').selectOption('DRIVER');
+    await Promise.all([
+      page.waitForURL(/[?&](updated|expenseError)=/, { timeout: 15_000 }),
+      page.getByRole('button', { name: 'Add' }).click(),
+    ]);
+
+    // Counting it would understate profit on every owner-driver job.
+    await expect(page.getByText("Driver's cost")).toBeVisible();
+    await expect(page.getByText('£100.00').first()).toBeVisible();
   });
 
   test('a VIEWER cannot reach the booking form or change a status', async ({

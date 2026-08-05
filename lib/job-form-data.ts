@@ -56,3 +56,28 @@ export async function loadJobFormOptions() {
     locations: locations.map((l) => l.label || l.address),
   };
 }
+
+/**
+ * Shifts currently open, for attributing a hired driver's job.
+ *
+ * Only open ones: attributing a job to a shift that has already been closed
+ * and paid would change what someone was owed after the fact.
+ */
+export async function loadOpenShifts() {
+  const shifts = await prisma.driverShift.findMany({
+    where: { endedAt: null },
+    select: {
+      id: true,
+      reference: true,
+      startedAt: true,
+      driver: { select: { name: true } },
+    },
+    orderBy: { startedAt: 'desc' },
+    take: 100,
+  });
+
+  return shifts.map((shift) => ({
+    id: shift.id,
+    label: `${shift.reference} · ${shift.driver.name}`,
+  }));
+}
