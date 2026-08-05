@@ -276,8 +276,16 @@ test.describe('jobs', () => {
   test('the list shows a No price badge and an unpriced count', async ({ page }) => {
     await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
 
-    // The seeded volume is deliberately about a third unpriced.
-    await page.goto('/jobs?unpriced=true&all=true');
+    // Creates its own unpriced job rather than relying on seeded volume or on
+    // another test having run first — the suite runs in parallel.
+    const pickup = `Unpriced List ${Date.now()}`;
+    await page.goto('/jobs/new');
+    await fillBooking(page, { pickup, dropoff: 'Luton Airport' });
+    await page.getByRole('button', { name: 'Save without a price' }).click();
+    await page.getByRole('button', { name: 'Book job' }).click();
+    await expect(page.getByTestId('unpriced-alert')).toBeVisible();
+
+    await page.goto(`/jobs?unpriced=true&all=true&q=${encodeURIComponent(pickup)}`);
 
     await expect(page.getByTestId('unpriced-badge').first()).toBeVisible();
     await expect(page.getByText(/\d+ unpriced/).first()).toBeVisible();
@@ -286,16 +294,21 @@ test.describe('jobs', () => {
   test('filter state survives a reload, so a view can be shared', async ({ page }) => {
     await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
 
-    await page.goto('/jobs?status=COMPLETED&all=true&sort=reference&dir=desc');
-    const firstReference = await page
-      .getByRole('cell')
-      .first()
-      .textContent();
+    await page.goto('/jobs?all=true&sort=reference&dir=desc');
+
+    // The reference link of the first row — not the first cell, which is the
+    // bulk-selection checkbox and has no text.
+    const firstRow = page.locator('tbody tr').first().getByRole('link').first();
+    const firstReference = await firstRow.textContent();
+    expect(firstReference).toBeTruthy();
 
     await page.reload();
 
     // The legacy Overview kept its search in memory and lost it on refresh.
-    await expect(page.getByRole('cell').first()).toHaveText(firstReference ?? '');
+    await expect(
+      page.locator('tbody tr').first().getByRole('link').first(),
+    ).toHaveText(firstReference ?? '');
+    await expect(page).toHaveURL(/sort=reference/);
   });
 
   test('a VIEWER cannot reach the booking form or change a status', async ({
