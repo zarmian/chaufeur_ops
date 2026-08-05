@@ -26,6 +26,16 @@ function readForm(formData: FormData) {
     insuranceExpiry: formData.get('insuranceExpiry') ?? '',
     insurancePolicyNo: formData.get('insurancePolicyNo') ?? '',
     status: formData.get('status') ?? 'ACTIVE',
+    ownership: formData.get('ownership') ?? 'DRIVER_OWNED',
+    ownerDriverId: formData.get('ownerDriverId') ?? '',
+    acquiredOn: formData.get('acquiredOn') ?? '',
+    disposedOn: formData.get('disposedOn') ?? '',
+    purchasePrice: formData.get('purchasePrice') ?? '',
+    currentOdometer: formData.get('currentOdometer') ?? '',
+    lastServicedOn: formData.get('lastServicedOn') ?? '',
+    lastServiceMiles: formData.get('lastServiceMiles') ?? '',
+    serviceEveryMonths: formData.get('serviceEveryMonths') ?? '',
+    serviceEveryMiles: formData.get('serviceEveryMiles') ?? '',
   };
 }
 

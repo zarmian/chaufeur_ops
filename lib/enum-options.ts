@@ -37,6 +37,17 @@ export const VEHICLE_STATUSES = [
   { value: 'RETIRED', label: 'Retired' },
 ] as const;
 
+/**
+ * How a vehicle is held. `DRIVER_OWNED` is first because it is the default
+ * and the common case — most of the fleet belongs to its driver.
+ */
+export const VEHICLE_OWNERSHIPS = [
+  { value: 'DRIVER_OWNED', label: "Driver's own car" },
+  { value: 'OWNED', label: 'Company owned' },
+  { value: 'FINANCED', label: 'Company, on finance' },
+  { value: 'LEASED', label: 'Company, leased' },
+] as const;
+
 export const ACCOUNT_KINDS = [
   { value: 'INTERNAL', label: 'Internal' },
   { value: 'AGENCY', label: 'Agency' },

@@ -1,5 +1,6 @@
 import { PageHeader } from '@/components/page-header';
 import { pageRequireCapability } from '@/lib/page-guards';
+import { listDriverOptions } from '@/lib/vehicles';
 import { createVehicleAction } from '../actions';
 import { VehicleForm } from '../vehicle-form';
 
@@ -7,6 +8,7 @@ export const metadata = { title: 'New vehicle' };
 
 export default async function NewVehiclePage() {
   await pageRequireCapability('editVehicles');
+  const drivers = await listDriverOptions();
 
   return (
     <>
@@ -18,6 +20,7 @@ export default async function NewVehiclePage() {
         action={createVehicleAction}
         submitLabel="Add vehicle"
         cancelHref="/vehicles"
+        drivers={drivers}
       />
     </>
   );

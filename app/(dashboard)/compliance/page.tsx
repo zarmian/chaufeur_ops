@@ -40,8 +40,21 @@ export default async function CompliancePage({
   const kind = filterValue(params, 'kind');
 
   const dated = [...report.expired, ...report.critical, ...report.warning];
-  const visible = (only === 'unknown' ? report.unknownExpiry : dated)
-    .filter((row) => (only && only !== 'unknown' ? row.level === only : true))
+  const visible = (
+    only === 'unknown'
+      ? report.unknownExpiry
+      : only === 'service'
+        ? report.serviceDue
+        : // Servicing rides along in the same list, because both an overdue
+          // service and a lapsing MOT stop a car earning. It stays out of the
+          // severity counts: only one of the two makes the car illegal.
+          [...dated, ...report.serviceDue]
+  )
+    .filter((row) =>
+      only && only !== 'unknown' && only !== 'service'
+        ? row.level === only
+        : true,
+    )
     .filter((row) => (kind ? row.kind === kind : true));
 
   const tiles = [
@@ -73,6 +86,13 @@ export default async function CompliancePage({
       tone: 'muted' as const,
       hint: 'Counts as non-compliant',
     },
+    {
+      key: 'service',
+      label: 'Service due',
+      count: report.counts.serviceDue,
+      tone: 'warning' as const,
+      hint: 'Does not block assignment',
+    },
   ];
 
   return (
@@ -90,7 +110,7 @@ export default async function CompliancePage({
         }
       />
 
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         {tiles.map((tile) => (
           <Link
             key={tile.key}
@@ -130,6 +150,11 @@ export default async function CompliancePage({
           label="No expiry recorded"
         />
         <FilterLink
+          href="/compliance?level=service"
+          active={only === 'service'}
+          label="Service due"
+        />
+        <FilterLink
           href="/compliance?kind=DRIVER"
           active={kind === 'DRIVER'}
           label="Drivers"
@@ -147,7 +172,8 @@ export default async function CompliancePage({
             report.counts.expired +
               report.counts.critical +
               report.counts.warning +
-              report.counts.unknownExpiry ===
+              report.counts.unknownExpiry +
+              report.counts.serviceDue ===
             0
               ? 'Everything is in date'
               : 'Nothing matches that filter'
