@@ -11,6 +11,7 @@ import {
 } from './job-status';
 import type { ListParams } from './list-params';
 import { billedHours, calculateFinance } from './job-finance';
+import { noteLocationUse } from './pricing/config';
 import { parseMoney } from './money';
 import { vehicleAvailableAt, type RentalRefusal } from './rentals';
 import { prisma } from './prisma';
@@ -140,6 +141,20 @@ export const jobSchema = z
     driverPricePence: priceField,
     zeroValueReason: z.string().trim().max(500).optional().or(z.literal('')),
 
+    /**
+     * What the rate card suggested, and which rule said so — spec 4.2.7 and
+     * 4.2.8.
+     *
+     * The suggestion is recorded, never trusted: the saved price is whatever
+     * is in the price field, and these exist so the audit entry can say what
+     * the card offered alongside what the operator actually agreed. A fare
+     * that departs from the card is a commercial decision, and the whole
+     * point of recording it is being able to see how often it happens.
+     */
+    rateCardRuleId: optionalId,
+    suggestedClientPricePence: priceField,
+    suggestedDriverPricePence: priceField,
+
     notes: z.string().trim().max(5000).optional().or(z.literal('')),
     internalNotes: z.string().trim().max(5000).optional().or(z.literal('')),
 
@@ -232,12 +247,48 @@ function toData(input: JobInput, timeZone?: string) {
     clientPricePence: input.clientPricePence,
     driverPricePence: input.driverPricePence,
     zeroValueReason: emptyToNull(input.zeroValueReason),
+    rateCardRuleId: input.rateCardRuleId,
 
     notes: emptyToNull(input.notes),
     internalNotes: emptyToNull(input.internalNotes),
 
     shiftId: input.shiftId,
     engagementKind: input.engagementKind,
+  };
+}
+
+/**
+ * What the rate card offered, and whether the operator took it — spec 4.2.8.
+ *
+ * Recorded on the `PRICE_SET` event rather than only in the audit snapshot,
+ * because the question this answers is about a decision, not a field: an
+ * override that happens on one job in twenty is a rate card working, and one
+ * that happens on nineteen is a rate card nobody believes.
+ *
+ * Absent entirely when nothing was suggested, so the metadata never implies
+ * a card had an opinion it did not have.
+ */
+function rateCardMetadata(
+  input: JobInput,
+  saved: { clientPricePence: number | null; driverPricePence: number | null },
+): Record<string, unknown> {
+  if (!input.rateCardRuleId || input.suggestedClientPricePence === null) {
+    return {};
+  }
+
+  const overridden = saved.clientPricePence !== input.suggestedClientPricePence;
+
+  return {
+    rateCardRuleId: input.rateCardRuleId,
+    suggestedClientPricePence: input.suggestedClientPricePence,
+    suggestedDriverPricePence: input.suggestedDriverPricePence,
+    priceSource: overridden ? 'OVERRIDE' : 'RATE_CARD',
+    ...(overridden
+      ? {
+          overrideDeltaPence:
+            (saved.clientPricePence ?? 0) - input.suggestedClientPricePence,
+        }
+      : {}),
   };
 }
 
@@ -474,6 +525,8 @@ export async function createJob(
   context: AuditContext,
   timeZone?: string,
 ): Promise<{ id: string; reference: string }> {
+  noteLocationsUsed(input);
+
   return withJobReference((reference) =>
     withAudit(
       'Job',
@@ -516,6 +569,7 @@ export async function createJob(
               metadata: {
                 clientPricePence: created.clientPricePence,
                 driverPricePence: created.driverPricePence,
+                ...rateCardMetadata(input, created),
               },
             },
           });
@@ -532,12 +586,29 @@ export async function createJob(
   );
 }
 
+/**
+ * Bump the use count of any saved location this booking named — spec 4.1.6.
+ *
+ * Deliberately outside the transaction and never awaited into the caller's
+ * error path: it orders an autocomplete list, and a booking must not fail
+ * because a counter did.
+ */
+function noteLocationsUsed(input: JobInput): void {
+  void noteLocationUse([
+    input.pickupText,
+    input.dropoffText,
+    ...input.stops.map((stop) => stop.address),
+  ]);
+}
+
 export async function updateJob(
   id: string,
   input: JobInput,
   context: AuditContext,
   timeZone?: string,
 ): Promise<{ id: string }> {
+  noteLocationsUsed(input);
+
   return withAudit(
     'Job',
     'update',
@@ -575,6 +646,7 @@ export async function updateJob(
             metadata: {
               fromPence: before.clientPricePence,
               toPence: after.clientPricePence,
+              ...rateCardMetadata(input, after),
             },
           },
         });

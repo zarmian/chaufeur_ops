@@ -1,10 +1,11 @@
-import { Globe, Palette, ShieldCheck, Upload } from 'lucide-react';
+import { Globe, Palette, ShieldCheck, Table2, Upload } from 'lucide-react';
 import Link from 'next/link';
 import { PageHeader } from '@/components/page-header';
 import { Card, CardContent } from '@/components/ui/card';
 import { getBranding } from '@/lib/branding-store';
 import { getLocaleConfig } from '@/lib/locale-store';
 import { pageRequireCapability } from '@/lib/page-guards';
+import { prisma } from '@/lib/prisma';
 import { getSettings } from '@/lib/settings';
 
 export const metadata = { title: 'Settings' };
@@ -12,11 +13,19 @@ export const metadata = { title: 'Settings' };
 export default async function SettingsPage() {
   await pageRequireCapability('manageSettings');
 
-  const [branding, locale, settings] = await Promise.all([
+  const [branding, locale, settings, defaultCard] = await Promise.all([
     getBranding(),
     getLocaleConfig(),
     getSettings(),
+    prisma.rateCard.findFirst({
+      where: { isDefault: true },
+      select: { name: true, _count: { select: { rules: true } } },
+    }),
   ]);
+
+  const pricing = defaultCard
+    ? `${defaultCard.name} · ${defaultCard._count.rules} rule${defaultCard._count.rules === 1 ? '' : 's'}`
+    : 'No default rate card';
 
   // Each card shows what is configured now, so the landing page answers
   // "what is this install set to" without opening four screens.
@@ -34,6 +43,13 @@ export default async function SettingsPage() {
       title: 'Locale',
       description: 'Currency, language, timezone, tax and distance units.',
       current: `${locale.currency} · ${locale.timeZone}`,
+    },
+    {
+      href: '/settings/pricing',
+      icon: Table2,
+      title: 'Pricing',
+      description: 'Zones, rate cards and the saved addresses that feed them.',
+      current: pricing,
     },
     {
       href: '/settings/compliance',
