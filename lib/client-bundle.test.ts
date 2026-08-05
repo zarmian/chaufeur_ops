@@ -31,6 +31,8 @@ const SERVER_ONLY_PACKAGES = [
   '@prisma/client',
   '@node-rs/argon2',
   '@vercel/blob',
+  'puppeteer-core',
+  '@sparticuz/chromium',
   'next/server',
   'next/headers',
   'next/cache',
