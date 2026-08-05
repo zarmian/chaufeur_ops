@@ -242,6 +242,49 @@ export interface JobEconomics extends FinanceTotals {
   paidByShift: boolean;
 }
 
+/**
+ * A stored `JobFinance` row as plain numbers.
+ *
+ * `customerHours` and `driverHours` come back from Prisma as `Decimal`, which
+ * is right for the column and wrong for arithmetic here — everything else is
+ * integer pence and hours are the one fractional input. Converting in one
+ * place stops a `Decimal` reaching a multiplication and silently
+ * stringifying.
+ */
+export function financeAmountsFrom(
+  row: {
+    baseFarePence: number;
+    waitTimePence: number;
+    extraChargesPence: number;
+    customerHours: { toNumber(): number } | number | null;
+    customerRatePence: number;
+    driverPaymentPence: number;
+    fuelCostPence: number;
+    otherExpensesPence: number;
+    driverHours: { toNumber(): number } | number | null;
+    driverRatePence: number;
+  } | null,
+): FinanceAmounts | null {
+  if (!row) return null;
+  return {
+    baseFarePence: row.baseFarePence,
+    waitTimePence: row.waitTimePence,
+    extraChargesPence: row.extraChargesPence,
+    customerHours: toNumber(row.customerHours),
+    customerRatePence: row.customerRatePence,
+    driverPaymentPence: row.driverPaymentPence,
+    fuelCostPence: row.fuelCostPence,
+    otherExpensesPence: row.otherExpensesPence,
+    driverHours: toNumber(row.driverHours),
+    driverRatePence: row.driverRatePence,
+  };
+}
+
+function toNumber(value: { toNumber(): number } | number | null): number | null {
+  if (value === null) return null;
+  return typeof value === 'number' ? value : value.toNumber();
+}
+
 export function jobEconomics(input: JobEconomicsInput): JobEconomics {
   const stopChargePence = sumPence(
     ...(input.stops ?? []).map((stop) => stop.chargePence),
