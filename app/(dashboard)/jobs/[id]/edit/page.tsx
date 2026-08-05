@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation';
 import { PageHeader } from '@/components/page-header';
 import { getPartsInZone } from '@/lib/dates';
-import { loadJobFormOptions } from '@/lib/job-form-data';
+import { loadJobFormOptions, loadOpenShifts } from '@/lib/job-form-data';
 import { getJob } from '@/lib/jobs';
 import { pageRequireCapability } from '@/lib/page-guards';
 import { updateJobAction } from '../../actions';
@@ -21,7 +21,11 @@ export default async function EditJobPage({
   await pageRequireCapability('editJobs');
   const { id } = await params;
 
-  const [job, options] = await Promise.all([getJob(id), loadJobFormOptions()]);
+  const [job, options, openShifts] = await Promise.all([
+    getJob(id),
+    loadJobFormOptions(),
+    loadOpenShifts(),
+  ]);
   if (!job) notFound();
 
   // The instant is stored in UTC; the form edits it in the operator's zone,
@@ -41,6 +45,7 @@ export default async function EditJobPage({
         drivers={options.drivers}
         vehicles={options.vehicles}
         locations={options.locations}
+        openShifts={openShifts}
         values={{
           clientId: job.clientId ?? '',
           accountId: job.accountId ?? '',
@@ -59,6 +64,19 @@ export default async function EditJobPage({
           flightNumber: job.flightNumber ?? '',
           clientPrice: asPounds(job.clientPricePence),
           driverPrice: asPounds(job.driverPricePence),
+          customerHours: job.finance?.customerHours?.toString() ?? '',
+          customerRate: asPounds(job.finance?.customerRatePence ?? null),
+          minimumHours: '',
+          shiftId: job.shiftId ?? '',
+          stops: job.stops
+            .slice()
+            .sort((a, b) => a.sequence - b.sequence)
+            .map((stop) => ({
+              address: stop.address,
+              waitMinutes: stop.waitMinutes?.toString() ?? '',
+              charge: asPounds(stop.chargePence),
+              note: stop.note ?? '',
+            })),
           notes: job.notes ?? '',
           internalNotes: job.internalNotes ?? '',
         }}

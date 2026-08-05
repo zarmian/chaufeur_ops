@@ -1,5 +1,5 @@
 import { PageHeader } from '@/components/page-header';
-import { loadJobFormOptions } from '@/lib/job-form-data';
+import { loadJobFormOptions, loadOpenShifts } from '@/lib/job-form-data';
 import { duplicateDefaults, getJob } from '@/lib/jobs';
 import { filterFlag, filterValue, type SearchParams } from '@/lib/list-params';
 import { pageRequireCapability } from '@/lib/page-guards';
@@ -21,9 +21,10 @@ export default async function NewJobPage({
   await pageRequireCapability('editJobs');
   const params = await searchParams;
 
-  const [options, nextReference] = await Promise.all([
+  const [options, nextReference, openShifts] = await Promise.all([
     loadJobFormOptions(),
     peekNextJobReference(),
+    loadOpenShifts(),
   ]);
 
   // `?from=<id>` duplicates an existing job; `&return=true` swaps the
@@ -37,6 +38,11 @@ export default async function NewJobPage({
     const defaults = duplicateDefaults(source, { swap: isReturn });
     values = {
       ...defaults,
+      customerHours: '',
+      customerRate: '',
+      minimumHours: '',
+      shiftId: '',
+      stops: [],
       // The date stays blank on purpose — see `duplicateDefaults`.
       clientPrice: asPounds(defaults.clientPricePence),
       driverPrice: asPounds(defaults.driverPricePence),
@@ -68,6 +74,7 @@ export default async function NewJobPage({
         drivers={options.drivers}
         vehicles={options.vehicles}
         locations={options.locations}
+        openShifts={openShifts}
       />
     </>
   );

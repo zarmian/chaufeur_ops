@@ -10,6 +10,7 @@ import {
   type TransitionResult,
 } from './job-status';
 import type { ListParams } from './list-params';
+import { billedHours, calculateFinance } from './job-finance';
 import { parseMoney } from './money';
 import { vehicleAvailableAt, type RentalRefusal } from './rentals';
 import { prisma } from './prisma';
@@ -70,6 +71,40 @@ const optionalCount = z.preprocess(
   z.coerce.number().int().min(0).max(99).nullable(),
 );
 
+/**
+ * One stop, as the form posts it.
+ *
+ * Stops arrive as parallel arrays (`stopAddress[]`, `stopCharge[]`), which is
+ * how a repeating fieldset submits. They are zipped back into records in
+ * `readStops` before they reach here.
+ */
+export const stopSchema = z.object({
+  address: z.string().trim().min(1).max(500),
+  waitMinutes: z.preprocess(
+    (value) => (value === '' || value === null || value === undefined ? null : value),
+    z.coerce.number().int().min(0).max(24 * 60).nullable(),
+  ),
+  chargePence: z
+    .string()
+    .trim()
+    .optional()
+    .transform((value) => (value === undefined || value === '' ? null : value))
+    .superRefine((value, ctx) => {
+      if (value === null) return;
+      try {
+        if (parseMoney(value) < 0) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'That cannot be negative' });
+        }
+      } catch {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Enter an amount like 15.00' });
+      }
+    })
+    .transform((value) => (value === null ? null : parseMoney(value))),
+  note: z.string().trim().max(500).optional().or(z.literal('')),
+});
+
+export type StopInput = z.infer<typeof stopSchema>;
+
 export const jobSchema = z
   .object({
     clientId: optionalId,
@@ -107,6 +142,33 @@ export const jobSchema = z
 
     notes: z.string().trim().max(5000).optional().or(z.literal('')),
     internalNotes: z.string().trim().max(5000).optional().or(z.literal('')),
+
+    /**
+     * Hours and hourly rate for as-directed work, asked for on the booking
+     * form rather than only in the finance panel (spec 2.5.6.1). A job priced
+     * by the hour whose hours live somewhere else is a job nobody prices.
+     */
+    customerHours: z.preprocess(
+      (value) =>
+        value === '' || value === null || value === undefined ? null : value,
+      z.coerce.number().min(0).max(999.99).nullable(),
+    ),
+    customerRatePence: priceField,
+    minimumHours: z.preprocess(
+      (value) =>
+        value === '' || value === null || value === undefined ? null : value,
+      z.coerce.number().min(0).max(999.99).nullable(),
+    ),
+
+    stops: z.array(stopSchema).max(20, 'That is more stops than a job can have').default([]),
+
+    /** Attributes the job to a hired driver's shift. */
+    shiftId: optionalId,
+    engagementKind: z
+      .enum(['OWNER_DRIVER', 'HIRED'])
+      .optional()
+      .or(z.literal(''))
+      .transform((value) => (value === '' || value === undefined ? null : value)),
 
     estimatedMinutes: z.preprocess(
       (value) =>
@@ -173,6 +235,51 @@ function toData(input: JobInput, timeZone?: string) {
 
     notes: emptyToNull(input.notes),
     internalNotes: emptyToNull(input.internalNotes),
+
+    shiftId: input.shiftId,
+    engagementKind: input.engagementKind,
+  };
+}
+
+/** The stop rows to persist, numbered from one in the order given. */
+function toStopData(stops: StopInput[]) {
+  return stops.map((stop, index) => ({
+    sequence: index + 1,
+    address: tidy(stop.address),
+    waitMinutes: stop.waitMinutes,
+    chargePence: stop.chargePence,
+    note: emptyToNull(stop.note),
+  }));
+}
+
+/**
+ * The finance figures a booking implies, when it was priced by the hour.
+ *
+ * Written to `JobFinance` at booking so an as-directed job has a total from
+ * the moment it is taken, rather than reading as unpriced until someone opens
+ * the panel. The minimum-hours rule is applied here, once, so the quote and
+ * the invoice cannot disagree.
+ */
+function hourlyFinanceFor(input: JobInput) {
+  const hours = billedHours(input.customerHours, input.minimumHours);
+  if (hours === null || !input.customerRatePence) return null;
+
+  const amounts = {
+    baseFarePence: input.clientPricePence ?? 0,
+    customerHours: hours,
+    customerRatePence: input.customerRatePence,
+    driverPaymentPence: input.driverPricePence ?? 0,
+  };
+  const totals = calculateFinance(amounts);
+
+  return {
+    baseFarePence: amounts.baseFarePence,
+    customerHours: hours,
+    customerRatePence: input.customerRatePence,
+    driverPaymentPence: amounts.driverPaymentPence,
+    totalClientPence: totals.totalClientPence,
+    totalCostsPence: totals.totalCostsPence,
+    grossProfitPence: totals.grossProfitPence,
   };
 }
 
@@ -334,7 +441,15 @@ export async function getJob(id: string) {
       vehicle: { select: { id: true, registration: true, make: true, model: true } },
       finance: true,
       events: { orderBy: { occurredAt: 'asc' } },
-      expenses: true,
+      expenses: { orderBy: { createdAt: 'asc' } },
+      stops: { orderBy: { sequence: 'asc' } },
+      shift: {
+        select: {
+          id: true,
+          reference: true,
+          driver: { select: { name: true } },
+        },
+      },
       createdBy: { select: { id: true, name: true } },
       invoiceLines: {
         select: {
@@ -370,8 +485,16 @@ export async function createJob(
             reference,
             status: 'PENDING',
             createdById: context.userId ?? null,
+            ...(input.stops.length > 0
+              ? { stops: { create: toStopData(input.stops) } }
+              : {}),
           },
         });
+
+        const hourly = hourlyFinanceFor(input);
+        if (hourly) {
+          await tx.jobFinance.create({ data: { ...hourly, jobId: created.id } });
+        }
 
         await tx.jobEvent.create({
           data: {
@@ -422,7 +545,13 @@ export async function updateJob(
       const before = await tx.job.findUniqueOrThrow({ where: { id } });
       const after = await tx.job.update({
         where: { id },
-        data: toData(input, timeZone),
+        data: {
+          ...toData(input, timeZone),
+          // Replaced wholesale rather than diffed. Stops are ordered and
+          // typically few; matching them up by position would silently
+          // reassign a charge when one is deleted from the middle.
+          stops: { deleteMany: {}, create: toStopData(input.stops) },
+        },
       });
 
       await tx.jobEvent.create({

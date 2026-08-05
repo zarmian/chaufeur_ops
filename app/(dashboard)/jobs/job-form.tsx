@@ -12,6 +12,8 @@ import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { JOB_TYPES } from '@/lib/enum-options';
 import { INITIAL_FORM_STATE, type FormState } from '@/lib/form-state';
+import { billedHours } from '@/lib/job-finance';
+import { StopsField, type StopValue } from './stops-field';
 
 /**
  * The booking form.
@@ -45,6 +47,11 @@ export interface JobFormValues {
   flightNumber: string;
   clientPrice: string;
   driverPrice: string;
+  customerHours: string;
+  customerRate: string;
+  minimumHours: string;
+  shiftId: string;
+  stops: StopValue[];
   notes: string;
   internalNotes: string;
 }
@@ -67,6 +74,11 @@ const BLANK: JobFormValues = {
   flightNumber: '',
   clientPrice: '',
   driverPrice: '',
+  customerHours: '',
+  customerRate: '',
+  minimumHours: '',
+  shiftId: '',
+  stops: [],
   notes: '',
   internalNotes: '',
 };
@@ -100,6 +112,7 @@ export function JobForm({
   drivers,
   vehicles,
   locations,
+  openShifts = [],
 }: {
   action: (state: FormState, formData: FormData) => Promise<FormState>;
   values?: JobFormValues;
@@ -110,6 +123,8 @@ export function JobForm({
   drivers: DriverOption[];
   vehicles: JobFormOption[];
   locations: string[];
+  /** Shifts currently open, for attributing a hired driver's job. */
+  openShifts?: JobFormOption[];
 }) {
   const [state, formAction] = useActionState(action, INITIAL_FORM_STATE);
   const errors = state.fields ?? {};
@@ -119,13 +134,32 @@ export function JobForm({
   const [vehicleId, setVehicleId] = useState(values.vehicleId);
   const [clientPrice, setClientPrice] = useState(values.clientPrice);
   const [confirmedUnpriced, setConfirmedUnpriced] = useState(false);
+  const [customerHours, setCustomerHours] = useState(values.customerHours);
+  const [customerRate, setCustomerRate] = useState(values.customerRate);
+  const [minimumHours, setMinimumHours] = useState(values.minimumHours);
 
   const isAirport = jobType === 'AIRPORT_TRANSFER';
   const isHourly = jobType === 'AS_DIRECTED';
 
+  // The hourly total, shown as it is typed (spec 2.5.6.3). Calculated with the
+  // same `billedHours` the server uses, so the quote on screen and the figure
+  // that gets stored cannot disagree.
+  const hoursValue = customerHours.trim() === '' ? null : Number(customerHours);
+  const minimumValue = minimumHours.trim() === '' ? null : Number(minimumHours);
+  const rateValue = customerRate.trim() === '' ? 0 : Number(customerRate);
+  const billed = billedHours(
+    Number.isFinite(hoursValue as number) ? hoursValue : null,
+    Number.isFinite(minimumValue as number) ? minimumValue : null,
+  );
+  const hourlyTotal =
+    billed !== null && Number.isFinite(rateValue) && rateValue > 0
+      ? billed * rateValue
+      : null;
+
   // Blank means "nobody has said", which is the state worth warning about. A
   // typed 0 is a deliberate statement and gets a zero-value reason instead.
-  const priceMissing = clientPrice.trim() === '';
+  // An hourly job with a total is priced even when the fixed fare is blank.
+  const priceMissing = clientPrice.trim() === '' && hourlyTotal === null;
   const needsConfirmation = priceMissing && !confirmedUnpriced;
 
   /** Choosing a driver defaults the vehicle, but never locks it. */
@@ -143,12 +177,6 @@ export function JobForm({
           <AlertDescription>{state.error}</AlertDescription>
         </Alert>
       ) : null}
-
-      <datalist id="saved-locations">
-        {locations.map((location) => (
-          <option key={location} value={location} />
-        ))}
-      </datalist>
 
       <section className="space-y-4">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
@@ -288,6 +316,13 @@ export function JobForm({
 
       <section className="space-y-4">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          Stops
+        </h2>
+        <StopsField initial={values.stops} locations={locations} />
+      </section>
+
+      <section className="space-y-4">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
           Driver and vehicle
         </h2>
 
@@ -311,6 +346,27 @@ export function JobForm({
               ))}
             </Select>
           </FormField>
+
+          {openShifts.length > 0 ? (
+            <FormField
+              name="shiftId"
+              label="Part of a shift"
+              hint="A hired driver is paid for the shift, so this job carries no driver fee of its own."
+              errors={errors.shiftId}
+            >
+              <Select
+                {...fieldProps('shiftId', errors.shiftId)}
+                defaultValue={values.shiftId}
+              >
+                <option value="">Not on a shift</option>
+                {openShifts.map((shift) => (
+                  <option key={shift.id} value={shift.id}>
+                    {shift.label}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+          ) : null}
 
           <FormField
             name="vehicleId"
@@ -382,6 +438,74 @@ export function JobForm({
             />
           </FormField>
         </div>
+
+        {isHourly ? (
+          <div className="space-y-4 rounded-md border border-dashed p-3">
+            <p className="text-sm font-medium">Priced by the hour</p>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <FormField
+                name="customerHours"
+                label="Hours booked"
+                errors={errors.customerHours}
+              >
+                <Input
+                  {...fieldProps('customerHours', errors.customerHours)}
+                  inputMode="decimal"
+                  placeholder="4"
+                  value={customerHours}
+                  onChange={(event) => setCustomerHours(event.target.value)}
+                />
+              </FormField>
+              <FormField
+                name="customerRate"
+                label="Hourly rate"
+                errors={errors.customerRatePence}
+              >
+                <Input
+                  {...fieldProps('customerRate', errors.customerRatePence)}
+                  inputMode="decimal"
+                  placeholder="45.00"
+                  value={customerRate}
+                  onChange={(event) => setCustomerRate(event.target.value)}
+                />
+              </FormField>
+              <FormField
+                name="minimumHours"
+                label="Minimum hours"
+                hint="Billed hours are the greater of the two."
+                errors={errors.minimumHours}
+              >
+                <Input
+                  {...fieldProps('minimumHours', errors.minimumHours)}
+                  inputMode="decimal"
+                  placeholder="4"
+                  value={minimumHours}
+                  onChange={(event) => setMinimumHours(event.target.value)}
+                />
+              </FormField>
+            </div>
+            {hourlyTotal !== null ? (
+              <p className="text-sm" data-testid="hourly-total">
+                <span className="text-muted-foreground">
+                  {billed} billed hours ×{' '}
+                  {Number(customerRate).toFixed(2)} ={' '}
+                </span>
+                <span className="font-semibold tabular">
+                  £{hourlyTotal.toFixed(2)}
+                </span>
+                {billed !== hoursValue ? (
+                  <span className="ml-1 text-muted-foreground">
+                    (minimum applied)
+                  </span>
+                ) : null}
+              </p>
+            ) : null}
+            <p className="text-xs text-muted-foreground">
+              Waiting time and stop charges are additional to this, never
+              folded into it.
+            </p>
+          </div>
+        ) : null}
 
         {needsConfirmation ? (
           <Alert variant="warning" data-testid="unpriced-warning">

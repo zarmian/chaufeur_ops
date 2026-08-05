@@ -10,6 +10,30 @@ import { createJob, jobSchema, transitionJob, updateJob } from '@/lib/jobs';
 import { withAudit } from '@/lib/audit';
 import { actingUser } from '@/lib/request-context';
 
+/**
+ * Zip the parallel stop arrays back into records.
+ *
+ * A repeating fieldset posts `stopAddress` three times rather than
+ * `stops[0].address`, so the columns come back separately and are recombined
+ * by position here. Rows with no address are dropped: an empty row is a stop
+ * someone started adding and thought better of.
+ */
+function readStops(formData: FormData) {
+  const addresses = formData.getAll('stopAddress').map(String);
+  const waits = formData.getAll('stopWait').map(String);
+  const charges = formData.getAll('stopCharge').map(String);
+  const notes = formData.getAll('stopNote').map(String);
+
+  return addresses
+    .map((address, index) => ({
+      address,
+      waitMinutes: waits[index] ?? '',
+      chargePence: charges[index] ?? '',
+      note: notes[index] ?? '',
+    }))
+    .filter((stop) => stop.address.trim() !== '');
+}
+
 function readJobForm(formData: FormData) {
   return {
     clientId: formData.get('clientId') ?? '',
@@ -30,6 +54,11 @@ function readJobForm(formData: FormData) {
     // The form asks for pounds; the schema converts to pence.
     clientPricePence: formData.get('clientPrice') ?? '',
     driverPricePence: formData.get('driverPrice') ?? '',
+    customerHours: formData.get('customerHours') ?? '',
+    customerRatePence: formData.get('customerRate') ?? '',
+    minimumHours: formData.get('minimumHours') ?? '',
+    shiftId: formData.get('shiftId') ?? '',
+    stops: readStops(formData),
     notes: formData.get('notes') ?? '',
     internalNotes: formData.get('internalNotes') ?? '',
   };
