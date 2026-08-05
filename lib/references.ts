@@ -1,5 +1,5 @@
 import { Prisma } from '@prisma/client';
-import { getBranding } from './branding';
+import { getBranding } from './branding-store';
 import { prisma } from './prisma';
 
 /**

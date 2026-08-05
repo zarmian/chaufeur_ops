@@ -8,7 +8,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import { getBranding } from '@/lib/branding';
+import { getBranding } from '@/lib/branding-store';
 import { checkDatabase } from '@/lib/db-health';
 import { isInstallComplete, MIN_PASSWORD_LENGTH } from '@/lib/install';
 import { SetupForm } from './setup-form';

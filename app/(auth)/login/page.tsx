@@ -9,7 +9,8 @@ import {
 } from '@/components/ui/card';
 import { ConfigurationError } from '@/components/configuration-error';
 import { getCurrentUser } from '@/lib/authz';
-import { getBranding } from '@/lib/branding';
+import { BrandMark } from '@/components/brand-mark';
+import { getBranding } from '@/lib/branding-store';
 import { checkDatabase } from '@/lib/db-health';
 import { LoginForm } from './login-form';
 
@@ -56,7 +57,9 @@ export default async function LoginPage({
   return (
     <Card className="w-full max-w-sm">
       <CardHeader>
-        <CardTitle className="text-xl">{branding.tradingName}</CardTitle>
+        <CardTitle className="text-xl">
+          <BrandMark branding={branding} imageClassName="h-9" />
+        </CardTitle>
         <CardDescription>Sign in to continue</CardDescription>
       </CardHeader>
       <CardContent>
