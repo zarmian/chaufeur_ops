@@ -29,6 +29,13 @@ export const dynamic = 'force-dynamic';
 const ASSET_FIELDS = ['logoLightUrl', 'logoDarkUrl', 'faviconUrl'] as const;
 type AssetField = (typeof ASSET_FIELDS)[number];
 
+/** The typed-link input that corresponds to each uploadable asset. */
+const LINK_FIELD: Record<AssetField, string> = {
+  logoLightUrl: 'logoLightLink',
+  logoDarkUrl: 'logoDarkLink',
+  faviconUrl: 'faviconLink',
+};
+
 export async function POST(request: Request) {
   const query = new URLSearchParams();
 
@@ -52,6 +59,9 @@ export async function POST(request: Request) {
         bankDetails: form.get('bankDetails') ?? '',
         jobReferencePrefix: form.get('jobReferencePrefix') ?? 'JOB',
         invoiceNumberPrefix: form.get('invoiceNumberPrefix') ?? 'INV',
+        logoLightLink: form.get('logoLightLink') ?? '',
+        logoDarkLink: form.get('logoDarkLink') ?? '',
+        faviconLink: form.get('faviconLink') ?? '',
       }),
       audit,
     );
@@ -60,6 +70,15 @@ export async function POST(request: Request) {
       // A tick-box, so removing a logo does not mean uploading a blank one.
       if (form.get(`${field}Clear`) === 'on') {
         await saveBrandingAsset(field, null, audit);
+        continue;
+      }
+
+      // A typed link wins over an upload in the same submission — somebody
+      // filling in the address is choosing it over whatever is stored, and
+      // this is the only route open to a deployment without a Blob store.
+      const link = String(form.get(LINK_FIELD[field]) ?? '').trim();
+      if (link !== '') {
+        await saveBrandingAsset(field, link, audit);
         continue;
       }
 

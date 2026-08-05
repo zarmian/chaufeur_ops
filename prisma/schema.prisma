@@ -768,9 +768,10 @@ model DriverShift {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  driver  Driver   @relation(fields: [driverId], references: [id])
-  vehicle Vehicle? @relation(fields: [vehicleId], references: [id])
-  jobs    Job[]
+  driver      Driver             @relation(fields: [driverId], references: [id])
+  vehicle     Vehicle?           @relation(fields: [vehicleId], references: [id])
+  jobs        Job[]
+  payoutLines DriverPayoutLine[]
 
   @@index([driverId, startedAt])
   @@index([endedAt])
@@ -910,8 +911,9 @@ model VehicleRental {
   vehicle   Vehicle                @relation(fields: [vehicleId], references: [id])
   driver    Driver                 @relation(fields: [driverId], references: [id])
   createdBy User?                  @relation("RentalCreatedBy", fields: [createdById], references: [id])
-  payments  RentalPayment[]
-  checks    RentalChecklistItem[]
+  payments     RentalPayment[]
+  checks       RentalChecklistItem[]
+  invoiceLines InvoiceLine[]
 
   @@index([vehicleId, startAt])
   @@index([driverId])
@@ -992,18 +994,26 @@ model Invoice {
 }
 
 model InvoiceLine {
-  id          String  @id @default(cuid())
-  invoiceId   String
-  jobId       String?
+  id        String  @id @default(cuid())
+  invoiceId String
+
+  jobId String?
+  /// Hire of one of the company's own cars. Rental income is revenue like any
+  /// other, and without this it could be invoiced only as untraceable free
+  /// text — nothing would tie the line back to the agreement it came from.
+  rentalId String?
+
   description String
   amountPence Int
   sortOrder   Int     @default(0)
 
-  invoice Invoice @relation(fields: [invoiceId], references: [id])
-  job     Job?    @relation(fields: [jobId], references: [id])
+  invoice Invoice        @relation(fields: [invoiceId], references: [id])
+  job     Job?           @relation(fields: [jobId], references: [id])
+  rental  VehicleRental? @relation(fields: [rentalId], references: [id])
 
   @@index([invoiceId])
   @@index([jobId])
+  @@index([rentalId])
 }
 
 model Payment {
@@ -1043,17 +1053,26 @@ model DriverPayout {
 }
 
 model DriverPayoutLine {
-  id          String  @id @default(cuid())
-  payoutId    String
-  jobId       String
+  id       String @id @default(cuid())
+  payoutId String
+
+  /// A per-job fee. Null when the line is a shift.
+  jobId   String?
+  /// Hours worked in one of the company's own cars. Null when the line is a
+  /// job. A driver paid by the hour has no per-job fee to pay out, so a
+  /// payout that could only hold jobs could not pay them at all.
+  shiftId String?
+
   amountPence Int
   description String?
 
   payout DriverPayout @relation(fields: [payoutId], references: [id])
-  job    Job          @relation(fields: [jobId], references: [id])
+  job    Job?         @relation(fields: [jobId], references: [id])
+  shift  DriverShift? @relation(fields: [shiftId], references: [id])
 
   @@index([payoutId])
   @@index([jobId])
+  @@index([shiftId])
 }
 
 // ---------------------------------------------------------------- system

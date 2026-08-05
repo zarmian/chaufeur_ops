@@ -1,4 +1,5 @@
 import { PageHeader } from '@/components/page-header';
+import { brandAssetSrc } from '@/lib/branding';
 import { getBranding } from '@/lib/branding-store';
 import { filterValue, type SearchParams } from '@/lib/list-params';
 import { pageRequireCapability } from '@/lib/page-guards';
@@ -28,6 +29,9 @@ export default async function BrandingSettingsPage({
         hasLogoLight={Boolean(branding.logoLightUrl)}
         hasLogoDark={Boolean(branding.logoDarkUrl)}
         hasFavicon={Boolean(branding.faviconUrl)}
+        logoLightSrc={brandAssetSrc('logoLightUrl', branding.logoLightUrl)}
+        logoDarkSrc={brandAssetSrc('logoDarkUrl', branding.logoDarkUrl)}
+        faviconSrc={brandAssetSrc('faviconUrl', branding.faviconUrl)}
         error={filterValue(query, 'brandingError')}
         saved={Boolean(filterValue(query, 'updated'))}
         values={{

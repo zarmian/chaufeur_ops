@@ -51,6 +51,9 @@ export function BrandingForm({
   hasLogoLight,
   hasLogoDark,
   hasFavicon,
+  logoLightSrc,
+  logoDarkSrc,
+  faviconSrc,
   error,
   saved,
 }: {
@@ -59,6 +62,9 @@ export function BrandingForm({
   hasLogoLight: boolean;
   hasLogoDark: boolean;
   hasFavicon: boolean;
+  logoLightSrc: string | null;
+  logoDarkSrc: string | null;
+  faviconSrc: string | null;
   error?: string | null;
   saved?: boolean;
 }) {
@@ -206,34 +212,46 @@ export function BrandingForm({
 
           <Section
             title="Logos"
-            description="The light-background logo appears on white surfaces; the dark one is used in dark mode. SVG, PNG, JPEG or WebP."
+            description="The light-background logo appears on white surfaces; the dark one is used in dark mode. Either upload a file or point at one you already host."
           >
             {!storageConfigured ? (
               <Alert variant="warning">
                 <AlertDescription>
-                  File storage is not configured, so logos cannot be uploaded.
-                  Everything else on this page saves normally.
+                  File storage is not set up on this deployment, so files
+                  cannot be uploaded here — but you can still set a logo by
+                  giving the address of one you already host. To enable
+                  uploads, create a Vercel Blob store and set{' '}
+                  <code>BLOB_READ_WRITE_TOKEN</code>.
                 </AlertDescription>
               </Alert>
-            ) : (
-              <div className="space-y-4">
-                <AssetField
-                  name="logoLightUrl"
-                  label="Logo — light background"
-                  present={hasLogoLight}
-                />
-                <AssetField
-                  name="logoDarkUrl"
-                  label="Logo — dark background"
-                  present={hasLogoDark}
-                />
-                <AssetField
-                  name="faviconUrl"
-                  label="Favicon"
-                  present={hasFavicon}
-                />
-              </div>
-            )}
+            ) : null}
+
+            <div className="space-y-5">
+              <AssetField
+                name="logoLightUrl"
+                linkName="logoLightLink"
+                label="Logo — light background"
+                present={hasLogoLight}
+                currentSrc={logoLightSrc}
+                canUpload={storageConfigured}
+              />
+              <AssetField
+                name="logoDarkUrl"
+                linkName="logoDarkLink"
+                label="Logo — dark background"
+                present={hasLogoDark}
+                currentSrc={logoDarkSrc}
+                canUpload={storageConfigured}
+              />
+              <AssetField
+                name="faviconUrl"
+                linkName="faviconLink"
+                label="Favicon"
+                present={hasFavicon}
+                currentSrc={faviconSrc}
+                canUpload={storageConfigured}
+              />
+            </div>
           </Section>
 
           <Section
@@ -381,47 +399,94 @@ function ColourField({
   );
 }
 
+/**
+ * One logo, settable two ways.
+ *
+ * The upload is the better option when file storage is available. The typed
+ * address is always available, because a deployment without a Blob store
+ * still has a company with a logo — gating branding on a piece of storage
+ * infrastructure made the white-label promise conditional on something that
+ * has nothing to do with it.
+ */
 function AssetField({
   name,
+  linkName,
   label,
   present,
+  currentSrc,
+  canUpload,
 }: {
   name: string;
+  linkName: string;
   label: string;
   present: boolean;
+  currentSrc: string | null;
+  canUpload: boolean;
 }) {
   return (
-    <div className="flex flex-wrap items-end gap-3">
-      <div className="min-w-0 flex-1">
-        <label htmlFor={name} className="mb-1 block text-sm font-medium">
-          {label}
-        </label>
-        <Input
-          id={name}
-          name={name}
-          type="file"
-          accept="image/svg+xml,image/png,image/jpeg,image/webp"
-          className="cursor-pointer file:mr-3 file:cursor-pointer file:rounded file:border-0 file:bg-secondary file:px-2 file:py-1 file:text-xs"
-        />
+    <div className="rounded-md border p-3" data-testid={`asset-${name}`}>
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <p className="text-sm font-medium">{label}</p>
+        {present && currentSrc ? (
+          <div className="flex items-center gap-3">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={currentSrc}
+              alt={`Current ${label.toLowerCase()}`}
+              className="h-8 w-auto max-w-[8rem] object-contain"
+            />
+            <label className="flex items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground">
+              <input type="checkbox" name={`${name}Clear`} className="size-3.5" />
+              Remove
+            </label>
+          </div>
+        ) : (
+          <span className="text-xs text-muted-foreground">Not set</span>
+        )}
       </div>
-      {present ? (
-        <div className="flex items-center gap-3 pb-2">
-          {/* Rendered through the app's own route, so the signed URL is never
-              handled by client code and never goes stale in the markup. */}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={`/api/branding/asset?field=${name}`}
-            alt={`Current ${label.toLowerCase()}`}
-            className="h-8 w-auto max-w-[8rem] object-contain"
-          />
-          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <input type="checkbox" name={`${name}Clear`} className="size-3.5" />
-            Remove
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        {canUpload ? (
+          <div>
+            <label
+              htmlFor={name}
+              className="mb-1 block text-xs text-muted-foreground"
+            >
+              Upload a file
+            </label>
+            <Input
+              id={name}
+              name={name}
+              type="file"
+              accept="image/svg+xml,image/png,image/jpeg,image/webp"
+              className="cursor-pointer file:mr-3 file:cursor-pointer file:rounded file:border-0 file:bg-secondary file:px-2 file:py-1 file:text-xs"
+            />
+            <p className="mt-1 text-xs text-muted-foreground">
+              SVG, PNG, JPEG or WebP.
+            </p>
+          </div>
+        ) : null}
+
+        <div className={canUpload ? '' : 'sm:col-span-2'}>
+          <label
+            htmlFor={linkName}
+            className="mb-1 block text-xs text-muted-foreground"
+          >
+            {canUpload ? 'Or link to one you host' : 'Link to one you host'}
           </label>
+          <Input
+            id={linkName}
+            name={linkName}
+            type="url"
+            inputMode="url"
+            placeholder="https://example.com/logo.svg"
+          />
+          <p className="mt-1 text-xs text-muted-foreground">
+            Must start https:// — the browser blocks a plain http image on a
+            secure page. Leave blank to keep what is set.
+          </p>
         </div>
-      ) : (
-        <p className="pb-2 text-xs text-muted-foreground">Not set</p>
-      )}
+      </div>
     </div>
   );
 }

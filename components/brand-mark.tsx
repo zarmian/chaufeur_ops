@@ -1,4 +1,4 @@
-import type { Branding } from '@/lib/branding';
+import { brandAssetSrc, type Branding } from '@/lib/branding';
 import { cn } from '@/lib/utils';
 
 /**
@@ -33,17 +33,21 @@ export function BrandMark({
 
   // Either variant alone is used for both themes — a customer who uploads one
   // logo gets that logo everywhere rather than their name in dark mode.
-  const light = logoLightUrl ?? logoDarkUrl;
-  const dark = logoDarkUrl ?? logoLightUrl;
-  const field = logoLightUrl ? 'logoLightUrl' : 'logoDarkUrl';
-  const darkField = logoDarkUrl ? 'logoDarkUrl' : 'logoLightUrl';
+  const light = brandAssetSrc(
+    logoLightUrl ? 'logoLightUrl' : 'logoDarkUrl',
+    logoLightUrl ?? logoDarkUrl,
+  );
+  const dark = brandAssetSrc(
+    logoDarkUrl ? 'logoDarkUrl' : 'logoLightUrl',
+    logoDarkUrl ?? logoLightUrl,
+  );
 
   return (
     <span className={cn('inline-flex items-center', className)}>
       {light ? (
         /* eslint-disable-next-line @next/next/no-img-element */
         <img
-          src={`/api/branding/asset?field=${field}`}
+          src={light}
           alt={tradingName}
           className={cn('h-7 w-auto object-contain dark:hidden', imageClassName)}
         />
@@ -51,7 +55,7 @@ export function BrandMark({
       {dark ? (
         /* eslint-disable-next-line @next/next/no-img-element */
         <img
-          src={`/api/branding/asset?field=${darkField}`}
+          src={dark}
           alt={tradingName}
           className={cn(
             'hidden h-7 w-auto object-contain dark:block',
