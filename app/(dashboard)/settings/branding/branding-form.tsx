@@ -1,0 +1,534 @@
+'use client';
+
+import { useState } from 'react';
+import { FormField } from '@/components/form-field';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  buildPalette,
+  checkContrast,
+  LIGHT_SURFACE,
+  normaliseHex,
+  PICKER_FALLBACK,
+  readableForeground,
+  SUGGESTED_ACCENT,
+  SUGGESTED_PRIMARY,
+} from '@/lib/colour';
+
+/**
+ * The branding screen.
+ *
+ * A Client Component for one reason: the preview has to react to a colour
+ * before it is saved. Picking a brand colour blind, saving, and discovering
+ * the button text is unreadable is exactly the loop this avoids.
+ *
+ * The form itself is a plain multipart POST to a route handler — see
+ * `app/api/jobs/[id]/status/route.ts` for why not a Server Action.
+ */
+
+export interface BrandingFormValues {
+  tradingName: string;
+  legalName: string;
+  primaryColour: string;
+  accentColour: string;
+  addressLines: string;
+  phone: string;
+  supportEmail: string;
+  websiteUrl: string;
+  taxNumber: string;
+  companyNumber: string;
+  bankDetails: string;
+  jobReferencePrefix: string;
+  invoiceNumberPrefix: string;
+}
+
+export function BrandingForm({
+  values,
+  storageConfigured,
+  hasLogoLight,
+  hasLogoDark,
+  hasFavicon,
+  error,
+  saved,
+}: {
+  values: BrandingFormValues;
+  storageConfigured: boolean;
+  hasLogoLight: boolean;
+  hasLogoDark: boolean;
+  hasFavicon: boolean;
+  error?: string | null;
+  saved?: boolean;
+}) {
+  const [primary, setPrimary] = useState(values.primaryColour || SUGGESTED_PRIMARY);
+  const [accent, setAccent] = useState(values.accentColour || SUGGESTED_ACCENT);
+  const [prefix, setPrefix] = useState(values.jobReferencePrefix);
+
+  return (
+    <form
+      method="post"
+      action="/api/branding"
+      encType="multipart/form-data"
+      className="space-y-8"
+      data-testid="branding-form"
+    >
+      {error ? (
+        <Alert variant="destructive" data-testid="branding-error">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : null}
+      {saved && !error ? (
+        <Alert data-testid="branding-saved">
+          <AlertDescription>
+            Saved. The change is live now — no redeploy needed.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_20rem]">
+        <div className="space-y-8">
+          <Section
+            title="The company"
+            description="What appears in the sidebar, on the login page, on invoices and in emails."
+          >
+            <div className="grid gap-4 sm:grid-cols-2">
+              <FormField name="tradingName" label="Trading name" required>
+                <Input
+                  id="tradingName"
+                  name="tradingName"
+                  defaultValue={values.tradingName}
+                  required
+                  maxLength={120}
+                />
+              </FormField>
+              <FormField
+                name="legalName"
+                label="Legal name"
+                hint="For invoices and statements, if it differs."
+              >
+                <Input
+                  id="legalName"
+                  name="legalName"
+                  defaultValue={values.legalName}
+                  maxLength={160}
+                />
+              </FormField>
+            </div>
+
+            <FormField name="addressLines" label="Address">
+              <Textarea
+                id="addressLines"
+                name="addressLines"
+                rows={3}
+                defaultValue={values.addressLines}
+                maxLength={400}
+              />
+            </FormField>
+
+            <div className="grid gap-4 sm:grid-cols-3">
+              <FormField name="phone" label="Phone">
+                <Input id="phone" name="phone" defaultValue={values.phone} />
+              </FormField>
+              <FormField name="supportEmail" label="Support email">
+                <Input
+                  id="supportEmail"
+                  name="supportEmail"
+                  type="email"
+                  defaultValue={values.supportEmail}
+                />
+              </FormField>
+              <FormField name="websiteUrl" label="Website">
+                <Input
+                  id="websiteUrl"
+                  name="websiteUrl"
+                  defaultValue={values.websiteUrl}
+                />
+              </FormField>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <FormField name="taxNumber" label="Tax registration number">
+                <Input
+                  id="taxNumber"
+                  name="taxNumber"
+                  defaultValue={values.taxNumber}
+                  className="tabular"
+                />
+              </FormField>
+              <FormField name="companyNumber" label="Company number">
+                <Input
+                  id="companyNumber"
+                  name="companyNumber"
+                  defaultValue={values.companyNumber}
+                  className="tabular"
+                />
+              </FormField>
+            </div>
+
+            <FormField
+              name="bankDetails"
+              label="Bank details"
+              hint="Printed on invoices. Account name, sort code, account number."
+            >
+              <Textarea
+                id="bankDetails"
+                name="bankDetails"
+                rows={3}
+                defaultValue={values.bankDetails}
+                maxLength={600}
+              />
+            </FormField>
+          </Section>
+
+          <Section
+            title="Colours"
+            description="One hex value each. Hover, active and focus shades are derived from them, so the whole interface stays coherent."
+          >
+            <div className="grid gap-4 sm:grid-cols-2">
+              <ColourField
+                name="primaryColour"
+                label="Primary"
+                hint="Buttons, links and the active sidebar item."
+                value={primary}
+                onChange={setPrimary}
+              />
+              <ColourField
+                name="accentColour"
+                label="Accent"
+                hint="Highlighted rows and subtle fills."
+                value={accent}
+                onChange={setAccent}
+              />
+            </div>
+          </Section>
+
+          <Section
+            title="Logos"
+            description="The light-background logo appears on white surfaces; the dark one is used in dark mode. SVG, PNG, JPEG or WebP."
+          >
+            {!storageConfigured ? (
+              <Alert variant="warning">
+                <AlertDescription>
+                  File storage is not configured, so logos cannot be uploaded.
+                  Everything else on this page saves normally.
+                </AlertDescription>
+              </Alert>
+            ) : (
+              <div className="space-y-4">
+                <AssetField
+                  name="logoLightUrl"
+                  label="Logo — light background"
+                  present={hasLogoLight}
+                />
+                <AssetField
+                  name="logoDarkUrl"
+                  label="Logo — dark background"
+                  present={hasLogoDark}
+                />
+                <AssetField
+                  name="faviconUrl"
+                  label="Favicon"
+                  present={hasFavicon}
+                />
+              </div>
+            )}
+          </Section>
+
+          <Section
+            title="Reference prefixes"
+            description="Printed on paperwork, so they are upper-cased and limited to letters and digits."
+          >
+            <div className="grid gap-4 sm:grid-cols-2">
+              <FormField
+                name="jobReferencePrefix"
+                label="Job reference"
+                required
+                hint={`Jobs will read ${(prefix || 'JOB').toUpperCase()}-000767.`}
+              >
+                <Input
+                  id="jobReferencePrefix"
+                  name="jobReferencePrefix"
+                  value={prefix}
+                  onChange={(event) => setPrefix(event.target.value)}
+                  required
+                  maxLength={8}
+                  className="uppercase tabular"
+                />
+              </FormField>
+              <FormField
+                name="invoiceNumberPrefix"
+                label="Invoice number"
+                required
+                hint="Existing references keep the prefix they were issued with."
+              >
+                <Input
+                  id="invoiceNumberPrefix"
+                  name="invoiceNumberPrefix"
+                  defaultValue={values.invoiceNumberPrefix}
+                  required
+                  maxLength={8}
+                  className="uppercase tabular"
+                />
+              </FormField>
+            </div>
+          </Section>
+
+          <div className="flex items-center gap-3 border-t pt-6">
+            <Button type="submit">Save branding</Button>
+            <p className="text-sm text-muted-foreground">
+              Takes effect immediately.
+            </p>
+          </div>
+        </div>
+
+        <Preview primary={primary} accent={accent} name={values.tradingName} />
+      </div>
+    </form>
+  );
+}
+
+function Section({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="space-y-4">
+      <div>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          {title}
+        </h2>
+        <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function ColourField({
+  name,
+  label,
+  hint,
+  value,
+  onChange,
+}: {
+  name: string;
+  label: string;
+  hint: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const normalised = normaliseHex(value);
+
+  // Checked as *text on the page*, not as a button fill. Against its own
+  // derived foreground a brand colour always passes — the picker chooses the
+  // better of black and white — so warning on that pairing would never fire.
+  // Used as a link or an active label on white, a pale brand genuinely fails.
+  const asText = normalised ? checkContrast(normalised, LIGHT_SURFACE) : null;
+  const onFill = normalised
+    ? checkContrast(readableForeground(normalised), normalised)
+    : null;
+
+  return (
+    <FormField name={name} label={label} hint={hint}>
+      <div className="flex items-center gap-2">
+        <input
+          type="color"
+          aria-label={`${label} colour picker`}
+          value={normalised ?? PICKER_FALLBACK}
+          onChange={(event) => onChange(event.target.value)}
+          className="h-9 w-12 shrink-0 cursor-pointer rounded border bg-background"
+        />
+        <Input
+          id={name}
+          name={name}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={SUGGESTED_PRIMARY}
+          className="tabular"
+        />
+      </div>
+      {!normalised && value.trim() !== '' ? (
+        <p className="mt-1 text-xs text-destructive">
+          That is not a hex colour. Use something like #1f6feb.
+        </p>
+      ) : null}
+      {/* Reported, not enforced. A brand colour is the customer's decision —
+          but they should learn this here rather than from a user who cannot
+          read a link in it. */}
+      {asText?.message ? (
+        <p
+          className="mt-1 text-xs text-warning-foreground"
+          data-testid={`${name}-contrast`}
+        >
+          As text on a white page: {asText.message} Buttons in this colour are
+          fine — the label switches to{' '}
+          {readableForeground(normalised!) === PICKER_FALLBACK ? 'black' : 'white'}{' '}
+          at {onFill?.ratio}:1.
+        </p>
+      ) : normalised ? (
+        <p className="mt-1 text-xs text-muted-foreground">
+          Contrast on white: {asText?.ratio}:1. Passes WCAG AA.
+        </p>
+      ) : null}
+    </FormField>
+  );
+}
+
+function AssetField({
+  name,
+  label,
+  present,
+}: {
+  name: string;
+  label: string;
+  present: boolean;
+}) {
+  return (
+    <div className="flex flex-wrap items-end gap-3">
+      <div className="min-w-0 flex-1">
+        <label htmlFor={name} className="mb-1 block text-sm font-medium">
+          {label}
+        </label>
+        <Input
+          id={name}
+          name={name}
+          type="file"
+          accept="image/svg+xml,image/png,image/jpeg,image/webp"
+          className="cursor-pointer file:mr-3 file:cursor-pointer file:rounded file:border-0 file:bg-secondary file:px-2 file:py-1 file:text-xs"
+        />
+      </div>
+      {present ? (
+        <div className="flex items-center gap-3 pb-2">
+          {/* Rendered through the app's own route, so the signed URL is never
+              handled by client code and never goes stale in the markup. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={`/api/branding/asset?field=${name}`}
+            alt={`Current ${label.toLowerCase()}`}
+            className="h-8 w-auto max-w-[8rem] object-contain"
+          />
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <input type="checkbox" name={`${name}Clear`} className="size-3.5" />
+            Remove
+          </label>
+        </div>
+      ) : (
+        <p className="pb-2 text-xs text-muted-foreground">Not set</p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A sample of the interface in the chosen colours.
+ *
+ * Deliberately the three things most likely to go wrong: a filled button
+ * (foreground legibility), a badge (the accent surface) and a table row
+ * (whether the highlight is visible at all).
+ */
+function Preview({
+  primary,
+  accent,
+  name,
+}: {
+  primary: string;
+  accent: string;
+  name: string;
+}) {
+  const primaryPalette = buildPalette(primary);
+  const accentPalette = buildPalette(accent);
+
+  const style = {
+    ...(primaryPalette
+      ? {
+          '--preview-primary': `hsl(${primaryPalette.base})`,
+          '--preview-primary-fg': `hsl(${primaryPalette.baseForeground})`,
+          '--preview-primary-hover': `hsl(${primaryPalette.hover})`,
+        }
+      : {}),
+    ...(accentPalette
+      ? {
+          '--preview-accent': `hsl(${accentPalette.muted})`,
+          '--preview-accent-fg': `hsl(${accentPalette.mutedForeground})`,
+        }
+      : {}),
+  } as React.CSSProperties;
+
+  return (
+    <aside
+      className="h-fit rounded-lg border p-4 lg:sticky lg:top-6"
+      style={style}
+      data-testid="branding-preview"
+    >
+      <p className="mb-3 text-sm font-medium">Preview</p>
+
+      <div className="space-y-4 text-sm">
+        <div className="rounded-md border p-3">
+          <p className="mb-2 text-xs text-muted-foreground">Sidebar</p>
+          <div
+            className="rounded px-3 py-2 font-medium"
+            style={{
+              background: 'var(--preview-primary)',
+              color: 'var(--preview-primary-fg)',
+            }}
+          >
+            {name || 'Operations'}
+          </div>
+        </div>
+
+        <div className="rounded-md border p-3">
+          <p className="mb-2 text-xs text-muted-foreground">Button</p>
+          <span
+            className="inline-flex items-center rounded-md px-3 py-1.5 text-sm font-medium"
+            style={{
+              background: 'var(--preview-primary)',
+              color: 'var(--preview-primary-fg)',
+            }}
+          >
+            Book job
+          </span>
+        </div>
+
+        <div className="rounded-md border p-3">
+          <p className="mb-2 text-xs text-muted-foreground">Badge and row</p>
+          <span
+            className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium"
+            style={{
+              background: 'var(--preview-accent)',
+              color: 'var(--preview-accent-fg)',
+            }}
+          >
+            Assigned
+          </span>
+          <div
+            className="mt-2 flex items-center justify-between rounded px-2 py-1.5 tabular"
+            style={{ background: 'var(--preview-accent)' }}
+          >
+            <span>JOB-000767</span>
+            <span>£125.50</span>
+          </div>
+        </div>
+
+        {/* Fixed across every brand: a red that means "expired" must not
+            become a customer's colour. */}
+        <div className="rounded-md border p-3">
+          <p className="mb-2 text-xs text-muted-foreground">
+            Semantic states, unchanged
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Badge variant="destructive">Expired</Badge>
+            <Badge variant="warning">Expiring</Badge>
+            <Badge variant="success">In date</Badge>
+          </div>
+        </div>
+      </div>
+    </aside>
+  );
+}

@@ -54,6 +54,10 @@ function toData(input: DriverInput) {
   return {
     name: tidy(input.name),
     phone: tidy(input.phone),
+    // Written on every save, not only on import: a driver added by hand and
+    // one loaded from a spreadsheet have to be the same record when the same
+    // file is imported again.
+    normalisedPhone: normalisePhone(input.phone),
     email: emptyToNull(input.email)?.toLowerCase() ?? null,
     address: emptyToNull(input.address),
     dvlaLicenceNumber: emptyToNull(input.dvlaLicenceNumber),

@@ -79,7 +79,50 @@ is use it. An *unclaimed* install, by contrast, advertises itself by showing
 the form, which is the real reason to deploy and complete setup in the same
 sitting rather than leaving a fresh deployment unattended.
 
-### Option B — the seed script (terminal)
+### Option B — the setup wizard (terminal, recommended)
+
+`npm run setup` asks for the company details, the locale and the first
+administrator, then seeds the zones and the default rate card. It is the same
+work `/setup` does from a browser — both call `completeInstall`, so the two
+cannot drift into seeding different things — but it also captures the
+branding and locale, which the browser page does not.
+
+```bash
+npm ci
+cp .env.example .env   # fill in the two connection strings
+npm run db:deploy      # only if you have not deployed yet — Vercel does this
+npm run setup
+npm run verify
+```
+
+It refuses to run twice. On an install that already has an administrator it
+prints "already set up" and changes nothing, so it is safe to leave in a
+deployment script.
+
+For an unattended install, pipe the answers in the order the questions are
+asked. Blank lines take the default shown in brackets:
+
+```bash
+printf '%s\n' \
+  'Northwind Chauffeurs' \
+  ''                      `# legal name — defaults to the trading name` \
+  'support@example.com' \
+  '020 7946 0000' \
+  'NWC'                   `# job reference prefix` \
+  ''                      `# invoice prefix — defaults to INV` \
+  '' '' '' '' '' ''       `# six locale answers — all UK defaults` \
+  'Ada Lovelace' \
+  'ada@example.com' \
+  "$ADMIN_PASSWORD" \
+  "$ADMIN_PASSWORD" \
+  | npm run setup
+```
+
+The password is echoed as asterisks, so it does not land in a deployment log
+— but it is still on the command line, so prefer an environment variable to a
+literal.
+
+### Option C — the seed script (terminal, unattended)
 
 If you would rather not expose a bootstrap page at all:
 
@@ -165,13 +208,39 @@ For each new install:
 - [ ] Vercel project from the same repository
 - [ ] `CRON_SECRET` generated fresh — never reused between customers, since
       one leaking would compromise the others
-- [ ] First administrator created — via `/setup` or `npm run db:seed`
+- [ ] `BLOB_READ_WRITE_TOKEN` set, or accept that documents and logos cannot
+      be uploaded — everything else works without it
+- [ ] First administrator created — `npm run setup`, `/setup` or
+      `npm run db:seed`
 - [ ] `/setup` returns 404 afterwards
 - [ ] `/api/health` returns 200
 - [ ] Admin password recorded somewhere safe
-- [ ] Branding, locale and reference prefixes configured (Phase 3)
+- [ ] Branding configured: trading name, logos, colours, reference prefixes
+- [ ] Locale checked — currency, timezone, tax name and rate
+- [ ] Vehicles imported, then drivers, then clients
+- [ ] Compliance screen reviewed: every import lands its undated documents
+      there, and that backlog is the first real job
 - [ ] Real users created; the seeded admin retired or renamed
 - [ ] Uptime monitoring and daily backups on
+
+### Standing one up end to end
+
+Roughly forty minutes, most of it waiting for Vercel.
+
+| Step | Where | Time |
+|---|---|---|
+| Supabase project, connection strings | Supabase | 5 min |
+| Vercel project, environment variables | Vercel | 10 min |
+| First deploy (runs migrations) | Vercel | 5 min |
+| `npm run setup` — company, locale, admin | Terminal | 5 min |
+| Branding — logos and colours | Settings → Branding | 5 min |
+| Import vehicles, drivers, clients | Settings → Import | 10 min |
+
+Import the vehicles first. The driver file can name a car by registration,
+which links the two in one pass — but only for vehicles already loaded.
+Drivers first still works; their registrations come back as unmatched, and
+re-running the same driver file afterwards picks them up, because an import
+matches on the natural key and updates rather than duplicating.
 
 ---
 

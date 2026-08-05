@@ -23,6 +23,20 @@ export const ALLOWED_MIME_TYPES = [
 
 export type AllowedMimeType = (typeof ALLOWED_MIME_TYPES)[number];
 
+/**
+ * Branding assets accept SVG on top of the document types, because a logo
+ * that has to stay crisp on a PDF letterhead is usually vector.
+ *
+ * An SVG is a document that can carry script, so it is never inlined into a
+ * page. Branding assets are served from the Blob store's own origin behind a
+ * signed URL and rendered in an `<img>`, where script inside the file does
+ * not execute.
+ */
+export const BRAND_MIME_TYPES = [
+  ...ALLOWED_MIME_TYPES,
+  'image/svg+xml',
+] as const;
+
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
 export const DEFAULT_SIGNED_URL_TTL_SECONDS = 15 * 60;
 
@@ -56,10 +70,18 @@ function assertConfigured(): void {
   if (!isStorageConfigured()) throw new StorageNotConfiguredError();
 }
 
-function assertAllowed(mimeType: string, sizeBytes: number): void {
-  if (!(ALLOWED_MIME_TYPES as readonly string[]).includes(mimeType)) {
+function assertAllowed(
+  mimeType: string,
+  sizeBytes: number,
+  allowed: readonly string[] = ALLOWED_MIME_TYPES,
+): void {
+  if (!allowed.includes(mimeType)) {
     throw new StorageValidationError(
-      `${mimeType} is not an accepted file type. Upload a JPEG, PNG, WebP or PDF.`,
+      `${mimeType} is not an accepted file type. Upload a ${
+        allowed === ALLOWED_MIME_TYPES
+          ? 'JPEG, PNG, WebP or PDF'
+          : 'JPEG, PNG, WebP, SVG or PDF'
+      }.`,
     );
   }
   if (sizeBytes > MAX_UPLOAD_BYTES) {
@@ -189,4 +211,34 @@ export async function exists(key: string): Promise<boolean> {
 /** Validate an uploaded `File` before it reaches storage. */
 export function assertUploadable(file: File): void {
   assertAllowed(file.type, file.size);
+}
+
+/** As `assertUploadable`, for the branding assets that may also be SVG. */
+export function assertBrandAssetUploadable(file: File): void {
+  assertAllowed(file.type, file.size, BRAND_MIME_TYPES);
+}
+
+/**
+ * Store a branding asset.
+ *
+ * Separate from `upload` only so the wider allowlist cannot leak into the
+ * document path, where an SVG has no business being.
+ */
+export async function uploadBrandAsset(
+  buffer: Buffer | Uint8Array,
+  key: string,
+  mimeType: string,
+): Promise<{ key: string; sizeBytes: number }> {
+  assertAllowed(mimeType, buffer.byteLength, BRAND_MIME_TYPES);
+  assertConfigured();
+
+  const body = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
+  await put(key, body, {
+    access: 'private',
+    contentType: mimeType,
+    addRandomSuffix: false,
+    allowOverwrite: false,
+  });
+
+  return { key, sizeBytes: buffer.byteLength };
 }

@@ -3,7 +3,8 @@ import { AppShell } from '@/components/layout/app-shell';
 import { UserMenu } from '@/components/layout/user-menu';
 import { signOutAction } from '@/app/(auth)/actions';
 import { can, getCurrentUser } from '@/lib/authz';
-import { getBranding } from '@/lib/branding';
+import { BrandMark } from '@/components/brand-mark';
+import { getBranding } from '@/lib/branding-store';
 import { NAVIGATION } from '@/lib/navigation';
 
 /**
@@ -32,11 +33,7 @@ export default async function DashboardLayout({
   return (
     <AppShell
       sections={sections}
-      brand={
-        <span className="text-sm font-semibold tracking-tight">
-          {branding.tradingName}
-        </span>
-      }
+      brand={<BrandMark branding={branding} />}
       header={
         <div className="ml-auto flex items-center gap-2">
           <UserMenu
