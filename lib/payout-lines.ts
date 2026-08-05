@@ -25,8 +25,37 @@ export interface PayoutJob {
   reference: string;
   scheduledAt: Date;
   driverPricePence: number | null;
+  /**
+   * What the finance record says the driver is paid — spec 4.5.2.
+   *
+   * Preferred over `driverPricePence` when there is one, because the finance
+   * panel is where a fee actually gets adjusted: waiting time agreed after
+   * the job, an hourly driver's hours, a correction. The booking price is
+   * what was expected; this is what was settled on, and paying the first when
+   * the second exists would quietly short the driver.
+   */
+  financeDriverPaymentPence?: number | null;
   /** Set when a shift covered this job, which means it carries no fee. */
   shiftId: string | null;
+}
+
+/**
+ * An expense the driver paid out of their own pocket — spec 4.5.8.
+ *
+ * Reimbursed as its own line rather than folded into a job's fee: a driver
+ * checking a payout against their receipts needs the parking to appear as
+ * parking. Only expenses somebody approved, and only ones the driver is not
+ * meant to bear themselves — an owner-driver's own fuel is a cost of their
+ * business, not something the company owes them.
+ */
+export interface PayoutExpense {
+  id: string;
+  jobId: string;
+  jobReference: string;
+  occurredAt: Date;
+  kind: string;
+  amountPence: number;
+  note: string | null;
 }
 
 export interface PayoutShift {
@@ -39,7 +68,7 @@ export interface PayoutShift {
   approvedAt: Date | null;
 }
 
-export type PayoutLineSource = 'JOB' | 'SHIFT';
+export type PayoutLineSource = 'JOB' | 'SHIFT' | 'EXPENSE';
 
 export interface PayoutLineDraft {
   source: PayoutLineSource;
@@ -55,6 +84,7 @@ export interface PayoutDraft {
   lines: PayoutLineDraft[];
   jobPence: number;
   shiftPence: number;
+  expensePence: number;
   totalPence: number;
   /**
    * Things deliberately left out, and why. Surfaced rather than silently
@@ -73,6 +103,8 @@ export interface PayoutDraft {
 export function buildPayoutLines(input: {
   jobs: PayoutJob[];
   shifts: PayoutShift[];
+  /** Approved, driver-paid expenses to reimburse. */
+  expenses?: PayoutExpense[];
   /** Shifts must be approved before they are paid, unless this is off. */
   requireApprovedShifts?: boolean;
 }): PayoutDraft {
@@ -90,7 +122,10 @@ export function buildPayoutLines(input: {
       continue;
     }
 
-    if (job.driverPricePence === null || job.driverPricePence === 0) {
+    // The settled figure beats the booked one where there is a difference.
+    const feePence = job.financeDriverPaymentPence ?? job.driverPricePence;
+
+    if (feePence === null || feePence === 0) {
       // Not silently skipped. An unpriced job is a data-quality problem, and
       // a payout that quietly omits one is how a driver ends up short.
       excluded.push({
@@ -104,7 +139,7 @@ export function buildPayoutLines(input: {
       source: 'JOB',
       jobId: job.id,
       shiftId: null,
-      amountPence: job.driverPricePence,
+      amountPence: feePence,
       description: `Job ${job.reference}`,
       occurredAt: job.scheduledAt,
     });
@@ -145,6 +180,24 @@ export function buildPayoutLines(input: {
     });
   }
 
+  for (const expense of input.expenses ?? []) {
+    if (expense.amountPence === 0) continue;
+
+    // Carried on the line as a job id: it *is* a cost of that job, and a
+    // reimbursement that pointed at nothing would be untraceable the moment
+    // anybody queried it.
+    lines.push({
+      source: 'EXPENSE',
+      jobId: expense.jobId,
+      shiftId: null,
+      amountPence: expense.amountPence,
+      description: `${expenseLabel(expense.kind)} on ${expense.jobReference}${
+        expense.note ? ` — ${expense.note}` : ''
+      }`,
+      occurredAt: expense.occurredAt,
+    });
+  }
+
   // Chronological, so a statement reads as the period happened rather than
   // as jobs-then-shifts.
   lines.sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime());
@@ -155,12 +208,24 @@ export function buildPayoutLines(input: {
   const shiftPence = sumPence(
     ...lines.filter((line) => line.source === 'SHIFT').map((line) => line.amountPence),
   );
+  const expensePence = sumPence(
+    ...lines
+      .filter((line) => line.source === 'EXPENSE')
+      .map((line) => line.amountPence),
+  );
 
   return {
     lines,
     jobPence,
     shiftPence,
-    totalPence: jobPence + shiftPence,
+    expensePence,
+    totalPence: jobPence + shiftPence + expensePence,
     excluded,
   };
+}
+
+/** `TOLL_CONGESTION` reads as "Toll congestion" on a statement. */
+function expenseLabel(kind: string): string {
+  const words = kind.toLowerCase().replace(/_/g, ' ');
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }

@@ -132,6 +132,10 @@ async function completedJob(page: Page, clientName: string, price: string) {
   await selectByOptionText(page, '#clientId', clientName);
   await selectByOptionText(page, '#driverId', driverName);
   await page.getByRole('button', { name: 'Book job' }).click();
+  // Waited on the job's own status control, not on the absence of a
+  // warning: `toHaveCount(0)` passes on any page, including the booking
+  // form the browser has not left yet.
+  await expect(page.getByTestId('job-status')).toBeVisible({ timeout: 15_000 });
   await expect(page.getByTestId('unpriced-alert')).toHaveCount(0);
 
   for (const status of ['Assigned', 'In progress', 'Completed']) {
