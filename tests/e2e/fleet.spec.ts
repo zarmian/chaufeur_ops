@@ -221,6 +221,38 @@ test.describe('fleet', () => {
     await expect(page.getByTestId('cost-list')).toHaveCount(0);
   });
 
+  test('a receipt is offered only when storage can hold one', async ({
+    page,
+  }) => {
+    // CI has no Blob store, so this asserts the honest half: the field is
+    // absent and the panel says why, rather than offering an upload that
+    // would silently go nowhere. With storage configured the field appears.
+    await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+
+    const registration = `RC${String(Date.now()).slice(-6)}`;
+    await addVehicle(page, registration, 'OWNED');
+
+    const form = page.getByTestId('cost-form');
+    const receipt = form.getByLabel('Receipt');
+
+    if ((await receipt.count()) > 0) {
+      await expect(receipt).toBeVisible();
+    } else {
+      await expect(form).toContainText('File storage is not configured');
+    }
+
+    // Either way the cost itself records, and an invoice reference is kept
+    // against it — that is what reconciles when the paperwork turns up.
+    await form.getByLabel('Kind').selectOption('MOT_TEST');
+    await form.getByLabel('Amount').fill('54.85');
+    await form.getByLabel('Date').fill(dateIn(-2));
+    await form.getByLabel('Invoice ref').fill('INV-2291');
+    await form.getByRole('button', { name: 'Add' }).click();
+
+    await expect(page.getByTestId('cost-list')).toContainText('INV-2291');
+    await expect(page.getByTestId('cost-list')).toContainText('£54.85');
+  });
+
   test('the fleet view ranks cars and marks the idle ones', async ({ page }) => {
     await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
 

@@ -260,6 +260,10 @@ export default async function VehicleDetailPage({
             companyOwned={companyOwned}
             ownerName={vehicle.ownerDriver?.name ?? null}
             mayEdit={mayEditCosts}
+            // A garage invoice shows what the company pays its suppliers,
+            // which is finance's business rather than every dispatcher's.
+            mayViewReceipts={can(user, 'viewInvoices')}
+            storageConfigured={isStorageConfigured()}
             error={costError}
             today={toDateOnlyString(new Date())}
             costs={costs}
