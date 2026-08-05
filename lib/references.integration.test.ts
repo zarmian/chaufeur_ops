@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   DRIVER_REFERENCE_PREFIX,
@@ -169,5 +169,86 @@ describe.skipIf(!DATABASE_AVAILABLE)('job reference allocation', () => {
     const reference = await peekNextJobReference();
     const digits = reference.split('-')[1] ?? '';
     expect(digits.length).toBeGreaterThanOrEqual(6);
+  });
+
+  it('offsets the peek so a retry steps past the collision', async () => {
+    // Without this, every concurrent writer re-reads the same maximum and
+    // asks for the same next number, so they collide again on the retry and
+    // the one after. CI found it: four test files creating jobs at once
+    // exhausted the retries and refused a booking.
+    const [first, second, third] = await Promise.all([
+      peekNextJobReference(0),
+      peekNextJobReference(1),
+      peekNextJobReference(2),
+    ]);
+
+    const numberOf = (reference: string) => Number(reference.split('-')[1]);
+    expect(numberOf(second!)).toBe(numberOf(first!) + 1);
+    expect(numberOf(third!)).toBe(numberOf(first!) + 2);
+  });
+});
+
+describe.skipIf(!DATABASE_AVAILABLE)('allocation under contention', () => {
+  afterAll(async () => {
+    await raw?.$disconnect();
+  });
+
+  /** The error Postgres raises when two writers claim one reference. */
+  function duplicateReference(): Prisma.PrismaClientKnownRequestError {
+    return new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+      code: 'P2002',
+      clientVersion: 'test',
+      meta: { target: ['reference'] },
+    });
+  }
+
+  it('asks for a different number after each collision', async () => {
+    // The case CI hit, driven directly rather than by racing real writers:
+    // the database serialises concurrent creates through the connection pool,
+    // so a `Promise.all` in one process does not reproduce what four parallel
+    // test *processes* did.
+    //
+    // What broke was that every retry re-read the same maximum and asked for
+    // the same number again, so five attempts made five identical requests
+    // and the booking was refused. Each attempt must now ask for a different
+    // one.
+    const asked: string[] = [];
+
+    await expect(
+      withDriverReference(async (reference) => {
+        asked.push(reference);
+        throw duplicateReference();
+      }),
+    ).rejects.toThrow();
+
+    expect(asked.length).toBeGreaterThan(5);
+    expect(new Set(asked).size).toBe(asked.length);
+  });
+
+  it('settles as soon as a number is free', async () => {
+    // Three collisions then success — the ordinary shape of a contended
+    // allocation, and it must not surface the collisions to the caller.
+    let attempts = 0;
+    const result = await withDriverReference(async (reference) => {
+      attempts += 1;
+      if (attempts <= 3) throw duplicateReference();
+      return reference;
+    });
+
+    expect(attempts).toBe(4);
+    expect(result).toMatch(new RegExp(`^${DRIVER_REFERENCE_PREFIX}-\\d{4,}$`));
+  });
+
+  it('surfaces anything that is not a reference collision immediately', async () => {
+    // Retrying a real fault would turn one error into twelve.
+    let attempts = 0;
+    await expect(
+      withDriverReference(async () => {
+        attempts += 1;
+        throw new Error('the database fell over');
+      }),
+    ).rejects.toThrow('the database fell over');
+
+    expect(attempts).toBe(1);
   });
 });

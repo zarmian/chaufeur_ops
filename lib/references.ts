@@ -17,8 +17,14 @@ export const DRIVER_REFERENCE_PREFIX = 'DRV';
 export const DRIVER_REFERENCE_PAD = 4;
 export const JOB_REFERENCE_PAD = 6;
 
-/** How many times to retry when two creates race for the same number. */
-const MAX_ATTEMPTS = 5;
+/**
+ * How many times to retry when concurrent creates race for the same number.
+ *
+ * Generous because the failure mode is a refused booking. Each attempt is one
+ * cheap query plus one insert, so a dozen costs milliseconds even in the
+ * worst case, and the worst case is rare.
+ */
+const MAX_ATTEMPTS = 12;
 
 export function formatReference(
   prefix: string,
@@ -91,19 +97,23 @@ async function highestSequence(
   return rows[0]?.max ?? 0;
 }
 
-export async function peekNextDriverReference(): Promise<string> {
+export async function peekNextDriverReference(offset = 0): Promise<string> {
   const highest = await highestSequence('driver', DRIVER_REFERENCE_PREFIX);
   return formatReference(
     DRIVER_REFERENCE_PREFIX,
-    highest + 1,
+    highest + 1 + offset,
     DRIVER_REFERENCE_PAD,
   );
 }
 
-export async function peekNextJobReference(): Promise<string> {
+export async function peekNextJobReference(offset = 0): Promise<string> {
   const { jobReferencePrefix } = await getBranding();
   const highest = await highestSequence('job', jobReferencePrefix);
-  return formatReference(jobReferencePrefix, highest + 1, JOB_REFERENCE_PAD);
+  return formatReference(
+    jobReferencePrefix,
+    highest + 1 + offset,
+    JOB_REFERENCE_PAD,
+  );
 }
 
 /**
@@ -113,15 +123,31 @@ export async function peekNextJobReference(): Promise<string> {
  * the same moment ends with one unique-constraint violation rather than two
  * records sharing a number. That is the safe failure, and retrying it is
  * cheap — so this retries rather than surfacing it.
+ *
+ * Two details make the retry actually converge under load, both learned from
+ * a CI run where four test files created jobs at once and a booking was
+ * refused after five collisions:
+ *
+ * - **The retry steps past the collision.** Re-reading the highest number is
+ *   not enough on its own: every concurrent writer reads the same maximum and
+ *   asks for the same next number, so they collide again on the next attempt
+ *   and the one after. Offsetting by the attempt count spreads them, so N
+ *   writers settle into N adjacent numbers instead of fighting over one.
+ * - **A short random wait between attempts.** Without it, writers that
+ *   started together stay in lockstep.
+ *
+ * Neither creates gaps in the ordinary case: the offset is only applied after
+ * a collision, and the number it lands on is one another writer has just
+ * taken or is about to.
  */
 async function withReference<T>(
-  peek: () => Promise<string>,
+  peek: (offset: number) => Promise<string>,
   create: (reference: string) => Promise<T>,
 ): Promise<T> {
   let lastError: unknown;
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
-    const reference = await peek();
+    const reference = await peek(attempt);
     try {
       return await create(reference);
     } catch (error) {
@@ -132,6 +158,12 @@ async function withReference<T>(
 
       if (!isDuplicateReference) throw error;
       lastError = error;
+
+      if (attempt < MAX_ATTEMPTS - 1) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, Math.random() * 15 * (attempt + 1)),
+        );
+      }
     }
   }
 
