@@ -8,6 +8,7 @@ import {
 } from './compliance';
 import { fromDateOnlyString } from './dates';
 import type { ListParams } from './list-params';
+import { parseMoney } from './money';
 import { prisma } from './prisma';
 import { emptyToNull, normaliseRegistration, tidy } from './text';
 
@@ -25,6 +26,14 @@ const optionalDate = z
   .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use the date picker')
   .optional()
   .or(z.literal(''));
+
+// `z.coerce.number()` turns '' into 0, which would record a car with no
+// odometer as one that has never moved. Blanks become null before coercion.
+const optionalInt = z.preprocess(
+  (value) =>
+    value === '' || value === null || value === undefined ? null : value,
+  z.coerce.number().int().min(0).max(2_000_000).nullable(),
+);
 
 export const vehicleSchema = z.object({
   registration: z
@@ -51,6 +60,35 @@ export const vehicleSchema = z.object({
   insuranceExpiry: optionalDate,
   insurancePolicyNo: z.string().trim().max(60).optional().or(z.literal('')),
   status: z.enum(['ACTIVE', 'OFF_ROAD', 'RETIRED']),
+
+  // Phase 2.6. Defaulted so an existing record saved through an older form
+  // keeps its meaning rather than silently becoming a company car.
+  ownership: z
+    .enum(['OWNED', 'FINANCED', 'LEASED', 'DRIVER_OWNED'])
+    .default('DRIVER_OWNED'),
+  ownerDriverId: z.string().trim().optional().or(z.literal('')),
+  acquiredOn: optionalDate,
+  disposedOn: optionalDate,
+  purchasePrice: z
+    .string()
+    .trim()
+    .optional()
+    .superRefine((value, ctx) => {
+      if (!value) return;
+      try {
+        parseMoney(value);
+      } catch {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Enter an amount like 34500.00, or leave it blank',
+        });
+      }
+    }),
+  currentOdometer: optionalInt,
+  lastServicedOn: optionalDate,
+  lastServiceMiles: optionalInt,
+  serviceEveryMonths: optionalInt,
+  serviceEveryMiles: optionalInt,
 });
 
 export type VehicleInput = z.infer<typeof vehicleSchema>;
@@ -74,6 +112,24 @@ function toData(input: VehicleInput) {
     insuranceExpiry: toDate(input.insuranceExpiry),
     insurancePolicyNo: emptyToNull(input.insurancePolicyNo),
     status: input.status,
+
+    ownership: input.ownership,
+    // An owner only means anything on a driver's own car. Keeping one against
+    // a company car would leave the record claiming both.
+    ownerDriverId:
+      input.ownership === 'DRIVER_OWNED'
+        ? emptyToNull(input.ownerDriverId)
+        : null,
+    acquiredOn: toDate(input.acquiredOn),
+    disposedOn: toDate(input.disposedOn),
+    purchasePricePence: input.purchasePrice?.trim()
+      ? parseMoney(input.purchasePrice)
+      : null,
+    currentOdometer: input.currentOdometer,
+    lastServicedOn: toDate(input.lastServicedOn),
+    lastServiceMiles: input.lastServiceMiles,
+    serviceEveryMonths: input.serviceEveryMonths,
+    serviceEveryMiles: input.serviceEveryMiles,
   };
 }
 
@@ -108,6 +164,7 @@ export interface VehicleListFilters {
   status: string | null;
   vehicleClass: string | null;
   compliance: string | null;
+  ownership: string | null;
   archived: boolean;
 }
 
@@ -124,6 +181,9 @@ export async function listVehicles(
       : {}),
     ...(filters.vehicleClass
       ? { vehicleClass: filters.vehicleClass as VehicleInput['vehicleClass'] }
+      : {}),
+    ...(filters.ownership
+      ? { ownership: filters.ownership as VehicleInput['ownership'] }
       : {}),
     ...(params.q
       ? {
@@ -153,6 +213,7 @@ export async function listVehicles(
     motExpiry: true,
     insuranceExpiry: true,
     phvLicenceExpiry: true,
+    ownership: true,
     drivers: { select: { id: true, name: true }, take: 2 },
   };
 
@@ -205,11 +266,22 @@ export async function getVehicle(id: string) {
     where: { id },
     include: {
       drivers: { select: { id: true, name: true, reference: true } },
+      ownerDriver: { select: { id: true, name: true, reference: true } },
       documents: {
         orderBy: { uploadedAt: 'desc' },
         where: { supersededBy: null },
       },
     },
+  });
+}
+
+/** Drivers offered as the owner of a driver-owned car. */
+export async function listDriverOptions() {
+  return prisma.driver.findMany({
+    where: { status: { not: 'INACTIVE' } },
+    select: { id: true, name: true, reference: true },
+    orderBy: { name: 'asc' },
+    take: 1000,
   });
 }
 

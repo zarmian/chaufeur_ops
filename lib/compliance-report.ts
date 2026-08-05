@@ -5,6 +5,7 @@ import {
 } from './compliance';
 import { daysBetweenDates } from './dates';
 import { prisma } from './prisma';
+import { companyBearsCosts, serviceStatus } from './vehicle-costs';
 
 /**
  * The fleet-wide expiry picture.
@@ -33,11 +34,22 @@ export interface ComplianceReport {
   warning: ExpiringRow[];
   /** Kept apart, per the spec: unknown is not a severity, it is a gap. */
   unknownExpiry: ExpiringRow[];
+  /**
+   * Company cars with a service due.
+   *
+   * Listed alongside the lapsing documents because both stop a car earning,
+   * but counted apart from them: an expired MOT is illegal and blocks
+   * assignment, an overdue service is a maintenance decision. Folding these
+   * into the counts would mean the "cannot be assigned" figure stopped
+   * meaning that.
+   */
+  serviceDue: ExpiringRow[];
   counts: {
     expired: number;
     critical: number;
     warning: number;
     unknownExpiry: number;
+    serviceDue: number;
   };
 }
 
@@ -86,6 +98,12 @@ export async function buildComplianceReport(
         motExpiry: true,
         insuranceExpiry: true,
         phvLicenceExpiry: true,
+        ownership: true,
+        lastServicedOn: true,
+        lastServiceMiles: true,
+        currentOdometer: true,
+        serviceEveryMonths: true,
+        serviceEveryMiles: true,
       },
     }),
   ]);
@@ -140,6 +158,29 @@ export async function buildComplianceReport(
     }
   }
 
+  // Servicing, for the company's own cars only. A driver's own car is
+  // serviced by its owner and the company has no reading to judge it on.
+  const serviceDue: ExpiringRow[] = [];
+  for (const vehicle of vehicles) {
+    if (!companyBearsCosts(vehicle.ownership)) continue;
+    const status = serviceStatus(vehicle, now);
+    if (!status.due) continue;
+    serviceDue.push({
+      kind: 'VEHICLE',
+      id: vehicle.id,
+      name: vehicle.registration,
+      reference: null,
+      documentType: 'SERVICE',
+      documentLabel: status.reason ?? 'Service due',
+      expiresOn: null,
+      daysRemaining: status.daysRemaining,
+      // Amber, never red: this does not stop the car being assigned.
+      level: 'warning',
+      href: `/vehicles/${vehicle.id}#costs`,
+    });
+  }
+  serviceDue.sort((a, b) => (a.daysRemaining ?? 0) - (b.daysRemaining ?? 0));
+
   // Most urgent first: the longest-lapsed at the top, because that is the one
   // that has been putting the licence at risk for longest.
   const byUrgency = (a: ExpiringRow, b: ExpiringRow) =>
@@ -157,11 +198,13 @@ export async function buildComplianceReport(
     critical,
     warning,
     unknownExpiry,
+    serviceDue,
     counts: {
       expired: expired.length,
       critical: critical.length,
       warning: warning.length,
       unknownExpiry: unknownExpiry.length,
+      serviceDue: serviceDue.length,
     },
   };
 }
@@ -185,6 +228,12 @@ export function toApiShape(report: ComplianceReport, now = new Date()) {
     critical: report.critical.map(map),
     warning: report.warning.map(map),
     unknownExpiry: report.unknownExpiry.map(map),
+    // A service is due by mileage as often as by date, so its countdown comes
+    // from the status rather than from an expiry that may not exist.
+    serviceDue: report.serviceDue.map((row) => ({
+      ...map(row),
+      daysRemaining: row.daysRemaining,
+    })),
     counts: report.counts,
   };
 }
@@ -196,6 +245,7 @@ export function toExportRows(report: ComplianceReport) {
     ...report.critical,
     ...report.warning,
     ...report.unknownExpiry,
+    ...report.serviceDue,
   ].map((row) => ({
     Type: row.kind === 'DRIVER' ? 'Driver' : 'Vehicle',
     Name: row.name,

@@ -120,6 +120,13 @@ export const NAVIGATION: NavSection[] = [
         matchPrefix: true,
       },
       {
+        href: '/fleet',
+        label: 'Fleet profit',
+        icon: 'Wrench',
+        capability: 'viewReports',
+        matchPrefix: true,
+      },
+      {
         href: '/reports',
         label: 'Reports',
         icon: 'ChartNoAxesColumn',

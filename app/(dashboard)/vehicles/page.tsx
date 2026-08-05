@@ -25,7 +25,12 @@ import {
 } from '@/lib/list-params';
 import { pageRequireCapability } from '@/lib/page-guards';
 import { getComplianceThresholds } from '@/lib/settings';
-import { VEHICLE_CLASSES, VEHICLE_STATUSES } from '@/lib/enum-options';
+import {
+  VEHICLE_CLASSES,
+  VEHICLE_OWNERSHIPS,
+  VEHICLE_STATUSES,
+} from '@/lib/enum-options';
+import { OWNERSHIP_LABELS } from '@/lib/vehicle-costs';
 import { listVehicles } from '@/lib/vehicles';
 
 export const metadata = { title: 'Vehicles' };
@@ -51,6 +56,7 @@ export default async function VehiclesPage({
     status: filterValue(params, 'status'),
     vehicleClass: filterValue(params, 'vehicleClass'),
     compliance: filterValue(params, 'compliance'),
+    ownership: filterValue(params, 'ownership'),
     archived: filterFlag(params, 'archived'),
   };
 
@@ -63,6 +69,7 @@ export default async function VehiclesPage({
       filters.status ||
       filters.vehicleClass ||
       filters.compliance ||
+      filters.ownership ||
       filters.archived,
   );
 
@@ -106,6 +113,12 @@ export default async function VehiclesPage({
             options: COMPLIANCE_OPTIONS,
             allLabel: 'Any state',
           },
+          {
+            name: 'ownership',
+            label: 'Ownership',
+            options: VEHICLE_OWNERSHIPS.map((o) => ({ ...o })),
+            allLabel: 'Any ownership',
+          },
         ]}
       />
 
@@ -140,6 +153,7 @@ export default async function VehiclesPage({
             <TableRow>
               <TableHead>Registration</TableHead>
               <TableHead>Vehicle</TableHead>
+              <TableHead>Held as</TableHead>
               <TableHead>Driver</TableHead>
               <TableHead>Compliance</TableHead>
               <TableHead>Next expiry</TableHead>
@@ -170,6 +184,9 @@ export default async function VehiclesPage({
                   <TableCell className="text-muted-foreground">
                     {vehicle.make} {vehicle.model}
                     {vehicle.variant ? ` ${vehicle.variant}` : ''}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {OWNERSHIP_LABELS[vehicle.ownership]}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {vehicle.drivers.length === 0

@@ -135,6 +135,34 @@ enum PayoutStatus {
 /// How a driver is working at a given moment. Not a fixed property of the
 /// person — the same driver can be an owner-driver one week and hired the
 /// next. See DriverEngagement.
+/// How a vehicle is held.
+///
+/// `DRIVER_OWNED` is the default because most of the fleet is owner-drivers'
+/// cars — the company neither pays for them nor is entitled to their costs.
+enum VehicleOwnership {
+  OWNED
+  FINANCED
+  LEASED
+  DRIVER_OWNED
+}
+
+/// What a vehicle cost was for.
+enum VehicleCostKind {
+  SERVICE
+  REPAIR
+  MOT_TEST
+  TYRES
+  BODYWORK
+  CLEANING
+  INSURANCE
+  ROAD_TAX
+  FINANCE
+  LEASE
+  BREAKDOWN_COVER
+  PARKING_PERMIT
+  OTHER
+}
+
 enum EngagementKind {
   /// Owns or leases their own car, paid a fee per job, bears their own
   /// running costs. The Phase 1/2 assumption, and the default.
@@ -321,6 +349,7 @@ model Driver {
   engagements     DriverEngagement[]
   shifts          DriverShift[]
   rentals         VehicleRental[]
+  ownedVehicles   Vehicle[]          @relation("VehicleOwner")
 
   @@index([status])
   @@index([phvBadgeExpiry])
@@ -346,10 +375,32 @@ model Vehicle {
   insuranceExpiry   DateTime? @db.Date
   insurancePolicyNo String?
 
+  /// Most of the fleet belongs to its driver. Company cars are the exception,
+  /// and the only ones whose running costs are the company's.
+  ownership     VehicleOwnership @default(DRIVER_OWNED)
+  /// Whose car it is, when it is not the company's.
+  ownerDriverId String?
+
+  acquiredOn         DateTime? @db.Date
+  disposedOn         DateTime? @db.Date
+  purchasePricePence Int?
+
+  /// Latest known reading, updated whenever a cost records one.
+  currentOdometer  Int?
+  lastServicedOn   DateTime? @db.Date
+  lastServiceMiles Int?
+  /// Nulls fall back to the configured fleet defaults.
+  serviceEveryMonths Int?
+  serviceEveryMiles  Int?
+
   status    VehicleStatus @default(ACTIVE)
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
   deletedAt DateTime?
+
+  ownerDriver   Driver?               @relation("VehicleOwner", fields: [ownerDriverId], references: [id])
+  costs         VehicleCost[]
+  standingCosts VehicleStandingCost[]
 
   documents Document[]
   drivers   Driver[]
@@ -358,6 +409,7 @@ model Vehicle {
   rentals   VehicleRental[]
 
   @@index([status])
+  @@index([ownership])
   @@index([motExpiry])
   @@index([insuranceExpiry])
   @@index([phvLicenceExpiry])
@@ -752,6 +804,65 @@ model JobStop {
 /// Deliberately not a Job. A rental has no pickup, no dropoff and no
 /// passenger, spans days rather than minutes, and earns money with no
 /// journey attached. Modelling it as a job would corrupt every job report.
+/// A one-off cost against a vehicle — a service, a repair, a set of tyres.
+model VehicleCost {
+  id        String          @id @default(cuid())
+  vehicleId String
+  kind      VehicleCostKind
+
+  amountPence Int
+  incurredOn  DateTime @db.Date
+
+  supplier       String?
+  invoiceRef     String?
+  /// Reading at the time, so servicing intervals can be judged on mileage.
+  odometer       Int?
+  receiptFileKey String?
+  note           String?
+
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id])
+
+  @@index([vehicleId, incurredOn])
+  @@index([kind])
+  @@index([deletedAt])
+}
+
+/// A cost that recurs — insurance, road tax, a finance or lease payment.
+///
+/// Held as an amount per period rather than as a stream of payments, and
+/// accrued pro-rata across whatever window is being asked about. A £1,200
+/// annual premium is £100 in a month; recording it as a single April payment
+/// would make April look like a disaster and May look free.
+model VehicleStandingCost {
+  id        String          @id @default(cuid())
+  vehicleId String
+  kind      VehicleCostKind
+
+  label       String
+  /// The amount charged once per `periodMonths`.
+  amountPence Int
+  periodMonths Int @default(1)
+
+  startsOn DateTime  @db.Date
+  /// null = still running
+  endsOn   DateTime? @db.Date
+
+  note      String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id])
+
+  @@index([vehicleId, startsOn])
+  @@index([deletedAt])
+}
+
 model VehicleRental {
   id        String @id @default(cuid())
   /// human-facing, e.g. RNT-000042

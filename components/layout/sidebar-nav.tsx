@@ -15,6 +15,7 @@ import {
   Timer,
   Users,
   Wallet,
+  Wrench,
   type LucideIcon,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -37,6 +38,7 @@ const ICONS: Record<string, LucideIcon> = {
   ShieldCheck,
   Timer,
   KeyRound,
+  Wrench,
 };
 
 export function SidebarNav({

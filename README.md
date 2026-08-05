@@ -25,7 +25,9 @@ The order below differs deliberately from the enhancement roadmap in the origina
 | **0 — Foundation** | Repo, DB, auth, roles, layout, deploy pipeline, audit log | — |
 | **1 — Core records** | Clients, accounts, drivers, vehicles, documents, expiry tracking | 0 |
 | **2 — Jobs** | Job CRUD, list with server-side filters, statuses, price at booking, finance panel | 1 |
-| **3 — Branding & import** | White-label theming, install script, CSV import for drivers/vehicles/clients | 2 |
+| **2.5 — Hourly, stops & engagements** | Hourly pricing, stops, itemised expenses, hired-driver shifts, vehicle rentals | 2 |
+| **2.6 — Fleet** | Vehicle ownership, running and standing costs, servicing, profit per vehicle | 2.5 |
+| **3 — Branding & import** | White-label theming, install script, CSV import for drivers/vehicles/clients | 2.6 |
 | **4 — Money** | Rate cards, invoicing with VAT, invoice ledger, driver payouts, reports and exports | 3 |
 | **5 — Telegram** | Driver bot, assignment, status events, wait-time capture, expenses, admin bot | 4 |
 | **6 — Dispatch & scale** | Day timeline, conflict detection, recurring jobs, saved locations, payment gateways | 5 |
