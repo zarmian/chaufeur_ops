@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   ALLOWED_MIME_TYPES,
+  assertUploadable,
   buildObjectKey,
   DEFAULT_SIGNED_URL_TTL_SECONDS,
   MAX_UPLOAD_BYTES,
@@ -47,6 +48,29 @@ describe('upload validation', () => {
 
   it('signs URLs for fifteen minutes by default', () => {
     expect(DEFAULT_SIGNED_URL_TTL_SECONDS).toBe(900);
+  });
+
+  // The early guard the route handlers call, so a rejected upload is refused
+  // before its bytes are ever read into memory.
+  describe('assertUploadable', () => {
+    const asFile = (type: string, size: number) =>
+      ({ type, size, name: 'f' }) as File;
+
+    it('accepts a receipt-sized PDF', () => {
+      expect(() => assertUploadable(asFile('application/pdf', 2048))).not.toThrow();
+    });
+
+    it('refuses a type outside the allowlist', () => {
+      expect(() =>
+        assertUploadable(asFile('application/x-msdownload', 2048)),
+      ).toThrow(StorageValidationError);
+    });
+
+    it('refuses a file over the size limit', () => {
+      expect(() =>
+        assertUploadable(asFile('application/pdf', MAX_UPLOAD_BYTES + 1)),
+      ).toThrow(StorageValidationError);
+    });
   });
 });
 

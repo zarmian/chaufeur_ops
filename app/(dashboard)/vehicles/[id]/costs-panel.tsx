@@ -1,4 +1,5 @@
-import { X } from 'lucide-react';
+import { Paperclip, X } from 'lucide-react';
+import Link from 'next/link';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -30,6 +31,7 @@ export interface CostRow {
   invoiceRef: string | null;
   odometer: number | null;
   note: string | null;
+  receiptFileKey: string | null;
 }
 
 export interface StandingRow {
@@ -68,6 +70,8 @@ export function CostsPanel({
   companyOwned,
   ownerName,
   mayEdit,
+  mayViewReceipts,
+  storageConfigured,
   error,
   today,
 }: {
@@ -77,6 +81,8 @@ export function CostsPanel({
   companyOwned: boolean;
   ownerName: string | null;
   mayEdit: boolean;
+  mayViewReceipts: boolean;
+  storageConfigured: boolean;
   error?: string | null;
   today: string;
 }) {
@@ -143,6 +149,23 @@ export function CostsPanel({
                     {cost.invoiceRef ? ` · ${cost.invoiceRef}` : ''}
                   </p>
                 </div>
+                {cost.receiptFileKey && mayViewReceipts ? (
+                  <Button asChild variant="ghost" size="sm">
+                    <Link
+                      href={`/api/vehicle-costs/${cost.id}/receipt`}
+                      target="_blank"
+                      rel="noopener"
+                      aria-label={`Receipt for this ${(
+                        COST_KIND_LABELS[
+                          cost.kind as keyof typeof COST_KIND_LABELS
+                        ] ?? cost.kind
+                      ).toLowerCase()}`}
+                      data-testid="cost-receipt"
+                    >
+                      <Paperclip aria-hidden />
+                    </Link>
+                  </Button>
+                ) : null}
                 <span className="tabular whitespace-nowrap text-sm">
                   {formatGBP(cost.amountPence)}
                 </span>
@@ -169,6 +192,9 @@ export function CostsPanel({
           <form
             method="post"
             action={action}
+            // Multipart because of the receipt. Harmless for the text-only
+            // case, and the route reads both the same way.
+            encType="multipart/form-data"
             className="mt-4 grid gap-2 border-t pt-4 sm:grid-cols-[9rem_7rem_9rem_1fr_auto]"
             data-testid="cost-form"
           >
@@ -217,7 +243,31 @@ export function CostsPanel({
                 className="tabular"
               />
             </Field>
-            <input type="hidden" name="invoiceRef" value="" />
+            <Field id="cost-invoice" label="Invoice ref">
+              <Input id="cost-invoice" name="invoiceRef" />
+            </Field>
+            {storageConfigured ? (
+              <Field
+                id="cost-receipt"
+                label="Receipt"
+                hint="JPEG, PNG, WebP or PDF."
+              >
+                <Input
+                  id="cost-receipt"
+                  name="receipt"
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,application/pdf"
+                  className="cursor-pointer file:mr-3 file:cursor-pointer file:rounded file:border-0 file:bg-secondary file:px-2 file:py-1 file:text-xs"
+                />
+              </Field>
+            ) : (
+              <div className="sm:col-span-2">
+                <p className="text-xs text-muted-foreground">
+                  File storage is not configured, so receipts cannot be
+                  attached. The costs themselves record fine without them.
+                </p>
+              </div>
+            )}
             <input type="hidden" name="note" value="" />
           </form>
         ) : null}

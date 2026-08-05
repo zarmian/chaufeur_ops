@@ -265,6 +265,52 @@ describe.skipIf(!DATABASE_AVAILABLE)('fleet profit', () => {
     expect(vehicle.currentOdometer).toBe(42000);
   });
 
+  it('refuses a receipt it cannot actually store', async () => {
+    // Said plainly rather than dropping the file. The operator watched it
+    // upload; silently discarding it would only surface at the VAT return.
+    const configured = Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+    const result = await recordVehicleCost(
+      companyCarId,
+      vehicleCostSchema.parse({
+        kind: 'REPAIR',
+        amountPence: '90.00',
+        incurredOn: dayIn(-3),
+      }),
+      audit,
+      {
+        buffer: Buffer.from('a receipt'),
+        fileName: 'invoice.pdf',
+        mimeType: 'application/pdf',
+      },
+    );
+
+    if (configured) {
+      expect(result.ok).toBe(true);
+    } else {
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.message).toMatch(/storage is not configured/);
+    }
+  });
+
+  it('records a cost with no receipt at all', async () => {
+    // The receipt is optional throughout — a cost entered from a bank line
+    // with no paperwork yet is still a cost.
+    const result = await recordVehicleCost(
+      companyCarId,
+      vehicleCostSchema.parse({
+        kind: 'CLEANING',
+        amountPence: '25.00',
+        incurredOn: dayIn(-4),
+      }),
+      audit,
+    );
+    expect(result.ok).toBe(true);
+
+    const { costs } = await getVehicleCosts(companyCarId);
+    const cleaning = costs.find((cost) => cost.kind === 'CLEANING');
+    expect(cleaning?.receiptFileKey).toBeNull();
+  });
+
   it('lists the costs and the service position', async () => {
     const { costs, standing, service } = await getVehicleCosts(companyCarId);
     expect(costs.length).toBeGreaterThan(0);

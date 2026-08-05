@@ -7,6 +7,7 @@ import { parseMoney } from './money';
 import { prisma } from './prisma';
 import { rentalCharge } from './rentals';
 import { shiftPayPence } from './shifts';
+import { buildObjectKey, isStorageConfigured, upload } from './storage';
 import { emptyToNull } from './text';
 import { companyBearsCosts, serviceStatus } from './vehicle-costs';
 import { defaultPnlWindow, rankByProfit, vehiclePnl } from './vehicle-pnl';
@@ -117,6 +118,13 @@ export type StandingCostInput = z.infer<typeof standingCostSchema>;
 
 export type CostRefusal = { ok: true } | { ok: false; message: string };
 
+/** A receipt to file against the cost. Optional throughout. */
+export interface ReceiptUpload {
+  buffer: Buffer;
+  fileName: string;
+  mimeType: string;
+}
+
 /**
  * Record a cost against a vehicle.
  *
@@ -127,11 +135,17 @@ export type CostRefusal = { ok: true } | { ok: false; message: string };
  * A cost carrying an odometer reading updates the car's current mileage, and
  * a service also moves the last-serviced marks — otherwise every service
  * would have to be entered twice.
+ *
+ * A receipt, when one is supplied, is stored before the transaction opens.
+ * The order matters: a failed upload must not leave a row pointing at an
+ * object that does not exist, and a garage invoice that silently vanished
+ * would only be discovered at the VAT return.
  */
 export async function recordVehicleCost(
   vehicleId: string,
   input: VehicleCostInput,
   context: AuditContext,
+  receipt?: ReceiptUpload,
 ): Promise<CostRefusal> {
   const vehicle = await prisma.vehicle.findUnique({
     where: { id: vehicleId },
@@ -148,6 +162,26 @@ export async function recordVehicleCost(
 
   const incurredOn = fromDateOnlyString(input.incurredOn);
 
+  let receiptFileKey: string | null = null;
+  if (receipt) {
+    // Said plainly rather than dropping the file: the operator watched it
+    // upload and would otherwise believe the receipt was filed.
+    if (!isStorageConfigured()) {
+      return {
+        ok: false,
+        message:
+          'File storage is not configured, so the receipt could not be filed. Record the cost without it, or set up a Blob store first.',
+      };
+    }
+    receiptFileKey = buildObjectKey(
+      'vehicle-cost',
+      vehicleId,
+      receipt.fileName,
+      'receipts',
+    );
+    await upload(receipt.buffer, receiptFileKey, receipt.mimeType);
+  }
+
   await withAudit(
     'Vehicle',
     'update',
@@ -161,6 +195,7 @@ export async function recordVehicleCost(
           supplier: emptyToNull(input.supplier),
           invoiceRef: emptyToNull(input.invoiceRef),
           odometer: input.odometer,
+          receiptFileKey,
           note: emptyToNull(input.note),
           createdById: context.userId ?? null,
         },
@@ -441,6 +476,15 @@ export async function getVehicleCosts(vehicleId: string) {
     standing,
     service: vehicle ? serviceStatus(vehicle) : null,
   };
+}
+
+/** One cost, for the receipt link. Deleted costs keep theirs — the receipt is
+ *  the evidence for a payment that still happened. */
+export async function getVehicleCost(costId: string) {
+  return prisma.vehicleCost.findUnique({
+    where: { id: costId },
+    select: { id: true, vehicleId: true, receiptFileKey: true },
+  });
 }
 
 export const COST_KINDS: VehicleCostKind[] = [

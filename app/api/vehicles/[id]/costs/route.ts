@@ -11,6 +11,7 @@ import {
 } from '@/lib/fleet';
 import { ForbiddenError, UnauthenticatedError } from '@/lib/permissions';
 import { clientIpFrom } from '@/lib/rate-limit';
+import { assertUploadable } from '@/lib/storage';
 
 /**
  * `POST /api/vehicles/:id/costs` — recording what a car costs to run.
@@ -57,6 +58,13 @@ export async function POST(
       );
       if (!result.ok) query.set('costError', result.message);
     } else {
+      // An empty file input still posts a zero-byte File, which is a receipt
+      // nobody attached rather than one that failed.
+      const upload = form.get('receipt');
+      const receipt =
+        upload instanceof File && upload.size > 0 ? upload : null;
+      if (receipt) assertUploadable(receipt);
+
       const result = await recordVehicleCost(
         id,
         vehicleCostSchema.parse({
@@ -69,6 +77,13 @@ export async function POST(
           note: form.get('note') ?? '',
         }),
         audit,
+        receipt
+          ? {
+              buffer: Buffer.from(await receipt.arrayBuffer()),
+              fileName: receipt.name,
+              mimeType: receipt.type,
+            }
+          : undefined,
       );
       if (!result.ok) query.set('costError', result.message);
     }

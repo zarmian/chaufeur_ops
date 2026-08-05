@@ -39,12 +39,19 @@ profit after running it, and a driver-owned car's margin.
    supplier, an invoice reference, the odometer reading and an optional
    receipt
 
-   > The receipt is the one part not built. `VehicleCost.receiptFileKey`
-   > exists and the storage layer is there, but the upload path is not wired
-   > up — a receipt currently goes on the vehicle's documents panel, not
-   > against the individual cost. Finish it when Phase 4 needs receipts for
-   > VAT reclaim, which is the first point at which cost-level attachment
-   > actually matters.
+   > The receipt goes to private Blob storage under
+   > `receipts/vehicle-cost/<vehicleId>/`, so an object's owner is obvious
+   > from its key alone — the same rule the compliance documents follow. It
+   > is read back through a signed URL that lasts fifteen minutes, behind
+   > `viewInvoices` rather than `viewJobs`: a garage invoice shows what the
+   > company pays its suppliers.
+   >
+   > Uploading happens before the row is written, so a failed upload cannot
+   > leave a cost pointing at an object that does not exist. Where storage is
+   > not configured the field is not offered at all and the panel says why —
+   > a receipt that silently went nowhere would only be discovered at the VAT
+   > return. A soft-deleted cost keeps its key: the receipt is evidence for a
+   > payment that still happened.
 2. Kinds cover servicing, repairs, MOT, tyres, bodywork, cleaning, breakdown
    cover and anything else
 3. Standing costs — insurance, road tax, finance and lease payments — are
