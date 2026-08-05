@@ -176,15 +176,23 @@ describe.skipIf(!DATABASE_AVAILABLE)('job reference allocation', () => {
     // asks for the same next number, so they collide again on the retry and
     // the one after. CI found it: four test files creating jobs at once
     // exhausted the retries and refused a booking.
-    const [first, second, third] = await Promise.all([
-      peekNextJobReference(0),
-      peekNextJobReference(1),
-      peekNextJobReference(2),
-    ]);
-
+    //
+    // Asserted as an inequality rather than exact arithmetic. Other test
+    // files create jobs while this runs, so the underlying maximum moves
+    // between reads — and pinning `second === first + 1` made this test
+    // itself flaky, which is a poor advertisement for a fix to a race. The
+    // maximum only ever rises, so `peek(n)` after `peek(0)` is at least n
+    // higher, and that holds however busy the database is.
+    //
+    // The exact arithmetic is pinned deterministically in "asks for a
+    // different number after each collision" below, which drives the retry
+    // directly and does not touch a shared table.
     const numberOf = (reference: string) => Number(reference.split('-')[1]);
-    expect(numberOf(second!)).toBe(numberOf(first!) + 1);
-    expect(numberOf(third!)).toBe(numberOf(first!) + 2);
+
+    const base = numberOf(await peekNextJobReference(0));
+    const offset = numberOf(await peekNextJobReference(3));
+
+    expect(offset).toBeGreaterThanOrEqual(base + 3);
   });
 });
 

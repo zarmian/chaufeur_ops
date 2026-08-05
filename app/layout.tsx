@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import { brandAssetSrc } from '@/lib/branding';
 import { getBranding } from '@/lib/branding-store';
 import { getLocaleConfig } from '@/lib/locale-store';
 import { brandStyleSheet } from '@/lib/theme';
@@ -25,7 +26,7 @@ export async function generateMetadata(): Promise<Metadata> {
     // job references in its URLs have something to lose.
     robots: { index: false, follow: false },
     ...(branding.faviconUrl
-      ? { icons: { icon: '/api/branding/asset?field=faviconUrl' } }
+      ? { icons: { icon: brandAssetSrc('faviconUrl', branding.faviconUrl)! } }
       : {}),
   };
 }

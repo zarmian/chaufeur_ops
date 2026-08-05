@@ -94,6 +94,40 @@ const optionalColour = z
     }
   });
 
+/**
+ * An externally hosted logo.
+ *
+ * `http` is refused rather than merely discouraged: the application is served
+ * over TLS, and a plain-http image on an https page is blocked by the browser
+ * as mixed content — so it would appear to save and then simply not show,
+ * which is the worst of both.
+ */
+export const assetUrlField = z
+  .string()
+  .trim()
+  .optional()
+  .or(z.literal(''))
+  .superRefine((value, ctx) => {
+    if (!value) return;
+    let url: URL;
+    try {
+      url = new URL(value);
+    } catch {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Enter a full address, starting https://',
+      });
+      return;
+    }
+    if (url.protocol !== 'https:') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          'The address must start https:// — a plain http image is blocked by the browser on a secure page, so it would save and then not appear.',
+      });
+    }
+  });
+
 export const brandingSchema = z.object({
   tradingName: z
     .string()
@@ -118,6 +152,47 @@ export const brandingSchema = z.object({
   bankDetails: optionalText(600),
   jobReferencePrefix: referencePrefix('job reference'),
   invoiceNumberPrefix: referencePrefix('invoice number'),
+
+  // Typed rather than uploaded. Empty leaves whatever is already stored
+  // alone, so saving the rest of the page does not clear an uploaded logo.
+  logoLightLink: assetUrlField,
+  logoDarkLink: assetUrlField,
+  faviconLink: assetUrlField,
 });
 
 export type BrandingInput = z.infer<typeof brandingSchema>;
+
+/**
+ * Whether a stored asset value is a link to somewhere else.
+ *
+ * The logo fields hold one of two things: a Blob storage key, written when a
+ * file is uploaded, or an ordinary URL, typed in by someone whose logo is
+ * already on their own website. The second exists because file storage is
+ * optional — a deployment without a Blob store had no way to set a logo at
+ * all, which made the whole white-label promise conditional on a piece of
+ * infrastructure that has nothing to do with branding.
+ *
+ * A key never starts with a scheme, so the two cannot be confused.
+ */
+export function isExternalAssetUrl(value: string | null): boolean {
+  if (!value) return false;
+  return /^https?:\/\//i.test(value.trim());
+}
+
+/**
+ * Where to load a branding asset from.
+ *
+ * An external URL is used as-is. A storage key goes through this
+ * application's own route, so the signed URL never appears in the markup
+ * where it would go stale in a cached page.
+ */
+export function brandAssetSrc(
+  field: 'logoLightUrl' | 'logoDarkUrl' | 'faviconUrl',
+  value: string | null,
+): string | null {
+  if (!value) return null;
+  return isExternalAssetUrl(value)
+    ? value
+    : `/api/branding/asset?field=${field}`;
+}
+

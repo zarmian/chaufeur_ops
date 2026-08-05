@@ -148,6 +148,64 @@ test.describe('branding', () => {
     await expect(page.getByTestId('branding-error')).toBeVisible();
   });
 
+  test('a logo can be set without file storage configured', async ({ page }) => {
+    // The gap this closes: with no Blob store the whole logo section was
+    // replaced by a warning, so a deployment without one had no way to set a
+    // logo at all — the white-label promise made conditional on a piece of
+    // infrastructure that has nothing to do with branding.
+    await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+    await page.goto('/settings/branding');
+
+    // The section is always there, whichever way round storage is.
+    await expect(page.getByTestId('asset-logoLightUrl')).toBeVisible();
+    const link = page
+      .getByTestId('asset-logoLightUrl')
+      .getByLabel(/[Ll]ink to one you host/);
+    await expect(link).toBeVisible();
+
+    await link.fill('https://example.test/logo.svg');
+    await saveBranding(page);
+    await expect(page.getByTestId('branding-saved')).toBeVisible();
+
+    // It renders straight from the address, not through the signed-URL route
+    // — there is no stored object to sign.
+    await page.goto('/jobs');
+    const logo = page.locator('img[src="https://example.test/logo.svg"]');
+    await expect(logo.first()).toHaveCount(1);
+  });
+
+  test('a plain http logo address is refused', async ({ page }) => {
+    // It would save and then simply not appear: the browser blocks mixed
+    // content on a secure page. Better to say so than to look broken.
+    await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+    await page.goto('/settings/branding');
+
+    await page
+      .getByTestId('asset-logoLightUrl')
+      .getByLabel(/[Ll]ink to one you host/)
+      .fill('http://example.test/logo.svg');
+    await saveBranding(page);
+    await expect(page.getByTestId('branding-error')).toContainText('https://');
+  });
+
+  test('a stored logo can be removed again', async ({ page }) => {
+    await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+    await page.goto('/settings/branding');
+
+    await page
+      .getByTestId('asset-logoLightUrl')
+      .getByLabel(/[Ll]ink to one you host/)
+      .fill('https://example.test/logo.svg');
+    await saveBranding(page);
+
+    await page.getByTestId('asset-logoLightUrl').getByText('Remove').click();
+    await saveBranding(page);
+
+    await expect(
+      page.getByTestId('asset-logoLightUrl').getByText('Not set'),
+    ).toBeVisible();
+  });
+
   test('branding is ADMIN only', async ({ page }) => {
     test.skip(OPS_PASSWORD === '', 'no OPS credentials configured');
     await signIn(page, OPS_EMAIL, OPS_PASSWORD);

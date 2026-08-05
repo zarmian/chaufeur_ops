@@ -8,6 +8,34 @@
 
 ---
 
+## Already in place
+
+Two things Phase 4 needs were built ahead of it, because the shape of the
+data had to be right before the screens could be written at all.
+
+**A payout can hold a shift.** `DriverPayoutLine.jobId` was `NOT NULL`, so a
+driver paid by the hour to drive one of the company's own cars had no way onto
+a payout — there is no per-job fee to pay them. The line now carries either a
+job or a shift, with a database check that it is exactly one. `lib/payout-lines.ts`
+builds the draft and holds the rule that stops anyone being paid twice: a job
+attached to a shift never produces a line of its own, or an eight-hour shift
+with six runs in it would pay for the shift *and* six fees.
+
+**A rental can be invoiced.** Rental income reached the per-vehicle profit
+view and nowhere else, so a hire could not be billed except as untraceable
+free text. `InvoiceLine` now carries an optional `rentalId`, and
+`lib/billable.ts` gathers jobs and rentals into one list — a hire billed for
+what is still owed after cash already taken, never for its full charge twice.
+
+`lib/revenue.ts` answers the reporting question separately, and deliberately:
+a report counts what was *earned* whether or not anyone billed for it, so a
+hire settled in cash still counts there and does not appear as billable.
+
+What remains for this phase is the screens, the numbering sequence, the PDFs
+and the ledger.
+
+---
+
 ## 4.1 Zones and locations
 
 **Acceptance criteria**
