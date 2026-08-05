@@ -132,6 +132,47 @@ enum PayoutStatus {
   PAID
 }
 
+/// How a driver is working at a given moment. Not a fixed property of the
+/// person — the same driver can be an owner-driver one week and hired the
+/// next. See DriverEngagement.
+enum EngagementKind {
+  /// Owns or leases their own car, paid a fee per job, bears their own
+  /// running costs. The Phase 1/2 assumption, and the default.
+  OWNER_DRIVER
+  /// Drives a company car, paid by the hour for a shift. The company bears
+  /// fuel and running costs.
+  HIRED
+}
+
+/// Who ends up out of pocket for an expense.
+enum ExpenseBearer {
+  /// Recharged — appears on the client's bill.
+  CLIENT
+  /// The company absorbs it. A cost.
+  COMPANY
+  /// The driver absorbs it. Neither revenue nor cost to the company.
+  DRIVER
+}
+
+enum RentalRateType {
+  HOURLY
+  DAILY
+  WEEKLY
+}
+
+enum RentalStatus {
+  BOOKED
+  ACTIVE
+  RETURNED
+  CANCELLED
+}
+
+/// Which end of the hire an inspection belongs to.
+enum HandoverPhase {
+  OUT
+  IN
+}
+
 enum ExpenseKind {
   TOLL
   PARKING
@@ -157,6 +198,7 @@ model User {
 
   auditEntries AuditLog[]
   createdJobs  Job[]      @relation("JobCreatedBy")
+  createdRentals VehicleRental[] @relation("RentalCreatedBy")
   sessions     Session[]
 
   @@index([deletedAt])
@@ -276,6 +318,9 @@ model Driver {
   jobs            Job[]
   payouts         DriverPayout[]
   linkTokens      LinkToken[]
+  engagements     DriverEngagement[]
+  shifts          DriverShift[]
+  rentals         VehicleRental[]
 
   @@index([status])
   @@index([phvBadgeExpiry])
@@ -309,6 +354,8 @@ model Vehicle {
   documents Document[]
   drivers   Driver[]
   jobs      Job[]
+  shifts    DriverShift[]
+  rentals   VehicleRental[]
 
   @@index([status])
   @@index([motExpiry])
@@ -363,8 +410,9 @@ model Location {
 
   zone Zone? @relation(fields: [zoneId], references: [id])
 
-  pickupForJobs  Job[] @relation("JobPickupLocation")
-  dropoffForJobs Job[] @relation("JobDropoffLocation")
+  pickupForJobs  Job[]     @relation("JobPickupLocation")
+  dropoffForJobs Job[]     @relation("JobDropoffLocation")
+  stops          JobStop[] @relation("JobStopLocation")
 
   @@index([useCount])
   @@index([deletedAt])
@@ -475,6 +523,14 @@ model Job {
   notes         String?
   internalNotes String?
 
+  /// Overrides the dated engagement for this job alone, for the case where
+  /// someone covers a single run on different terms. Null = resolve from the
+  /// driver's engagement at scheduledAt.
+  engagementKind EngagementKind?
+  /// Set when a hired driver's pay for this job is covered by a shift. The
+  /// job then contributes no driver payment to its own gross profit.
+  shiftId        String?
+
   createdById String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -489,9 +545,12 @@ model Job {
   dropoffLocation Location?     @relation("JobDropoffLocation", fields: [dropoffLocationId], references: [id])
   rateCardRule    RateCardRule? @relation(fields: [rateCardRuleId], references: [id])
 
+  shift        DriverShift?  @relation(fields: [shiftId], references: [id])
+
   finance      JobFinance?
   events       JobEvent[]
   expenses     JobExpense[]
+  stops        JobStop[]
   invoiceLines InvoiceLine[]
   payoutLines  DriverPayoutLine[]
 
@@ -501,6 +560,7 @@ model Job {
   @@index([vehicleId, scheduledAt])
   @@index([clientId])
   @@index([accountId])
+  @@index([shiftId])
   @@index([deletedAt])
 }
 
@@ -578,12 +638,205 @@ model JobExpense {
   rejectedAt          DateTime?
   rejectionReason     String?
   rechargeToClient    Boolean     @default(true)
+  /// Who is out of pocket. CLIENT means recharged; COMPANY is a cost to us;
+  /// DRIVER is neither. Defaults follow the engagement — the company bears
+  /// fuel for a hired driver, the driver bears it when they own the car.
+  borneBy             ExpenseBearer @default(COMPANY)
   createdAt           DateTime    @default(now())
   deletedAt           DateTime?
 
   job Job @relation(fields: [jobId], references: [id])
 
   @@index([jobId])
+}
+
+// ------------------------------------------------- commercial arrangements
+
+/// How a driver is engaged over a period of time.
+///
+/// Dated rather than a column on Driver, because the terms change and a job
+/// worked last March must still show the terms it was actually worked under.
+/// A driver with no engagement row behaves exactly as in Phase 2.
+model DriverEngagement {
+  id       String         @id @default(cuid())
+  driverId String
+  kind     EngagementKind @default(OWNER_DRIVER)
+
+  effectiveFrom DateTime  @db.Date
+  /// null = still in force
+  effectiveTo   DateTime? @db.Date
+
+  /// HIRED only. Snapshotted onto each shift when it opens.
+  hourlyRatePence  Int?
+  dayRatePence     Int?
+  /// Minutes past which the day counts as overtime, when a day rate applies.
+  overtimeAfterMin Int?
+
+  notes     String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  driver Driver @relation(fields: [driverId], references: [id])
+
+  @@index([driverId, effectiveFrom])
+  @@index([deletedAt])
+}
+
+/// A period a hired driver worked, which may cover several jobs or none.
+///
+/// The rate is copied in when the shift opens rather than read from the
+/// engagement later: a rate rise must not silently re-price last month.
+model DriverShift {
+  id        String @id @default(cuid())
+  /// human-facing, e.g. SHF-000123
+  reference String @unique
+
+  driverId  String
+  vehicleId String?
+
+  startedAt DateTime
+  /// null = still open
+  endedAt   DateTime?
+  /// Unpaid break, subtracted from the paid total.
+  breakMinutes Int @default(0)
+
+  hourlyRatePence Int
+
+  approvedById String?
+  approvedAt   DateTime?
+
+  notes     String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  driver  Driver   @relation(fields: [driverId], references: [id])
+  vehicle Vehicle? @relation(fields: [vehicleId], references: [id])
+  jobs    Job[]
+
+  @@index([driverId, startedAt])
+  @@index([endedAt])
+  @@index([deletedAt])
+}
+
+/// An ordered stop between pickup and dropoff.
+model JobStop {
+  id       String @id @default(cuid())
+  jobId    String
+  /// 1-based position in the route.
+  sequence Int
+
+  address    String
+  locationId String?
+
+  arrivedAt   DateTime?
+  departedAt  DateTime?
+  waitMinutes Int?
+  /// Revenue. Additional to any hourly or wait-time charge.
+  chargePence Int?
+
+  note      String?
+  createdAt DateTime  @default(now())
+  deletedAt DateTime?
+
+  job      Job       @relation(fields: [jobId], references: [id])
+  location Location? @relation("JobStopLocation", fields: [locationId], references: [id])
+
+  @@unique([jobId, sequence])
+  @@index([jobId])
+}
+
+/// A company car hired out to a driver.
+///
+/// Deliberately not a Job. A rental has no pickup, no dropoff and no
+/// passenger, spans days rather than minutes, and earns money with no
+/// journey attached. Modelling it as a job would corrupt every job report.
+model VehicleRental {
+  id        String @id @default(cuid())
+  /// human-facing, e.g. RNT-000042
+  reference String @unique
+
+  vehicleId String
+  /// The renter. Company cars go out to drivers.
+  driverId  String
+
+  startAt DateTime
+  /// Planned return.
+  endAt   DateTime
+  /// Actual return. Charged to this when it is later than planned.
+  returnedAt DateTime?
+
+  rateType RentalRateType @default(DAILY)
+  ratePence Int
+
+  depositPence         Int       @default(0)
+  depositReturnedPence Int       @default(0)
+  depositReturnedAt    DateTime?
+
+  mileageOut Int?
+  mileageIn  Int?
+  /// Fuel level as a percentage of a full tank.
+  fuelOutPct Int?
+  fuelInPct  Int?
+
+  damageNotes       String?
+  damageChargePence Int @default(0)
+
+  status RentalStatus @default(BOOKED)
+  notes  String?
+
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  vehicle   Vehicle                @relation(fields: [vehicleId], references: [id])
+  driver    Driver                 @relation(fields: [driverId], references: [id])
+  createdBy User?                  @relation("RentalCreatedBy", fields: [createdById], references: [id])
+  payments  RentalPayment[]
+  checks    RentalChecklistItem[]
+
+  @@index([vehicleId, startAt])
+  @@index([driverId])
+  @@index([status])
+  @@index([deletedAt])
+}
+
+/// Money received against a rental.
+model RentalPayment {
+  id       String @id @default(cuid())
+  rentalId String
+
+  amountPence Int
+  paidAt      DateTime
+  method      PayMethod?
+  reference   String?
+  note        String?
+
+  createdAt DateTime  @default(now())
+  deletedAt DateTime?
+
+  rental VehicleRental @relation(fields: [rentalId], references: [id])
+
+  @@index([rentalId])
+}
+
+/// One line of the handover checklist, recorded at collection and at return.
+model RentalChecklistItem {
+  id       String        @id @default(cuid())
+  rentalId String
+  phase    HandoverPhase
+
+  label String
+  ok    Boolean @default(true)
+  note  String?
+
+  createdAt DateTime @default(now())
+
+  rental VehicleRental @relation(fields: [rentalId], references: [id])
+
+  @@index([rentalId, phase])
 }
 
 // ------------------------------------------------- invoicing and payouts

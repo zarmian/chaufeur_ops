@@ -11,6 +11,7 @@ import {
 } from './job-status';
 import type { ListParams } from './list-params';
 import { parseMoney } from './money';
+import { vehicleAvailableAt, type RentalRefusal } from './rentals';
 import { prisma } from './prisma';
 import { withJobReference } from './references';
 import { emptyToNull, tidy } from './text';
@@ -313,7 +314,11 @@ export async function listJobs(
       select: LIST_SELECT,
     }),
     prisma.job.count({ where }),
-    prisma.job.count({ where: { ...where, ...UNPRICED_WHERE } }),
+    // Nested, not spread. `UNPRICED_WHERE` is itself `{ AND: [...] }`, so
+    // spreading it over `where` *replaces* the filter's own AND clause —
+    // silently dropping the search term and counting unpriced jobs across the
+    // whole database. "12 unpriced" has to mean twelve in this view.
+    prisma.job.count({ where: { AND: [where, UNPRICED_WHERE] } }),
   ]);
 
   return { rows, total, unpriced };
@@ -497,12 +502,13 @@ export async function transitionJob(
     .map((line) => line.invoice)
     .find((invoice) => invoice && ['SENT', 'PAID'].includes(invoice.status));
 
-  // Only fetched when assignment is actually in play — it costs two queries.
+  // Only fetched when assignment is actually in play — it costs a few
+  // queries. Goes through checkAssignmentCompliance rather than
+  // isDriverCompliantAt directly, so a car out on rent is refused here too
+  // and not only on the form.
   const compliance =
     next === 'ASSIGNED' && job.driverId
-      ? await isDriverCompliantAt(job.driverId, job.scheduledAt, {
-          vehicleId: job.vehicleId,
-        })
+      ? await checkAssignmentCompliance(job.driverId, job.vehicleId, job.scheduledAt)
       : null;
 
   const verdict = canTransition(
@@ -612,6 +618,11 @@ export async function findDriverConflicts(
 /**
  * The compliance verdict for a proposed driver/vehicle pairing at a proposed
  * time — what the create form calls before allowing submission (spec 2.1.7).
+ *
+ * A car out on rent is folded in as a reason alongside the document checks.
+ * From the operator's point of view it is the same problem — this car cannot
+ * go on this job — and splitting it across two alerts would just mean fixing
+ * one and being refused by the other.
  */
 export async function checkAssignmentCompliance(
   driverId: string | null,
@@ -619,7 +630,41 @@ export async function checkAssignmentCompliance(
   scheduledAt: Date,
 ) {
   if (!driverId) return null;
-  return isDriverCompliantAt(driverId, scheduledAt, { vehicleId });
+
+  const compliance = await isDriverCompliantAt(driverId, scheduledAt, { vehicleId });
+  if (!vehicleId) return compliance;
+
+  const availability = await checkVehicleAvailability(vehicleId, scheduledAt);
+  if (availability.ok) return compliance;
+
+  return {
+    ...compliance,
+    compliant: false,
+    reasons: [...compliance.reasons, availability.message],
+  };
+}
+
+/** Is this car free of rentals at `at`? (spec 2.5.3.10) */
+export async function checkVehicleAvailability(
+  vehicleId: string,
+  at: Date,
+): Promise<RentalRefusal> {
+  const rentals = await prisma.vehicleRental.findMany({
+    where: {
+      vehicleId,
+      status: { not: 'CANCELLED' },
+      startAt: { lte: at },
+    },
+    select: {
+      reference: true,
+      startAt: true,
+      endAt: true,
+      returnedAt: true,
+      status: true,
+    },
+  });
+
+  return vehicleAvailableAt(rentals, at);
 }
 
 /** Completed jobs that were never priced — the dashboard tile and the digest. */
