@@ -322,8 +322,12 @@ model Driver {
   reference String  @unique
   name      String
   phone     String
-  email     String?
-  address   String?
+  /// phone with spacing and international prefix folded away — the natural
+  /// key a CSV re-import matches on, so the same file twice updates rather
+  /// than duplicating.
+  normalisedPhone String?
+  email           String?
+  address         String?
 
   dvlaLicenceNumber   String?
   dvlaLicenceExpiry   DateTime? @db.Date
@@ -354,6 +358,7 @@ model Driver {
   @@index([status])
   @@index([phvBadgeExpiry])
   @@index([dvlaLicenceExpiry])
+  @@index([normalisedPhone])
   @@index([deletedAt])
 }
 
