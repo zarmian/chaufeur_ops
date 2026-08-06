@@ -264,6 +264,24 @@ model LoginAttempt {
   @@index([ip, attemptedAt])
 }
 
+/// One row per limited request — spec 6.7.5.
+///
+/// In a table rather than in memory for the same reason `LoginAttempt` is:
+/// Vercel runs many short-lived instances, and an in-process counter resets
+/// on almost every request and therefore limits nothing.
+model RateLimitEvent {
+  id String @id @default(cuid())
+  /// What is being limited, e.g. `export`. Separate buckets so a burst of
+  /// spreadsheet downloads cannot lock somebody out of anything else.
+  bucket  String
+  /// Who: a user id where the request is authenticated, an IP where it is not.
+  subject String
+  at      DateTime @default(now())
+
+  @@index([bucket, subject, at])
+  @@index([at])
+}
+
 // ------------------------------------------------ commercial relationships
 
 model Client {

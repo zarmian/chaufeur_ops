@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { purgeExpiredSessions } from '@/lib/session';
 import { apiError, isAuthorisedCronRequest } from '@/lib/api';
-import { purgeOldLoginAttempts } from '@/lib/rate-limit';
+import { purgeOldLoginAttempts, purgeOldRateLimitEvents } from '@/lib/rate-limit';
 
 /**
  * The pattern every scheduled route follows: verify the bearer token before
@@ -19,14 +19,17 @@ export async function GET(request: Request) {
     return apiError('UNAUTHENTICATED', 'Missing or invalid cron credentials');
   }
 
-  const [sessions, attempts] = await Promise.all([
+  const [sessions, attempts, rateLimitEvents] = await Promise.all([
     purgeExpiredSessions(),
     purgeOldLoginAttempts(),
+    // Spec 6.7.5's limiter writes a row per limited request. Nothing reads
+    // one older than its window, and left alone the table would grow forever.
+    purgeOldRateLimitEvents(),
   ]);
 
   return NextResponse.json({
     ok: true,
-    purged: { expiredSessions: sessions, oldLoginAttempts: attempts },
+    purged: { expiredSessions: sessions, oldLoginAttempts: attempts, rateLimitEvents },
     ranAt: new Date().toISOString(),
   });
 }

@@ -1,5 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import { NextResponse } from 'next/server';
+import { clientIpFrom, consumeRateLimit } from '@/lib/rate-limit';
 import { webhookSecret } from '@/lib/telegram/config';
 import { handleUpdate, type Update } from '@/lib/telegram/handle';
 import { logUpdate } from '@/lib/telegram/send';
@@ -42,12 +43,30 @@ export async function POST(request: Request) {
 
   const supplied = request.headers.get(HEADER);
   if (!supplied || !safeEqual(supplied, expected)) {
+    // Spec 6.7.5, and only on this branch. Limiting by IP before the token
+    // check would throttle Telegram itself, which delivers from many
+    // addresses and retries what it cannot deliver — the outcome would be
+    // dropped status taps. Counting only failures means the budget is spent
+    // exclusively by whoever is guessing at the token.
+    const ip = clientIpFrom(request.headers);
+    const budget = await consumeRateLimit('webhookAuth', ip);
+
     // Before parsing. The body is never read.
     await logUpdate({
       bot: 'ops',
       kind: 'rejected',
-      outcome: 'bad or missing secret token',
+      outcome: budget.allowed
+        ? 'bad or missing secret token'
+        : `bad secret token, rate limited (${ip})`,
     });
+
+    if (!budget.allowed) {
+      return NextResponse.json(
+        { error: { code: 'RATE_LIMITED', message: 'Too many attempts' } },
+        { status: 429, headers: { 'Retry-After': String(budget.retryAfterSeconds) } },
+      );
+    }
+
     return NextResponse.json(
       { error: { code: 'UNAUTHENTICATED', message: 'Bad secret token' } },
       { status: 401 },

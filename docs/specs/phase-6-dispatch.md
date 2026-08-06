@@ -85,6 +85,33 @@
 7. Automated daily database backups with a tested restore
 8. Uptime monitoring against `/api/health`
 
+**Measured** — `npm run perf:phase6`, against 50,361 jobs, 34,975 finance
+rows and 520 active drivers on Postgres 16. Worst of five runs after a warm-up:
+
+| | Worst | Budget |
+|---|---|---|
+| Job list, page 1 | 15 ms | 500 ms |
+| Job list, page 200 | 18 ms | 500 ms |
+| Job list, unpriced filter | 14 ms | 500 ms |
+| Dispatch day | 19 ms | 1000 ms |
+| Dispatch day, all drivers | 13 ms | 1000 ms |
+| Report summary, 12 months | 63 ms | 3000 ms |
+| Report breakdown by client | 69 ms | 3000 ms |
+| Report trend, 12 months | 60 ms | 3000 ms |
+| Dashboard | 375 ms | 2000 ms |
+
+`EXPLAIN` on the four representative shapes — by date, by status and date,
+one driver over a day, one vehicle over a day — shows an index scan on each;
+the script fails if any of them plans a sequential scan on `Job`.
+
+The dashboard is the slowest and by a long way, which is expected: it is ten
+queries where the others are two or three. It is inside budget because those
+ten run in parallel, and the thing to watch for in review is somebody making
+them sequential.
+
+Seed the volume with
+`SEED_DRIVER_COUNT=200 SEED_JOB_COUNT=50000 npm run db:seed`.
+
 ---
 
 ## Definition of done
