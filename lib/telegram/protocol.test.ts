@@ -99,7 +99,7 @@ describe('parseStartPayload', () => {
 
   it('reads it when the command names the bot', () => {
     // Group chats append the bot's username.
-    expect(parseStartPayload('/start@WeLuxOpsBot drv_abc123XYZ')).toBe('abc123XYZ');
+    expect(parseStartPayload('/start@AnyOpsBot drv_abc123XYZ')).toBe('abc123XYZ');
   });
 
   it('is null for a bare start or an unrelated payload', () => {

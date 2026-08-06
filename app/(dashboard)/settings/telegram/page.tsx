@@ -135,7 +135,7 @@ export default async function TelegramSettingsPage({
                   id="opsBotUsername"
                   name="opsBotUsername"
                   defaultValue={config.opsBotUsername ?? ''}
-                  placeholder="WeLuxOpsBot"
+                  placeholder="YourCompanyOpsBot"
                 />
                 <p className="mt-1 text-xs text-muted-foreground">
                   Used to build each driver&rsquo;s personal link.
