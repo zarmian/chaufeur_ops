@@ -169,7 +169,13 @@ test.describe('payment gateways', () => {
     // The manual payment path is exercised end to end in invoices.spec.ts.
     // What this asserts is that nothing on the way there depends on a
     // gateway: the ledger renders, and raising one is offered.
-    await expect(page.getByRole('link', { name: /New invoice/ })).toBeVisible();
+    //
+    // `.first()` because an empty ledger offers the same link twice — once in
+    // the header and once in the empty state — and whether this database has
+    // any invoices in it is not what this test is about.
+    await expect(
+      page.getByRole('link', { name: 'New invoice' }).first(),
+    ).toBeVisible();
 
     await page.goto('/payments');
     await expect(page.getByRole('heading', { name: 'Payments' })).toBeVisible();
