@@ -33,6 +33,12 @@ enum JobType {
   AIRPORT_TRANSFER
 }
 
+enum RecurrenceFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
 enum JobStatus {
   DRAFT
   PENDING
@@ -231,6 +237,8 @@ model User {
 
   auditEntries AuditLog[]
   createdJobs  Job[]      @relation("JobCreatedBy")
+  createdJobSeries JobSeries[] @relation("JobSeriesCreatedBy")
+  bulkOperations   BulkOperation[] @relation("BulkOperationCreatedBy")
   createdRentals VehicleRental[] @relation("RentalCreatedBy")
   sessions     Session[]
 
@@ -253,6 +261,42 @@ model Session {
   @@index([expires])
 }
 
+/// A bulk action over more than a handful of jobs — spec 6.5.4.
+///
+/// Small batches run inside the request and this table never sees them. Past
+/// the threshold the work moves behind the response and its progress lives
+/// here, because a request that spends two minutes applying a status change
+/// to four hundred jobs is one the platform will cut off half way through —
+/// leaving the operator with no idea which half.
+///
+/// The failures are kept per job, by reference. "Twelve refused" tells
+/// somebody there is a problem without telling them where it is.
+model BulkOperation {
+  id   String            @id @default(cuid())
+  kind String
+  status BulkOperationStatus @default(RUNNING)
+
+  total     Int
+  succeeded Int @default(0)
+  failed    Int @default(0)
+  /// One line per refusal: `WLX-000123: reason`.
+  failures  String[]
+
+  createdById String?
+  startedAt   DateTime  @default(now())
+  finishedAt  DateTime?
+
+  createdBy User? @relation("BulkOperationCreatedBy", fields: [createdById], references: [id])
+
+  @@index([createdById, startedAt])
+}
+
+enum BulkOperationStatus {
+  RUNNING
+  DONE
+  FAILED
+}
+
 /// Failed login attempts, keyed by IP, backing the 5-per-15-minutes limit.
 model LoginAttempt {
   id          String   @id @default(cuid())
@@ -262,6 +306,24 @@ model LoginAttempt {
   attemptedAt DateTime @default(now())
 
   @@index([ip, attemptedAt])
+}
+
+/// One row per limited request — spec 6.7.5.
+///
+/// In a table rather than in memory for the same reason `LoginAttempt` is:
+/// Vercel runs many short-lived instances, and an in-process counter resets
+/// on almost every request and therefore limits nothing.
+model RateLimitEvent {
+  id String @id @default(cuid())
+  /// What is being limited, e.g. `export`. Separate buckets so a burst of
+  /// spreadsheet downloads cannot lock somebody out of anything else.
+  bucket  String
+  /// Who: a user id where the request is authenticated, an IP where it is not.
+  subject String
+  at      DateTime @default(now())
+
+  @@index([bucket, subject, at])
+  @@index([at])
 }
 
 // ------------------------------------------------ commercial relationships
@@ -294,6 +356,7 @@ model Client {
   bankTxns       BankTransaction[]
   credits        UnallocatedCredit[]
   messages       ClientMessage[]
+  favouriteLocations ClientFavouriteLocation[]
 
   @@index([normalisedName])
   @@index([deletedAt])
@@ -488,9 +551,30 @@ model Location {
   pickupForJobs  Job[]     @relation("JobPickupLocation")
   dropoffForJobs Job[]     @relation("JobDropoffLocation")
   stops          JobStop[] @relation("JobStopLocation")
+  favouriteOf    ClientFavouriteLocation[]
 
   @@index([useCount])
   @@index([deletedAt])
+}
+
+/// A location a particular client uses — spec 6.4.6.
+///
+/// Offered first when that client is on the booking, ahead of the globally
+/// popular ones. A corporate account whose people always go to the same
+/// office should not have to scroll past Heathrow to find it, and the office
+/// will never out-rank Heathrow on `useCount` across the whole business.
+model ClientFavouriteLocation {
+  clientId   String
+  locationId String
+  /// Free text, e.g. "Head office" or "Mr Ellis's home".
+  note       String?
+  createdAt  DateTime @default(now())
+
+  client   Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@id([clientId, locationId])
+  @@index([locationId])
 }
 
 model Zone {
@@ -615,11 +699,27 @@ model Job {
   /// job then contributes no driver payment to its own gross profit.
   shiftId        String?
 
+  /// The series this job was generated from — spec 6.3.4. Nullable, and the
+  /// job is a complete booking without it: generation creates independent
+  /// jobs, so a series that is later deleted leaves its jobs standing.
+  seriesId    String?
+  /// Position in the series, from 1. For display only — "this and future"
+  /// filters on the date, because an individually-edited job may no longer
+  /// sit where its index says.
+  seriesIndex Int?
+  /// The outbound leg this job returns from — spec 6.3.2. Unique because one
+  /// outbound has at most one return; booking a second is a new job, not a
+  /// second link.
+  returnOfJobId String? @unique
+
   createdById String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
 
+  series          JobSeries?    @relation(fields: [seriesId], references: [id])
+  returnOf        Job?          @relation("JobReturn", fields: [returnOfJobId], references: [id])
+  returnJob       Job?          @relation("JobReturn")
   client          Client?       @relation(fields: [clientId], references: [id])
   account         Account?      @relation(fields: [accountId], references: [id])
   driver          Driver?       @relation(fields: [driverId], references: [id])
@@ -646,6 +746,53 @@ model Job {
   @@index([clientId])
   @@index([accountId])
   @@index([shiftId])
+  @@index([seriesId, scheduledAt])
+  @@index([deletedAt])
+}
+
+/// A recurring booking — spec 6.3.3.
+///
+/// Holds the rule, not the jobs. Generation writes independent `Job` rows and
+/// the series never rewrites them afterwards, because every one of them is a
+/// real booking somebody may have already assigned a driver to. What the
+/// series gives is the ability to find them together and act on them as a
+/// group.
+model JobSeries {
+  id String @id @default(cuid())
+
+  frequency RecurrenceFrequency
+  /// Every N days, weeks or months.
+  interval  Int                 @default(1)
+  /// `WEEKLY` only: 0 = Sunday … 6 = Saturday.
+  weekdays  Int[]
+
+  /// The first occurrence. Its wall clock in the configured timezone fixes
+  /// the time of day for the whole series — stored UTC instants drift by an
+  /// hour across a DST transition, and the local time is what was agreed.
+  startsAt DateTime
+  /// Exactly one of these two. A recurrence with neither is not a long
+  /// series, it is an unanswered question.
+  occurrences Int?
+  endsOn      DateTime? @db.Date
+
+  /// What was booked, in words, so the series list can describe itself
+  /// without loading a job.
+  label String
+
+  /// Stops the series being offered for extension. The jobs it already
+  /// generated are cancelled separately and individually, because each one
+  /// is a booking a client may be expecting.
+  cancelledAt DateTime?
+
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  createdBy User? @relation("JobSeriesCreatedBy", fields: [createdById], references: [id])
+  jobs      Job[]
+
+  @@index([startsAt])
   @@index([deletedAt])
 }
 

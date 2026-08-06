@@ -45,6 +45,7 @@ export function AddressField({
   invalid,
   describedBy,
   onChosen,
+  clientId,
 }: {
   /** The text field's name. Hidden fields are `${name}Postcode` and so on. */
   name: string;
@@ -56,6 +57,15 @@ export function AddressField({
   describedBy?: string;
   /** Told when a suggestion resolves, so a caller can re-quote. */
   onChosen?: (value: AddressValue) => void;
+  /**
+   * The client on the booking — spec 6.4.6.
+   *
+   * Their favourite locations are offered ahead of the globally popular ones.
+   * A corporate account whose people always go to the same office should not
+   * scroll past Heathrow to find it, and that office will never out-rank
+   * Heathrow on a count taken across the whole business.
+   */
+  clientId?: string | null;
 }) {
   const listId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -162,7 +172,9 @@ export function AddressField({
 
       try {
         const response = await fetch(
-          `/api/places/suggest?q=${encodeURIComponent(query)}&session=${encodeURIComponent(session.current)}`,
+          `/api/places/suggest?q=${encodeURIComponent(query)}&session=${encodeURIComponent(
+            session.current,
+          )}${clientId ? `&clientId=${encodeURIComponent(clientId)}` : ''}`,
           { signal: abort.signal },
         );
         if (!response.ok) throw new Error('lookup failed');

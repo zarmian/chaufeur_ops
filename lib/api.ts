@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { ZodError } from 'zod';
+import { captureError, type ErrorContext } from './observability';
 import { ForbiddenError, UnauthenticatedError } from './permissions';
 import { zodFields } from './zod-fields';
 
@@ -85,10 +86,45 @@ export function withErrorHandling<Args extends unknown[]>(
       if (error instanceof ZodError) {
         return apiError('VALIDATION_FAILED', 'Validation failed', zodFields(error));
       }
-      console.error('Unhandled route error', error);
+      // Spec 6.7.6 — captured with user context, because a stack trace with
+      // nobody attached to it is one nobody can reproduce. Awaited so a
+      // serverless invocation cannot be frozen before the report leaves.
+      await captureError(error, await routeContext(args));
       return apiError('INTERNAL', 'Something went wrong');
     }
   };
+}
+
+/**
+ * Who and where, for the error report — spec 6.7.6.
+ *
+ * Best effort by construction. This runs while handling a failure, and a
+ * session lookup that throws here would replace the real error with a
+ * useless one; a report with no user attached beats no report.
+ *
+ * The first argument to a route handler is the `Request`, when there is one.
+ */
+async function routeContext(args: unknown[]): Promise<ErrorContext> {
+  const request = args[0];
+  let where = 'route';
+  if (request instanceof Request) {
+    try {
+      const url = new URL(request.url);
+      where = `${request.method} ${url.pathname}`;
+    } catch {
+      where = request.method;
+    }
+  }
+
+  try {
+    const { getCurrentUser } = await import('./authz');
+    const user = await getCurrentUser();
+    if (user) return { where, userId: user.id, userRole: user.role };
+  } catch {
+    // Unauthenticated, or no request context at all. Report it anyway.
+  }
+
+  return { where };
 }
 
 /** The list envelope: `{ data, page, pageSize, total }`. */

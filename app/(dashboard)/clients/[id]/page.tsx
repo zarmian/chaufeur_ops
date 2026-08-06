@@ -68,6 +68,21 @@ export default async function ClientDetailPage({
     findPossibleDuplicates(client.name, client.id),
   ]);
 
+  // Spec 6.4.6. Loaded separately from the block above so the favourites card
+  // can be added without disturbing the aggregates it sits beside.
+  const [favourites, savedLocations] = await Promise.all([
+    prisma.clientFavouriteLocation.findMany({
+      where: { clientId: id },
+      include: { location: { select: { id: true, label: true, address: true } } },
+      orderBy: { createdAt: 'asc' },
+    }),
+    prisma.location.findMany({
+      select: { id: true, label: true, address: true },
+      orderBy: [{ useCount: 'desc' }, { label: 'asc' }],
+      take: 200,
+    }),
+  ]);
+
   const lifetimeRevenue = finance._sum.totalClientPence ?? 0;
   const outstandingBalance =
     (outstanding._sum.grossPence ?? 0) - (outstanding._sum.paidPence ?? 0);
@@ -227,6 +242,82 @@ export default async function ClientDetailPage({
               ))}
             </ul>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Spec 6.4.6 — offered ahead of everything else on this client's
+          bookings. A corporate account whose people always go to the same
+          office should not scroll past Heathrow to find it. */}
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle className="text-base">Favourite locations</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {favourites.length === 0 ? (
+            <p className="mb-4 text-sm text-muted-foreground">
+              None yet. Anything added here is offered first when this client is
+              on the booking.
+            </p>
+          ) : (
+            <ul className="mb-4 space-y-2 text-sm" data-testid="client-favourites">
+              {favourites.map((favourite) => (
+                <li
+                  key={favourite.locationId}
+                  className="flex items-baseline justify-between gap-3"
+                  data-location-id={favourite.locationId}
+                >
+                  <span className="min-w-0">
+                    <span className="font-medium">{favourite.location.label}</span>
+                    <span className="ml-2 text-muted-foreground">
+                      {favourite.location.address}
+                    </span>
+                  </span>
+                  {mayEdit ? (
+                    <form method="post" action={`/api/clients/${client.id}/favourites`}>
+                      <input type="hidden" name="intent" value="remove" />
+                      <input
+                        type="hidden"
+                        name="locationId"
+                        value={favourite.locationId}
+                      />
+                      <Button type="submit" variant="ghost" size="sm">
+                        Remove
+                      </Button>
+                    </form>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {mayEdit && savedLocations.length > 0 ? (
+            <form
+              method="post"
+              action={`/api/clients/${client.id}/favourites`}
+              className="flex flex-wrap items-end gap-3"
+              data-testid="client-favourite-form"
+            >
+              <input type="hidden" name="intent" value="add" />
+              <label className="space-y-1.5 text-sm">
+                <span className="font-medium">Add a saved location</span>
+                <select
+                  name="locationId"
+                  defaultValue=""
+                  className="flex h-9 w-72 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
+                >
+                  <option value="">Choose a location</option>
+                  {savedLocations.map((location) => (
+                    <option key={location.id} value={location.id}>
+                      {location.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <Button type="submit" variant="outline">
+                Add
+              </Button>
+            </form>
+          ) : null}
         </CardContent>
       </Card>
 

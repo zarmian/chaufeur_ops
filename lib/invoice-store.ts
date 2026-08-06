@@ -574,6 +574,109 @@ export async function editLines(
   return editable;
 }
 
+/**
+ * Put one job on a draft invoice — spec 6.5.2.
+ *
+ * A job-aware `add`, not the free-text one. A line created through `editLines`
+ * carries no `jobId`, so the job would still count as unbilled and could be
+ * invoiced a second time — which is money asked for twice, and the person who
+ * spots it is the client.
+ *
+ * Refuses rather than guesses on an unpriced job. Adding it as a zero line
+ * would put a £0 row in front of a client and quietly mark the job billed,
+ * which is exactly how the legacy system lost 140 fares.
+ */
+export async function addJobLine(
+  invoiceId: string,
+  jobId: string,
+  context: AuditContext,
+): Promise<InvoiceRefusal> {
+  const editable = await assertEditable(invoiceId);
+  if (!editable.ok) return editable;
+
+  const job = await prisma.job.findUnique({
+    where: { id: jobId },
+    select: {
+      id: true,
+      reference: true,
+      scheduledAt: true,
+      pickupText: true,
+      dropoffText: true,
+      clientPricePence: true,
+      status: true,
+      invoiceLines: { select: { invoice: { select: { number: true } } } },
+    },
+  });
+
+  if (!job) {
+    return { ok: false, code: 'NOT_FOUND', message: 'That job no longer exists.' };
+  }
+
+  const billed = job.invoiceLines[0]?.invoice.number;
+  if (billed) {
+    return {
+      ok: false,
+      code: 'ALREADY_INVOICED',
+      message: `${job.reference} is already on ${billed}.`,
+    };
+  }
+
+  if (job.clientPricePence === null) {
+    return {
+      ok: false,
+      code: 'NO_PRICE',
+      message: `${job.reference} has no client price — price it before invoicing it.`,
+    };
+  }
+
+  await withAudit(
+    'Invoice',
+    'update',
+    async (tx) => {
+      const before = await tx.invoice.findUniqueOrThrow({
+        where: { id: invoiceId },
+        include: { lines: { orderBy: { sortOrder: 'asc' } } },
+      });
+
+      await tx.invoiceLine.create({
+        data: {
+          invoiceId,
+          jobId: job.id,
+          description: `${job.reference} — ${job.pickupText} to ${job.dropoffText}`,
+          amountPence: job.clientPricePence ?? 0,
+          sortOrder: before.lines.length,
+        },
+      });
+
+      const lines = await tx.invoiceLine.findMany({
+        where: { invoiceId },
+        select: { amountPence: true },
+      });
+      const totals = invoiceTotals(
+        lines.map((line) => line.amountPence),
+        Number(before.vatRatePct),
+      );
+
+      const after = await tx.invoice.update({
+        where: { id: invoiceId },
+        data: {
+          netPence: totals.netPence,
+          vatPence: totals.vatPence,
+          grossPence: totals.grossPence,
+        },
+        include: { lines: { orderBy: { sortOrder: 'asc' } } },
+      });
+
+      return { entityId: invoiceId, before, after, result: null };
+    },
+    context,
+  );
+
+  // `editable` already carries the invoice's id and number, which is what a
+  // caller wants back — the same shape `editLines` returns.
+  return editable;
+}
+
 /** Editing a line, refused once the invoice has left the building. */
 export async function assertEditable(invoiceId: string): Promise<InvoiceRefusal> {
   const invoice = await prisma.invoice.findUnique({

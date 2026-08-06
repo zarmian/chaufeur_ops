@@ -4,6 +4,7 @@ import {
   alertUnansweredAssignments,
   alertUnassignedJobs,
   chaseExpiringDocuments,
+  digestTomorrowsConflicts,
   purgeOldPositions,
   purgeStaleConversations,
 } from '@/lib/telegram/chasing';
@@ -27,11 +28,12 @@ export async function GET(request: Request) {
     return apiError('UNAUTHENTICATED', 'Missing or invalid cron credentials');
   }
 
-  const [documents, unassigned, unanswered, positions, conversations] =
+  const [documents, unassigned, unanswered, clashes, positions, conversations] =
     await Promise.allSettled([
       chaseExpiringDocuments(),
       alertUnassignedJobs(),
       alertUnansweredAssignments(),
+      digestTomorrowsConflicts(),
       purgeOldPositions(),
       purgeStaleConversations(),
     ]);
@@ -41,6 +43,7 @@ export async function GET(request: Request) {
     documents: settled(documents),
     unassigned: settled(unassigned),
     unanswered: settled(unanswered),
+    clashes: settled(clashes),
     positions: settled(positions),
     conversations: settled(conversations),
     ranAt: new Date().toISOString(),

@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import { INSTALL_COMPLETE_KEY, seedBaseline, ZONES } from '../lib/install';
 import { hashPassword } from '../lib/password';
+import { seedFleet } from './seed-fleet';
 import { seedJobs } from './seed-jobs';
 import { seedSampleData } from './seed-phase1';
 
@@ -130,6 +131,9 @@ async function main(): Promise<void> {
   console.log('  Fares are zero — set the real rates in Phase 4.');
 
   await seedSampleData(prisma);
+  // Fleet before jobs: the job seeder assigns from whatever drivers exist, so
+  // seeding them the other way round leaves 50,000 jobs sharing five drivers.
+  await seedFleet(prisma);
   await seedJobs(prisma);
 
   await markInstalled();

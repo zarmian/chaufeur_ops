@@ -10,8 +10,11 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    include: ['**/*.test.ts', '**/*.test.tsx'],
-    exclude: ['node_modules/**', '.next/**', 'tests/e2e/**'],
     globals: false,
+    // `include` and `exclude` live in `vitest.workspace.ts`, one set per
+    // project. They are deliberately not here: a workspace project extending
+    // this file *merges* the patterns rather than replacing them, so an
+    // `include` at this level would make every project run every test.
+    exclude: ['node_modules/**', '.next/**', 'tests/e2e/**'],
   },
 });

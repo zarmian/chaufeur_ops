@@ -11,7 +11,9 @@
     "start": "next start",
     "lint": "eslint . --ext .ts,.tsx",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "npm run test:unit && npm run test:integration",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "vitest run --project integration --no-file-parallelism",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "db:generate": "prisma generate",
@@ -22,6 +24,7 @@
     "setup": "tsx scripts/setup.ts",
     "verify": "tsx scripts/verify-install.ts",
     "perf:jobs": "tsx scripts/perf-jobs.ts",
+    "perf:phase6": "tsx scripts/perf-phase6.ts",
     "postinstall": "prisma generate"
   },
   "prisma": {

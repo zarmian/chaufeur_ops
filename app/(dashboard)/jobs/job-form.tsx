@@ -20,11 +20,16 @@ import { JOB_TYPES } from '@/lib/enum-options';
 import { INITIAL_FORM_STATE, type FormState } from '@/lib/form-state';
 import { billedHours } from '@/lib/job-finance';
 import {
+  conflictIsWorthAsking,
+  fetchConflicts,
+} from '@/lib/conflict-client';
+import {
   fetchQuote,
   penceToField,
   quoteIsWorthAsking,
   type Quote,
 } from '@/lib/pricing/quote-client';
+import { RepeatFields } from './repeat-fields';
 import { StopsField, type StopValue } from './stops-field';
 
 /**
@@ -142,6 +147,10 @@ export function JobForm({
   vehicles,
   locations,
   openShifts = [],
+  jobId,
+  allowRepeat = false,
+  returnOfJobId,
+  inSeries = false,
 }: {
   action: (state: FormState, formData: FormData) => Promise<FormState>;
   values?: JobFormValues;
@@ -154,6 +163,21 @@ export function JobForm({
   locations: string[];
   /** Shifts currently open, for attributing a hired driver's job. */
   openShifts?: JobFormOption[];
+  /**
+   * Set when editing, so the conflict check does not report the job clashing
+   * with itself — which it always would, perfectly.
+   */
+  jobId?: string;
+  /**
+   * Offer the recurrence fields — spec 6.3.3. New bookings only: turning an
+   * existing job into a series retrospectively would have to decide what the
+   * job it came from now is, and the answer is that it is still that job.
+   */
+  allowRepeat?: boolean;
+  /** The outbound leg this booking returns from — spec 6.3.2. */
+  returnOfJobId?: string;
+  /** This job came from a recurring series, so offer the reach — spec 6.3.5. */
+  inSeries?: boolean;
 }) {
   const [state, formAction, submitting] = useActionState(
     action,
@@ -162,6 +186,8 @@ export function JobForm({
   const errors = state.fields ?? {};
 
   const [jobType, setJobType] = useState(values.jobType);
+  // Spec 6.4.6 — the address fields offer this client's favourites first.
+  const [clientId, setClientId] = useState(values.clientId);
   const [driverId, setDriverId] = useState(values.driverId);
   const [vehicleId, setVehicleId] = useState(values.vehicleId);
   const [clientPrice, setClientPrice] = useState(values.clientPrice);
@@ -187,6 +213,8 @@ export function JobForm({
   const formRef = useRef<HTMLFormElement>(null);
   const [revision, setRevision] = useState(0);
   const [quote, setQuote] = useState<Quote | null>(null);
+  /** Spec 6.2.3 — a warning, never a block. */
+  const [clashes, setClashes] = useState<string[]>([]);
   /**
    * What the rate card put in each field.
    *
@@ -316,6 +344,66 @@ export function JobForm({
     submitting,
   ]);
 
+  /**
+   * Is this driver already busy? — spec 6.2.3.
+   *
+   * Its own effect rather than folded into the quote, because it depends on
+   * different fields and asking the rate card again every time somebody picks
+   * a driver would be a request for nothing.
+   *
+   * Same discipline as the quote throughout: debounced, aborted, and silent
+   * once the form has been submitted. A late answer touching state inside the
+   * submit's transition is what makes a form sit there having apparently done
+   * nothing.
+   */
+  const askedAboutClash = useRef('');
+
+  useEffect(() => {
+    const form = formRef.current;
+    if (!form) return;
+
+    const field = (name: string) => String(new FormData(form).get(name) ?? '');
+
+    // The driver and vehicle come from state, not from the form: both selects
+    // are controlled, and a driver chosen as the last action on the form
+    // never blurs it — so reading FormData here would leave the warning
+    // unshown for exactly the operator who picks the driver last.
+    const input = {
+      jobId: jobId ?? null,
+      driverId: driverId || null,
+      vehicleId: vehicleId || null,
+      scheduledDate: field('scheduledDate'),
+      scheduledTime: field('scheduledTime'),
+      hours: customerHours.trim() === '' ? null : Number(customerHours),
+    };
+
+    if (submitted.current || submitting) return;
+
+    if (!conflictIsWorthAsking(input)) {
+      setClashes([]);
+      return;
+    }
+
+    const key = JSON.stringify(input);
+    if (key === askedAboutClash.current) return;
+
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      if (submitted.current) return;
+      askedAboutClash.current = key;
+
+      const answer = await fetchConflicts(input, controller.signal);
+      if (controller.signal.aborted || submitted.current) return;
+
+      setClashes(answer.warnings);
+    }, 400);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [jobId, driverId, vehicleId, customerHours, revision, submitting]);
+
   const clientFromCard =
     suggestedClient !== '' && clientPrice === suggestedClient;
   const driverFromCard =
@@ -368,6 +456,12 @@ export function JobForm({
         </Alert>
       ) : null}
 
+      {/* Spec 6.3.2. Constant for the life of the form, so a plain hidden
+          input is safe here — nothing rewrites it after render. */}
+      {returnOfJobId ? (
+        <input type="hidden" name="returnOfJobId" value={returnOfJobId} readOnly />
+      ) : null}
+
       <section className="space-y-4">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
           Booking
@@ -377,7 +471,8 @@ export function JobForm({
           <FormField name="clientId" label="Client" errors={errors.clientId}>
             <Select
               {...fieldProps('clientId', errors.clientId)}
-              defaultValue={values.clientId}
+              value={clientId}
+              onChange={(event) => setClientId(event.target.value)}
             >
               <option value="">No client recorded</option>
               {clients.map((client) => (
@@ -479,6 +574,7 @@ export function JobForm({
                 lng: values.pickupLng,
               }}
               placeholder="The Dorchester"
+              clientId={clientId || null}
               onChosen={() => setRevision((count) => count + 1)}
             />
           </FormField>
@@ -503,6 +599,7 @@ export function JobForm({
                 lng: values.dropoffLng,
               }}
               placeholder="Heathrow Terminal 5"
+              clientId={clientId || null}
               onChosen={() => setRevision((count) => count + 1)}
             />
           </FormField>
@@ -618,6 +715,33 @@ export function JobForm({
           <BadgePoundSterling className="size-4" aria-hidden />
           Price
         </h2>
+
+        {/*
+          Spec 6.2.3 and 6.2.4. A warning, never a block: two airport runs
+          ninety minutes apart may be perfectly workable, and the operator
+          knows the traffic and the driver where the system does not. It names
+          the job, because "conflict detected" tells somebody there is a
+          problem without telling them whether it is one they care about.
+        */}
+        {clashes.length > 0 ? (
+          <div
+            className="flex items-start gap-2 rounded-md border border-warning bg-warning/10 p-3 text-xs"
+            data-testid="conflict-warning"
+          >
+            <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+            <div>
+              <p className="font-medium">Already booked</p>
+              {clashes.map((clash) => (
+                <p key={clash} className="mt-0.5">
+                  {clash}
+                </p>
+              ))}
+              <p className="mt-1 text-muted-foreground">
+                You can book it anyway.
+              </p>
+            </div>
+          </div>
+        ) : null}
 
         {/*
           Spec 4.2.7. The suggestion is stated, not silently applied: an
@@ -866,6 +990,8 @@ export function JobForm({
         </div>
       </section>
 
+      {allowRepeat ? <RepeatFields /> : null}
+
       <section className="space-y-4">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
           Notes
@@ -897,6 +1023,29 @@ export function JobForm({
           />
         </FormField>
       </section>
+
+      {inSeries ? (
+        <section className="space-y-2 rounded-lg border p-4" data-testid="series-scope-field">
+          <label className="space-y-1.5 text-sm">
+            <span className="font-medium">Apply this change to</span>
+            <select
+              name="seriesScope"
+              defaultValue="this"
+              className="flex h-9 w-full max-w-sm rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
+            >
+              <option value="this">This job only</option>
+              <option value="future">This job and the ones after it</option>
+            </select>
+          </label>
+          {/* Spec 6.3.5. "This job only" is the default because an edit that
+              reaches further than the operator meant is the failure worth
+              designing against — the other way round costs one more edit. */}
+          <p className="text-xs text-muted-foreground">
+            Dates are never copied across. Each later job keeps its own date and
+            takes everything else from this form.
+          </p>
+        </section>
+      ) : null}
 
       <div className="flex items-center gap-3 border-t pt-6">
         {/* Disabled until the warning is acknowledged, so an unpriced save is

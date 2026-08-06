@@ -137,4 +137,62 @@ export async function seedJobs(prisma: PrismaClient): Promise<void> {
   console.log(`✓ ${count} synthetic jobs (SEED_JOB_COUNT)`);
   console.log('  Roughly a third are deliberately unpriced.');
   console.log('  References are prefixed SEED- so they never look like real bookings.');
+
+  await seedFinances(prisma, start, start + count - 1);
+}
+
+/**
+ * A finance row for every priced job in the batch.
+ *
+ * The reports left-join `JobFinance`, so a volume seed without it measures a
+ * join that never matches — which is the fast case, and not the one anybody
+ * needs reassuring about. Revenue and profit reports are the slowest thing
+ * in the application and they are slow precisely because of this join.
+ *
+ * The arithmetic is deliberately trivial. This is not testing the pricing
+ * rules; it is giving the aggregates rows with plausible spread to sum.
+ */
+async function seedFinances(
+  prisma: PrismaClient,
+  fromSequence: number,
+  toSequence: number,
+): Promise<void> {
+  const CHUNK = 1000;
+  let written = 0;
+
+  for (let low = fromSequence; low <= toSequence; low += CHUNK) {
+    const high = Math.min(low + CHUNK - 1, toSequence);
+
+    const jobs = await prisma.job.findMany({
+      where: {
+        reference: {
+          in: Array.from({ length: high - low + 1 }, (_, offset) =>
+            `SEED-${String(low + offset).padStart(6, '0')}`,
+          ),
+        },
+        clientPricePence: { not: null },
+      },
+      select: { id: true, clientPricePence: true, driverPricePence: true },
+    });
+
+    const rows = jobs.map((job) => {
+      const base = job.clientPricePence ?? 0;
+      const driverPayment = job.driverPricePence ?? Math.floor(base * 0.65);
+      return {
+        jobId: job.id,
+        baseFarePence: base,
+        totalClientPence: base,
+        driverPaymentPence: driverPayment,
+        totalCostsPence: driverPayment,
+        grossProfitPence: base - driverPayment,
+      };
+    });
+
+    if (rows.length === 0) continue;
+
+    await prisma.jobFinance.createMany({ data: rows, skipDuplicates: true });
+    written += rows.length;
+  }
+
+  console.log(`✓ ${written} finance rows, so the reports have something to join`);
 }

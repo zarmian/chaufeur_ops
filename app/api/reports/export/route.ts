@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx';
 import { withErrorHandling } from '@/lib/api';
 import { requireCapability } from '@/lib/authz';
+import { requireExportBudget } from '@/lib/rate-limit';
 import {
   describeFiltersWithNames,
   dimensionFromParams,
@@ -26,7 +27,10 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export const GET = withErrorHandling(async (request: Request) => {
-  await requireCapability('viewReports');
+  const user = await requireCapability('viewReports');
+  // Spec 6.7.5. An unpaginated spreadsheet is the most expensive thing a
+  // signed-in user can ask for, so it is the one worth a budget.
+  await requireExportBudget(user.id);
 
   const params = new URL(request.url).searchParams;
   const filters = filtersFromParams(params);

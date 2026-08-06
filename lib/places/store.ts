@@ -179,10 +179,10 @@ export async function resolveProvider(): Promise<PlaceProvider> {
  */
 export async function suggestPlaces(
   query: string,
-  options: { sessionToken?: string; limit?: number } = {},
+  options: { sessionToken?: string; limit?: number; clientId?: string | null } = {},
 ): Promise<{ suggestions: PlaceSuggestion[]; provider: PlaceProviderName; warning: string | null }> {
   const limit = options.limit ?? 8;
-  const saved = await savedSuggestions(query, limit);
+  const saved = await savedSuggestions(query, limit, options.clientId ?? null);
 
   const provider = await resolveProvider();
   let remote: PlaceSuggestion[] = [];
@@ -212,26 +212,53 @@ function key(suggestion: PlaceSuggestion): string {
   return suggestion.primary.trim().toLowerCase();
 }
 
+/**
+ * Saved locations matching what has been typed — spec 6.4.2 and 6.4.6.
+ *
+ * Ordered `useCount` then alphabetically, with **this client's favourites
+ * ahead of everything**. That ordering is the whole value: a corporate
+ * account whose people always go to the same office should not scroll past
+ * Heathrow to find it, and that office will never out-rank Heathrow on a
+ * count taken across the whole business.
+ */
 async function savedSuggestions(
   query: string,
   limit: number,
+  clientId: string | null,
 ): Promise<PlaceSuggestion[]> {
   const typed = query.trim();
   if (typed === '') return [];
 
-  const locations = await prisma.location.findMany({
-    where: {
-      OR: [
-        { label: { contains: typed, mode: 'insensitive' } },
-        { address: { contains: typed, mode: 'insensitive' } },
-        { postcode: { contains: typed, mode: 'insensitive' } },
-      ],
-    },
-    orderBy: [{ useCount: 'desc' }, { label: 'asc' }],
-    take: limit,
-  });
+  const matching = {
+    OR: [
+      { label: { contains: typed, mode: 'insensitive' as const } },
+      { address: { contains: typed, mode: 'insensitive' as const } },
+      { postcode: { contains: typed, mode: 'insensitive' as const } },
+    ],
+  };
 
-  return locations.map((location) => ({
+  const [favourites, locations] = await Promise.all([
+    clientId
+      ? prisma.location.findMany({
+          where: { ...matching, favouriteOf: { some: { clientId } } },
+          orderBy: [{ useCount: 'desc' }, { label: 'asc' }],
+          take: limit,
+        })
+      : Promise.resolve([]),
+    prisma.location.findMany({
+      where: matching,
+      orderBy: [{ useCount: 'desc' }, { label: 'asc' }],
+      take: limit,
+    }),
+  ]);
+
+  const favouriteIds = new Set(favourites.map((location) => location.id));
+  const ordered = [
+    ...favourites,
+    ...locations.filter((location) => !favouriteIds.has(location.id)),
+  ];
+
+  return ordered.slice(0, limit).map((location) => ({
     id: `saved:${location.id}`,
     primary: location.label,
     secondary: location.address,

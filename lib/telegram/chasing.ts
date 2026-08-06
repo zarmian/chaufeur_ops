@@ -1,3 +1,4 @@
+import { conflictsForDay } from '../conflict-store';
 import { daysBetweenDates, formatDate, formatDateTime } from '../dates';
 import { getLocaleConfig } from '../locale-store';
 import { prisma } from '../prisma';
@@ -196,6 +197,42 @@ export async function alertUnansweredAssignments(
   );
 
   return { alerted: jobs.length };
+}
+
+/**
+ * Tomorrow's clashes — spec 6.2.7.
+ *
+ * Tomorrow rather than today, because a clash you find out about on the
+ * morning it happens is a clash you apologise for rather than fix.
+ *
+ * Genuine overlaps only. A tight-but-workable gap in a daily digest is the
+ * kind of noise that makes the digest itself get filtered.
+ */
+export async function digestTomorrowsConflicts(
+  now: Date = new Date(),
+): Promise<{ alerted: number }> {
+  const config = await getTelegramConfig();
+  if (!config.enabled) return { alerted: 0 };
+
+  const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  const entries = (await conflictsForDay(tomorrow)).filter(
+    (entry) => entry.overlapping,
+  );
+
+  if (entries.length === 0) return { alerted: 0 };
+
+  const lines = entries
+    .slice(0, 20)
+    .map(
+      (entry) =>
+        `${entry.who}: ${entry.reference} and ${entry.otherReference} overlap`,
+    );
+
+  await alertOps(
+    `${entries.length} clash${entries.length === 1 ? '' : 'es'} tomorrow:\n${lines.join('\n')}`,
+  );
+
+  return { alerted: entries.length };
 }
 
 /**

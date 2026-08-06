@@ -29,6 +29,9 @@ export const GET = withErrorHandling(async (request: Request) => {
 
   const result = await suggestPlaces(query, {
     ...(params.get('session') ? { sessionToken: params.get('session')! } : {}),
+    // Spec 6.4.6. The client on the booking decides which saved locations
+    // come first, so it has to reach the query.
+    clientId: params.get('clientId') || null,
   });
 
   return NextResponse.json(result, {

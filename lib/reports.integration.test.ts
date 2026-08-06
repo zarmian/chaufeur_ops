@@ -36,7 +36,17 @@ const raw = DATABASE_AVAILABLE
 
 const stamp = String(Date.now()).slice(-8);
 
-/** A century of its own, so seeded jobs can never leak into these totals. */
+/**
+ * A year of its own, so neither seeded jobs nor another test file's fixtures
+ * can leak into these totals.
+ *
+ * It has to be exclusive, not merely far away. These assertions compare an
+ * unfiltered total to a filtered one, so a single job from another test file
+ * landing in this window makes them disagree — and because Vitest runs files
+ * in parallel, that shows up as an intermittent failure rather than a
+ * consistent one. `dispatch.integration.test.ts` used to sit in 2119 and did
+ * exactly that; it now has 2117.
+ */
 const FROM = new Date('2119-01-01T00:00:00.000Z');
 const TO = new Date('2119-12-31T23:59:59.999Z');
 

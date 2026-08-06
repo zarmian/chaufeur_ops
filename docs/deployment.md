@@ -192,6 +192,67 @@ before doing any work. Confirm the schedule appears under the project's Cron
 Jobs tab after the first deploy — a cron declared in `vercel.json` but not
 listed there means the deployment did not pick the file up.
 
+### Backups and restore
+
+Supabase takes a daily logical backup on every paid plan; on the free plan it
+does not, which is the single most important thing to know before putting a
+customer on one. **Storage → Backups** in the Supabase dashboard shows the
+retention window.
+
+A backup nobody has restored is a hope, not a backup. Test it once when the
+install is stood up, and again whenever Postgres is upgraded:
+
+1. Create a scratch Supabase project — not the customer's.
+2. Download the most recent backup and restore it into the scratch project:
+
+   ```
+   pg_restore --no-owner --no-privileges \
+     --dbname "$SCRATCH_DIRECT_URL" backup.dump
+   ```
+
+3. Point a local checkout at it and check the data is actually there:
+
+   ```
+   DATABASE_URL="$SCRATCH_DIRECT_URL" DIRECT_URL="$SCRATCH_DIRECT_URL" \
+     npm run verify
+   ```
+
+4. Sign in against it and open one invoice. `verify` proves the schema; only
+   a screen proves the rows.
+5. Delete the scratch project.
+
+Record the date of the last successful restore test somewhere the customer
+can see it. Six months is long enough for a backup job to have been silently
+failing.
+
+Two things worth knowing about what a restore does and does not bring back.
+Documents live in Vercel Blob, not Postgres, so a database restore returns
+every driver's expiry dates and every document's metadata but not the files
+themselves — Blob has its own retention, and losing both at once means
+re-collecting licences from 200 drivers. And restoring over a live database
+invalidates every session row, so everyone is signed out; that is correct
+behaviour, not a fault.
+
+### Uptime monitoring
+
+Point a monitor at `/api/health` on a one-minute interval and alert on two
+consecutive failures. The route checks Postgres rather than just returning
+200, so it distinguishes three states that need different responses:
+
+| Response | Means | Do |
+|---|---|---|
+| `200 {"status":"ok"}` | app and database both up | nothing |
+| `503 {"database":"unreachable"}` | app up, Postgres not | check Supabase status and the connection string |
+| `503 {"schema":"missing"}` | database reachable, no tables | migrations have not run — redeploy |
+
+It says nothing about credentials, hosts or install state, so it is safe to
+leave unauthenticated and to give to a third-party monitor.
+
+Unhandled route errors are logged as structured JSON regardless of
+configuration, so a Vercel log drain searching for `"level":"error"` finds
+them. Setting `SENTRY_DSN` additionally posts them to Sentry with the acting
+user's id and role attached — see `.env.example`.
+
 ### Preview deployments
 
 Give previews their own database — a Supabase branch, or a second project.
@@ -221,7 +282,10 @@ For each new install:
 - [ ] Compliance screen reviewed: every import lands its undated documents
       there, and that backlog is the first real job
 - [ ] Real users created; the seeded admin retired or renamed
-- [ ] Uptime monitoring and daily backups on
+- [ ] Uptime monitoring on `/api/health`, alerting on two consecutive fails
+- [ ] Daily backups on — free-plan Supabase projects have none
+- [ ] Restore tested once into a scratch project, and the date recorded
+- [ ] `SENTRY_DSN` set, or accept log-only error capture
 
 ### Standing one up end to end
 

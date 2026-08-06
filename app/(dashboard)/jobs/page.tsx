@@ -28,8 +28,14 @@ import {
 } from '@/lib/list-params';
 import { formatGBP, marginPct } from '@/lib/money';
 import { pageRequireCapability } from '@/lib/page-guards';
+import { BACKGROUND_THRESHOLD } from '@/lib/bulk';
 import { prisma } from '@/lib/prisma';
-import { bulkPriceAction, bulkTransitionAction } from './actions';
+import {
+  bulkAssignAction,
+  bulkInvoiceAction,
+  bulkPriceAction,
+  bulkTransitionAction,
+} from './actions';
 import {
   BulkActionBar,
   BulkSelectionProvider,
@@ -85,7 +91,7 @@ export default async function JobsPage({
     unpricedOnly: filterFlag(params, 'unpriced'),
   };
 
-  const [{ rows, total, unpriced }, drivers] = await Promise.all([
+  const [{ rows, total, unpriced }, drivers, draftInvoices] = await Promise.all([
     listJobs(listParams, filters),
     prisma.driver.findMany({
       where: { status: 'ACTIVE' },
@@ -93,10 +99,24 @@ export default async function JobsPage({
       orderBy: { name: 'asc' },
       take: 300,
     }),
+    // Spec 6.5.2. Drafts only — an invoice that has been sent is immutable,
+    // and changing one takes a credit note rather than another line.
+    prisma.invoice.findMany({
+      where: { status: 'DRAFT' },
+      select: {
+        id: true,
+        number: true,
+        client: { select: { name: true } },
+        account: { select: { name: true } },
+      },
+      orderBy: { issueDate: 'desc' },
+      take: 50,
+    }),
   ]);
 
   const mayEdit = can(user, 'editJobs');
   const mayPrice = can(user, 'editJobFinances');
+  const mayInvoice = can(user, 'editInvoices');
   const jobIds = rows.map((row) => row.id);
   const isFiltered = Boolean(
     listParams.q ||
@@ -114,14 +134,22 @@ export default async function JobsPage({
         title="Jobs"
         description="Every booking, with the price captured at the point it was taken."
         actions={
-          mayEdit ? (
-            <Button asChild>
-              <Link href="/jobs/new">
-                <Plus aria-hidden />
-                New job
-              </Link>
+          <div className="flex flex-wrap gap-2">
+            {/* Spec 6.3.7. Here rather than in the sidebar: a recurrence is a
+                way of making jobs, so the place to look for one is the job
+                list. */}
+            <Button asChild variant="outline">
+              <Link href="/jobs/series">Recurring</Link>
             </Button>
-          ) : null
+            {mayEdit ? (
+              <Button asChild>
+                <Link href="/jobs/new">
+                  <Plus aria-hidden />
+                  New job
+                </Link>
+              </Button>
+            ) : null}
+          </div>
         }
       />
 
@@ -216,8 +244,21 @@ export default async function JobsPage({
           <BulkActionBar
             priceAction={bulkPriceAction}
             transitionAction={bulkTransitionAction}
+            assignAction={mayEdit ? bulkAssignAction : undefined}
+            invoiceAction={mayInvoice ? bulkInvoiceAction : undefined}
             mayPrice={mayPrice}
             mayTransition={mayEdit}
+            drivers={drivers.map((driver) => ({
+              id: driver.id,
+              label: driver.name,
+            }))}
+            draftInvoices={draftInvoices.map((invoice) => ({
+              id: invoice.id,
+              label: `${invoice.number} — ${
+                invoice.client?.name ?? invoice.account?.name ?? 'No recipient'
+              }`,
+            }))}
+            backgroundThreshold={BACKGROUND_THRESHOLD}
           />
           <div className="overflow-x-auto">
             <Table>

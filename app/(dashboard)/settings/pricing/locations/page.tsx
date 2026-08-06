@@ -53,12 +53,21 @@ export default async function LocationsPage({
         title="Saved locations"
         description="Addresses the booking form offers, ordered by how often they are actually chosen."
         actions={
-          <Button asChild variant="outline">
-            <Link href="/settings/pricing">
-              <ArrowLeft aria-hidden />
-              Pricing
-            </Link>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {/* Spec 6.4.4. The addresses people have actually typed are the
+                ones worth saving, and nobody is going to enter them by hand. */}
+            <Button asChild variant="outline">
+              <Link href="/settings/pricing/locations/suggestions">
+                Suggested from bookings
+              </Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link href="/settings/pricing">
+                <ArrowLeft aria-hidden />
+                Pricing
+              </Link>
+            </Button>
+          </div>
         }
       />
 

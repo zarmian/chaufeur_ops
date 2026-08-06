@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx';
 import { withErrorHandling } from '@/lib/api';
 import { requireCapability } from '@/lib/authz';
+import { requireExportBudget } from '@/lib/rate-limit';
 import { buildComplianceReport, toExportRows } from '@/lib/compliance-report';
 import { getComplianceThresholds } from '@/lib/settings';
 
@@ -14,7 +15,10 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export const GET = withErrorHandling(async () => {
-  await requireCapability('viewJobs');
+  const user = await requireCapability('viewJobs');
+  // Spec 6.7.5. An unpaginated spreadsheet is the most expensive thing a
+  // signed-in user can ask for, so it is the one worth a budget.
+  await requireExportBudget(user.id);
 
   const thresholds = await getComplianceThresholds();
   const report = await buildComplianceReport(thresholds);
