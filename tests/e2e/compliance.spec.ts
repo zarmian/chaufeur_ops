@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { uniqueDigits, uniqueLetters } from './unique';
 
 /**
  * Phase 1 acceptance: create a driver, give them a badge expiring in five
@@ -126,7 +127,11 @@ test.describe('compliance', () => {
   }) => {
     await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
 
-    const plate = `ZZ${String(Date.now()).slice(-2)} ABC`;
+    // Two digits alone is a hundred possible plates, which a database that
+    // persists between runs exhausts quickly — and the first attempt then
+    // fails as a duplicate, which is the thing this test is trying to cause
+    // on the *second*. The letters widen it.
+    const plate = `ZZ${uniqueDigits(2)} ${uniqueLetters(3)}`;
 
     for (const attempt of [1, 2]) {
       await page.goto('/vehicles/new');

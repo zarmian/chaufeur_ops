@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { uniqueDigits } from './unique';
 
 /**
  * Phase 3 acceptance: a fresh install loads its records from a spreadsheet.
@@ -52,7 +53,7 @@ test.describe('csv import', () => {
     await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
     await page.goto('/settings/import/vehicles');
 
-    const stamp = String(Date.now()).slice(-6);
+    const stamp = uniqueDigits(6);
     await attach(
       page,
       'fleet.csv',
@@ -78,7 +79,7 @@ test.describe('csv import', () => {
     await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
     await page.goto('/settings/import/vehicles');
 
-    const stamp = String(Date.now()).slice(-6);
+    const stamp = uniqueDigits(6);
     await attach(
       page,
       'fleet.csv',
@@ -103,7 +104,7 @@ test.describe('csv import', () => {
     // The correction loop, which is the whole point of the natural key.
     await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
 
-    const stamp = String(Date.now()).slice(-6);
+    const stamp = uniqueDigits(6);
     const plate = `E2E${stamp}D`;
 
     await page.goto('/settings/import/vehicles');
@@ -138,7 +139,7 @@ test.describe('csv import', () => {
     // Spec 3.5.7 — the two files link in one pass.
     await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
 
-    const stamp = String(Date.now()).slice(-6);
+    const stamp = uniqueDigits(6);
     const plate = `E2E${stamp}V`;
     const phone = `07700${stamp}9`;
 

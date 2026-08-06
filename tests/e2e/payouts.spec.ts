@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { uniqueDigits, uniquePhone, uniquePlate } from './unique';
 
 /**
  * Phase 4.5 acceptance, end to end.
@@ -56,9 +57,9 @@ test.describe('payouts', () => {
   }) => {
     await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
 
-    const stamp = String(Date.now()).slice(-6);
+    const stamp = uniqueDigits(6);
     const driverName = `Payout Driver ${stamp}`;
-    const plate = `PO${stamp.slice(-5)}`;
+    const plate = uniquePlate('PO');
 
     await page.goto('/vehicles/new');
     await page.getByLabel('Registration').fill(plate);
@@ -72,7 +73,7 @@ test.describe('payouts', () => {
 
     await page.goto('/drivers/new');
     await page.getByLabel('Name').fill(driverName);
-    await page.getByLabel('Phone').fill(`0770092${stamp.slice(-4)}`);
+    await page.getByLabel('Phone').fill(uniquePhone());
     await page.getByLabel('DVLA licence expires').fill(dateIn(400));
     await page.getByLabel('PHV badge expires').fill(dateIn(400));
     await selectByOptionText(page, '#assignedVehicleId', plate);

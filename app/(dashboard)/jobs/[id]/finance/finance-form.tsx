@@ -71,21 +71,35 @@ export function FinanceForm({
   cancelHref,
   readOnly = false,
   waitMinutesFromEvents,
+  autoWait = null,
 }: {
   action: (state: FormState, formData: FormData) => Promise<FormState>;
   values: FinanceFormValues;
   cancelHref: string;
   readOnly?: boolean;
   /**
-   * Derived from the driver's ARRIVED and POB events once Phase 5 supplies
-   * them. Null means nobody has recorded them, so the field stays editable
-   * rather than silently reading as zero.
+   * Derived from the driver's ARRIVED and POB events. Null means nobody has
+   * recorded them, so the field stays editable rather than silently reading
+   * as zero.
    */
   waitMinutesFromEvents: number | null;
+  /**
+   * Present once the driver's taps have produced a figure — spec 5.5.4.
+   *
+   * Its presence is what makes the wait fields read-only: a number nobody
+   * typed should not be quietly retyped. Overriding stays possible, and costs
+   * one deliberate action and a reason.
+   */
+  autoWait?: { explanation: string; overriddenBy: string | null } | null;
 }) {
   const [state, formAction] = useActionState(action, INITIAL_FORM_STATE);
   const errors = state.fields ?? {};
   const [live, setLive] = useState(values);
+
+  // Locked while the calculation stands and nobody has taken it over.
+  const [overriding, setOverriding] = useState(false);
+  const waitLocked =
+    Boolean(autoWait) && !autoWait?.overriddenBy && !overriding && !readOnly;
 
   const totals = calculateFinance({
     baseFarePence: live.baseFarePence,
@@ -162,13 +176,28 @@ export function FinanceForm({
         </h2>
         <div className="grid gap-4 sm:grid-cols-2">
           {money('baseFarePence', 'Base fare', 'Pre-filled from the booking price.')}
-          {money(
-            'waitTimePence',
-            'Wait time charge',
-            waitMinutesFromEvents === null
-              ? 'No arrival events recorded yet, so enter this by hand.'
-              : `Driver waited ${waitMinutesFromEvents} minutes.`,
-          )}
+          <FormField
+            name="waitTimePence"
+            label="Wait time charge"
+            hint={
+              autoWait
+                ? autoWait.explanation
+                : waitMinutesFromEvents === null
+                  ? 'No arrival events recorded yet, so enter this by hand.'
+                  : `Driver waited ${waitMinutesFromEvents} minutes.`
+            }
+            errors={errors.waitTimePence}
+          >
+            <Input
+              {...fieldProps('waitTimePence', errors.waitTimePence)}
+              type="number"
+              min={0}
+              step={1}
+              disabled={readOnly || waitLocked}
+              value={String(live.waitTimePence ?? 0)}
+              onChange={(event) => set('waitTimePence')(event.target.value)}
+            />
+          </FormField>
           {money('extraChargesPence', 'Extra charges')}
           <FormField
             name="waitMinutesBilled"
@@ -179,11 +208,60 @@ export function FinanceForm({
               {...fieldProps('waitMinutesBilled', errors.waitMinutesBilled)}
               type="number"
               min={0}
-              disabled={readOnly}
+              disabled={readOnly || waitLocked}
               value={String(live.waitMinutesBilled)}
               onChange={(event) => set('waitMinutesBilled')(event.target.value)}
             />
           </FormField>
+
+          {/* Spec 5.5.4. Calculated from the driver's taps, so it reads as a
+              derived figure rather than a typed one — and changing it is a
+              deliberate act with a reason attached, because "why is this £12
+              rather than the £25 the clock says" gets asked six months
+              later. */}
+          {autoWait ? (
+            <div className="sm:col-span-2 rounded-md border border-dashed p-3 text-sm">
+              {autoWait.overriddenBy ? (
+                <p className="text-muted-foreground">
+                  Overridden by hand. The driver&rsquo;s taps no longer update this.
+                </p>
+              ) : overriding ? (
+                <div className="space-y-2">
+                  <label
+                    htmlFor="waitOverrideReason"
+                    className="block font-medium"
+                  >
+                    Why are you changing it?
+                  </label>
+                  <Input
+                    id="waitOverrideReason"
+                    name="waitOverrideReason"
+                    required
+                    placeholder="Client disputed the arrival time"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Saved with your name. The automatic figure stops updating once
+                    you do this.
+                  </p>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-muted-foreground">
+                    Calculated from the driver&rsquo;s arrival and boarding taps.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={readOnly}
+                    onClick={() => setOverriding(true)}
+                  >
+                    Override
+                  </Button>
+                </div>
+              )}
+            </div>
+          ) : null}
           <FormField
             name="customerHours"
             label="Customer hours"

@@ -221,6 +221,11 @@ model User {
   role         UserRole  @default(VIEWER)
   active       Boolean   @default(true)
   lastLoginAt  DateTime?
+  /// Staff link their own Telegram for the admin bot — spec 5.9.1. Read-only
+  /// there: somebody with a phone in a pub should be able to see whether
+  /// tomorrow is covered, and should not be able to reassign a job.
+  telegramChatId   BigInt?   @unique
+  telegramLinkedAt DateTime?
   createdAt    DateTime  @default(now())
   deletedAt    DateTime?
 

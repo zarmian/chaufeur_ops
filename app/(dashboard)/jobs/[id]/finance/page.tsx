@@ -42,6 +42,14 @@ export default async function JobFinancePage({
         cancelHref={`/jobs/${job.id}`}
         readOnly={readOnly}
         waitMinutesFromEvents={waitMinutesFromEvents(job.events)}
+        autoWait={
+          finance?.waitAutoCalculatedAt || finance?.waitOverriddenById
+            ? {
+                explanation: waitExplanation(finance),
+                overriddenBy: finance.waitOverriddenById,
+              }
+            : null
+        }
         values={{
           baseFarePence: finance?.baseFarePence ?? prefill.baseFarePence ?? 0,
           waitTimePence: finance?.waitTimePence ?? 0,
@@ -67,4 +75,24 @@ export default async function JobFinancePage({
       />
     </>
   );
+}
+
+/**
+ * The derivation, in words — spec 5.5.4.
+ *
+ * Shown beside the figure so nobody has to trust it blindly, and so a wait a
+ * client disputes can be argued from the timeline rather than from memory.
+ */
+function waitExplanation(finance: {
+  waitMinutesBilled: number;
+  waitTimePence: number;
+  waitOverrideReason: string | null;
+}): string {
+  if (finance.waitOverrideReason) {
+    return `Overridden: ${finance.waitOverrideReason}`;
+  }
+  if (finance.waitMinutesBilled === 0) {
+    return 'The wait was inside the free allowance, so there is nothing to charge.';
+  }
+  return `${finance.waitMinutesBilled} billable minutes from the driver's taps.`;
 }

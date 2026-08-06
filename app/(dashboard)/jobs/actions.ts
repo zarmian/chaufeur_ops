@@ -118,6 +118,7 @@ function readFinanceForm(formData: FormData) {
     baseFarePence: number('baseFarePence'),
     waitTimePence: number('waitTimePence'),
     waitMinutesBilled: number('waitMinutesBilled'),
+    waitOverrideReason: formData.get('waitOverrideReason') ?? '',
     extraChargesPence: number('extraChargesPence'),
     extraChargesNotes: formData.get('extraChargesNotes') ?? '',
     customerHours: formData.get('customerHours') ?? '',
@@ -148,7 +149,20 @@ export async function saveFinanceAction(
 ): Promise<FormState> {
   try {
     const { audit } = await actingUser('editJobFinances');
-    const data = toFinanceData(financeSchema.parse(readFinanceForm(formData)));
+    const parsed = financeSchema.parse(readFinanceForm(formData));
+    const data = toFinanceData(parsed);
+
+    // A reason means somebody is deliberately replacing what the driver's
+    // taps produced. Stamped here so the automatic calculation stops writing
+    // over it — spec 5.5.4.
+    const reason = (parsed.waitOverrideReason ?? '').trim();
+    const override = reason
+      ? {
+          waitOverrideReason: reason,
+          waitOverriddenById: audit.userId,
+          waitOverriddenAt: new Date(),
+        }
+      : {};
 
     await withAudit(
       'JobFinance',
@@ -157,8 +171,8 @@ export async function saveFinanceAction(
         const before = await tx.jobFinance.findUnique({ where: { jobId } });
         const after = await tx.jobFinance.upsert({
           where: { jobId },
-          update: data,
-          create: { ...data, jobId },
+          update: { ...data, ...override },
+          create: { ...data, ...override, jobId },
         });
         return {
           entityId: after.id,

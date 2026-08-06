@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { uniqueDigits, uniquePhone, uniquePlate } from './unique';
 
 /**
  * Phase 4.8 acceptance, end to end.
@@ -22,7 +23,7 @@ const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? '';
 const CREDENTIALS_SET = ADMIN_PASSWORD !== '';
 
 /** Unique per run, so two runs never collide on a fingerprint. */
-const RUN = String(Date.now()).slice(-7);
+const RUN = uniqueDigits(7);
 const PAYER = `Kettleby Chambers ${RUN}`;
 
 function dateIn(days: number): string {
@@ -109,7 +110,7 @@ async function submitStatus(page: Page, label: string) {
  * the reconciliation walk has to start here.
  */
 async function createCompliantDriver(page: Page, name: string) {
-  const plate = `RC${String(Date.now()).slice(-5)}`;
+  const plate = uniquePlate('RC');
 
   await page.goto('/vehicles/new');
   await page.getByLabel('Registration').fill(plate);
@@ -123,7 +124,7 @@ async function createCompliantDriver(page: Page, name: string) {
 
   await page.goto('/drivers/new');
   await page.getByLabel('Name').fill(name);
-  await page.getByLabel('Phone').fill(`0770092${String(Date.now()).slice(-4)}`);
+  await page.getByLabel('Phone').fill(uniquePhone());
   await page.getByLabel('DVLA licence expires').fill(dateIn(400));
   await page.getByLabel('PHV badge expires').fill(dateIn(400));
   await selectByOptionText(page, '#assignedVehicleId', plate);
