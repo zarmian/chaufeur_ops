@@ -18,6 +18,7 @@ import {
 export interface ClientFormValues {
   name: string;
   contactPhone: string;
+  contactChannel: string;
   contactEmail: string;
   billingEmail: string;
   billingAddress: string;
@@ -30,6 +31,7 @@ export interface ClientFormValues {
 const BLANK: ClientFormValues = {
   name: '',
   contactPhone: '',
+  contactChannel: 'EMAIL',
   contactEmail: '',
   billingEmail: '',
   billingAddress: '',
@@ -106,6 +108,26 @@ export function ClientForm({
               defaultValue={values.contactPhone}
               disabled={!canEditAllFields}
             />
+          </FormField>
+
+          {/* Spec 5.10.4. Both this and the per-template setting have to say
+              yes before anything is sent. */}
+          <FormField
+            name="contactChannel"
+            label="Keep them informed by"
+            hint="Booking confirmations and driver updates."
+            errors={errors.contactChannel}
+          >
+            <Select
+              {...fieldProps('contactChannel', errors.contactChannel)}
+              defaultValue={values.contactChannel}
+              disabled={!canEditAllFields}
+            >
+              <option value="EMAIL">Email</option>
+              <option value="SMS">Text message</option>
+              <option value="BOTH">Both</option>
+              <option value="NONE">Nothing — they do not want to be contacted</option>
+            </Select>
           </FormField>
 
           <FormField

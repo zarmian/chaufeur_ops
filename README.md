@@ -31,7 +31,7 @@ The order below differs deliberately from the enhancement roadmap in the origina
 | **4 — Money** | Rate cards, invoicing with VAT, invoice ledger, driver payouts, reports and exports | 3 |
 | **4.7 — Email & gateways** | Invoice email, Revolut and SumUp payment links and webhooks | 4 |
 | **4.8 — Reconciliation & addresses** | Bank statement import, classification, allocation to invoices, address search | 4.7 |
-| **5 — Telegram** | Driver bot, assignment, status events, wait-time capture, expenses, admin bot | 4 |
+| **5 — Telegram** | Driver bot, assignment, status events, wait-time capture, expenses, admin bot, client email and SMS | 4.8 |
 | **6 — Dispatch & scale** | Day timeline, conflict detection, recurring jobs, saved locations, payment gateways | 5 |
 
 Phases 0–3 get you a branded, usable system with expiry tracking and real pricing. Phases 4–6 are where it overtakes the legacy one.
@@ -155,6 +155,10 @@ lib/
   storage.ts                           Vercel Blob, private + signed URLs
   bank/                                statement parsing, classification, allocation
   places/                              address lookup behind a provider seam
+  telegram/                            bot protocol, linking, status taps, admin bot
+  wait-time.ts                         the gap between two taps, as money
+  sms.ts                               Twilio, for clients who do not read email
+  client-messaging.ts                  what clients are told, and whether it arrived
 prisma/
   schema.prisma
   migrations/

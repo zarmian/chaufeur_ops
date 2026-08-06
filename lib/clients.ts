@@ -16,6 +16,14 @@ import type { ListParams } from './list-params';
 export const clientSchema = z.object({
   name: z.string().trim().min(1, 'Enter the client name').max(200),
   contactPhone: z.string().trim().max(50).optional().or(z.literal('')),
+  /**
+   * How this client wants to be kept informed — spec 5.10.4.
+   *
+   * `NONE` is a real choice, not an oversight. A corporate booker whose PA
+   * handles everything does not want four texts a day, and defaulting
+   * everybody to "both" is how a system gets muted.
+   */
+  contactChannel: z.enum(['EMAIL', 'SMS', 'BOTH', 'NONE']).default('EMAIL'),
   contactEmail: z
     .string()
     .trim()
@@ -47,6 +55,7 @@ function toData(input: ClientInput) {
     name: tidy(input.name),
     normalisedName: normaliseName(input.name),
     contactPhone: emptyToNull(input.contactPhone),
+    contactChannel: input.contactChannel,
     contactEmail: emptyToNull(input.contactEmail)?.toLowerCase() ?? null,
     billingEmail: emptyToNull(input.billingEmail)?.toLowerCase() ?? null,
     billingAddress: emptyToNull(input.billingAddress),

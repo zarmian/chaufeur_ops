@@ -3,6 +3,7 @@ import {
   Globe,
   Mail,
   MapPin,
+  MessageSquare,
   Send,
   Palette,
   ShieldCheck,
@@ -16,6 +17,7 @@ import { getBranding } from '@/lib/branding-store';
 import { getEmailConfig } from '@/lib/email-store';
 import { getAllGatewayConfigs } from '@/lib/gateways/store';
 import { getPlacesConfig } from '@/lib/places/store';
+import { getClientMessagingConfig } from '@/lib/client-messaging';
 import { getTelegramConfig } from '@/lib/telegram/config';
 import { getLocaleConfig } from '@/lib/locale-store';
 import { pageRequireCapability } from '@/lib/page-guards';
@@ -37,12 +39,15 @@ export default async function SettingsPage() {
     }),
   ]);
 
-  const [email, gateways, places, telegram] = await Promise.all([
+  const [email, gateways, places, telegram, messaging] = await Promise.all([
     getEmailConfig(),
     getAllGatewayConfigs(),
     getPlacesConfig(),
     getTelegramConfig(),
+    getClientMessagingConfig(),
   ]);
+
+  const liveTemplates = Object.values(messaging.enabled).filter(Boolean).length;
 
   const emailSummary =
     email.provider === 'none'
@@ -108,6 +113,17 @@ export default async function SettingsPage() {
         : telegram.opsTokenSet
           ? 'Configured but off'
           : 'Not configured',
+    },
+    {
+      href: '/settings/messaging',
+      icon: MessageSquare,
+      title: 'Client messaging',
+      description:
+        'Booking confirmations and driver updates, by email and text. Optional.',
+      current:
+        liveTemplates === 0
+          ? 'Nothing turned on'
+          : `${liveTemplates} template${liveTemplates === 1 ? '' : 's'} on`,
     },
     {
       href: '/settings/places',

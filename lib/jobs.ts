@@ -18,6 +18,7 @@ import { prisma } from './prisma';
 import {
   onDriverReplaced,
   onJobAssigned,
+  onJobBooked,
   onJobCancelled,
   onJobEdited,
   onJobStatusChanged,
@@ -584,7 +585,7 @@ export async function createJob(
 ): Promise<{ id: string; reference: string }> {
   noteLocationsUsed(input);
 
-  return withJobReference((reference) =>
+  const booked = await withJobReference((reference) =>
     withAudit(
       'Job',
       'create',
@@ -641,6 +642,11 @@ export async function createJob(
       context,
     ),
   );
+
+  // After the commit, and never allowed to fail it — spec 5.10.3.
+  await onJobBooked(booked.id);
+
+  return booked;
 }
 
 /**

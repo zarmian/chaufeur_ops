@@ -1,5 +1,13 @@
+import { getBranding } from '../branding-store';
+import {
+  bookingConfirmation,
+  driverAssigned,
+  driverEnRoute,
+  messageClient,
+} from '../client-messaging';
 import { formatDateTime } from '../dates';
 import { getLocaleConfig } from '../locale-store';
+import { prisma } from '../prisma';
 import {
   notifyCancelled,
   notifyJobChanged,
@@ -32,6 +40,63 @@ async function quietly(work: () => Promise<void>): Promise<void> {
 
 export async function onJobAssigned(jobId: string): Promise<void> {
   await quietly(() => sendAssignment(jobId));
+  await quietly(() => tellClient(jobId, 'driver_assigned'));
+}
+
+/** Spec 5.10.3 — the client is told a car is booked, if they want to be. */
+export async function onJobBooked(jobId: string): Promise<void> {
+  await quietly(() => tellClient(jobId, 'booking_confirmation'));
+}
+
+/** Spec 5.10.3 — sent when the driver taps On my way. */
+export async function onDriverEnRoute(jobId: string): Promise<void> {
+  await quietly(() => tellClient(jobId, 'driver_en_route'));
+}
+
+/**
+ * Build and send whichever client template applies.
+ *
+ * Gated three times over before anything leaves — the template must be on,
+ * the client must want it, and the channel must be configured — so this is
+ * safe to call from any lifecycle point without checking first.
+ */
+async function tellClient(
+  jobId: string,
+  template: 'booking_confirmation' | 'driver_assigned' | 'driver_en_route',
+): Promise<void> {
+  const job = await prisma.job.findUnique({
+    where: { id: jobId },
+    select: {
+      reference: true,
+      scheduledAt: true,
+      pickupText: true,
+      dropoffText: true,
+      clientId: true,
+      driver: { select: { name: true, phone: true } },
+      vehicle: { select: { make: true, model: true } },
+    },
+  });
+  if (!job?.clientId) return;
+
+  const branding = await getBranding();
+  const forMessage = {
+    reference: job.reference,
+    scheduledAt: job.scheduledAt,
+    pickupText: job.pickupText,
+    dropoffText: job.dropoffText,
+    driverName: job.driver?.name ?? null,
+    driverPhone: job.driver?.phone ?? null,
+    vehicle: job.vehicle ? `${job.vehicle.make} ${job.vehicle.model}` : null,
+  };
+
+  const content =
+    template === 'booking_confirmation'
+      ? await bookingConfirmation(forMessage, branding.tradingName)
+      : template === 'driver_assigned'
+        ? await driverAssigned(forMessage, branding.tradingName)
+        : await driverEnRoute(forMessage, branding.tradingName);
+
+  await messageClient(job.clientId, template, content);
 }
 
 export async function onJobCancelled(jobId: string): Promise<void> {

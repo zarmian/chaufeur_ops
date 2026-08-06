@@ -2,6 +2,7 @@ import { recordAudit } from '../audit';
 import { transitionJob } from '../jobs';
 import { prisma } from '../prisma';
 import { calculateWait, waitTimestamps, type WaitCalculation } from '../wait-time';
+import { onDriverEnRoute } from './hooks';
 import { canTake, type DriverStep } from './protocol';
 
 /**
@@ -121,6 +122,10 @@ export async function applyStep(
   });
 
   const nowRecorded = [...recorded, step];
+
+  // Spec 5.10.3 — the client is told their car is coming, if they asked to
+  // be. After the event is written, and never allowed to fail the tap.
+  if (step === 'ON_WAY') await onDriverEnRoute(jobId);
 
   // Wait time, the moment the passenger is on board — spec 5.5.1.
   const wait =
