@@ -272,6 +272,11 @@ model Client {
   billingAddress   String?
   vatNumber        String?
   paymentTermsDays Int       @default(14)
+  /// How this client is kept informed — spec 5.10.4. `NONE` is a real
+  /// choice: a corporate booker whose PA handles everything does not want
+  /// four texts a day, and defaulting everybody to "both" is how a system
+  /// gets muted.
+  contactChannel   ContactChannel @default(EMAIL)
   defaultAccountId String?
   notes            String?
   createdAt        DateTime  @default(now())
@@ -283,6 +288,7 @@ model Client {
   invoices       Invoice[]
   bankTxns       BankTransaction[]
   credits        UnallocatedCredit[]
+  messages       ClientMessage[]
 
   @@index([normalisedName])
   @@index([deletedAt])
@@ -358,6 +364,7 @@ model Driver {
   engagements     DriverEngagement[]
   shifts          DriverShift[]
   rentals         VehicleRental[]
+  positions       DriverPosition[]
   ownedVehicles   Vehicle[]          @relation("VehicleOwner")
 
   @@index([status])
@@ -621,6 +628,7 @@ model Job {
 
   finance      JobFinance?
   events       JobEvent[]
+  positions    DriverPosition[]
   expenses     JobExpense[]
   stops        JobStop[]
   invoiceLines InvoiceLine[]
@@ -644,6 +652,15 @@ model JobFinance {
   baseFarePence     Int      @default(0)
   waitTimePence     Int      @default(0)
   waitMinutesBilled Int      @default(0)
+  /// Set when the driver's Arrived and POB taps produced the figure — spec
+  /// 5.5.4. Its presence is what makes the field read-only on the panel: a
+  /// number nobody typed should not be quietly retyped.
+  waitAutoCalculatedAt DateTime?
+  /// Who overrode the calculation, and why. Once set, the automatic figure
+  /// stops writing — an accountant's reason beats the arithmetic.
+  waitOverriddenById   String?
+  waitOverriddenAt     DateTime?
+  waitOverrideReason   String?
   extraChargesPence Int      @default(0)
   extraChargesNotes String?
   customerHours     Decimal? @db.Decimal(5, 2)
@@ -1311,4 +1328,131 @@ model UnallocatedCredit {
   @@index([clientId])
   @@index([accountId])
   @@index([deletedAt])
+}
+
+// ------------------------------------------------------ telegram and messaging
+
+/// Every inbound update, with what came of it — spec 5.1.7.
+///
+/// Kept because a bot that silently does nothing is indistinguishable from a
+/// bot nobody messaged. When a driver says "I pressed Arrived", this is the
+/// only place that can say whether the tap ever reached us.
+///
+/// The body is stored, not the whole update: a Telegram update carries the
+/// user's display name and phone in places, and there is no reason to keep
+/// more of it than the handler needed.
+model TelegramUpdate {
+  id String @id @default(cuid())
+
+  /// `ops` or `admin` — which bot received it.
+  bot        String
+  chatId     BigInt?
+  /// message | callback_query | photo | location | …
+  kind       String
+  /// The command or callback data, trimmed. Never the full message text.
+  payload    String?
+  driverId   String?
+  userId     String?
+  /// What the handler did, or the refusal.
+  outcome    String
+  handledMs  Int?
+  createdAt  DateTime @default(now())
+
+  @@index([chatId, createdAt])
+  @@index([createdAt])
+}
+
+/// Where a driver was, while a job was live — spec 5.7.
+///
+/// Purged after the retention window rather than kept indefinitely. Knowing
+/// where somebody was three months ago serves no operational purpose and is
+/// the kind of data that only creates obligations.
+model DriverPosition {
+  id       String @id @default(cuid())
+  driverId String
+  jobId    String?
+
+  lat        Float
+  lng        Float
+  accuracyM  Int?
+  headingDeg Int?
+  recordedAt DateTime @default(now())
+
+  driver Driver @relation(fields: [driverId], references: [id])
+  job    Job?   @relation(fields: [jobId], references: [id])
+
+  @@index([driverId, recordedAt])
+  @@index([jobId, recordedAt])
+  @@index([recordedAt])
+}
+
+/// What a driver's chat is in the middle of.
+///
+/// Telegram has no notion of a form. A driver who sends a receipt photo has
+/// to be asked what it was and how much, and the answer arrives as a separate
+/// message with nothing tying it back. This is that thread.
+///
+/// One row per chat, replaced rather than accumulated, and expired so a
+/// conversation abandoned yesterday does not capture an unrelated message
+/// tomorrow.
+model TelegramConversation {
+  chatId BigInt @id
+
+  /// `expense_kind` | `expense_amount` | `document_expiry` | …
+  step      String
+  /// What the step needs to remember: the job, the file key, the amount.
+  context   Json
+  expiresAt DateTime
+  updatedAt DateTime @updatedAt
+
+  @@index([expiresAt])
+}
+
+/// A client's standing preference for being contacted.
+enum ContactChannel {
+  EMAIL
+  SMS
+  BOTH
+  NONE
+}
+
+/// How a client is contacted, and what was sent — spec 5.10.
+enum MessageChannel {
+  EMAIL
+  SMS
+}
+
+enum MessageStatus {
+  QUEUED
+  SENT
+  FAILED
+}
+
+/// One message to a client, and whether it arrived.
+///
+/// Mirrors what `TelegramUpdate` does for drivers: without it, "did the
+/// client get the confirmation" has no answer but the client's word.
+model ClientMessage {
+  id       String @id @default(cuid())
+  clientId String?
+
+  channel   MessageChannel
+  /// booking_confirmation | driver_assigned | driver_en_route | invoice | …
+  template  String
+  /// Email address or phone number, as sent to.
+  recipient String
+  subject   String?
+  body      String
+
+  status       MessageStatus @default(QUEUED)
+  /// The provider's own id, for chasing a delivery.
+  providerId   String?
+  failedReason String?
+  sentAt       DateTime?
+  createdAt    DateTime      @default(now())
+
+  client Client? @relation(fields: [clientId], references: [id])
+
+  @@index([clientId, createdAt])
+  @@index([status])
 }
