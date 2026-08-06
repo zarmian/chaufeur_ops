@@ -20,6 +20,10 @@ import { JOB_TYPES } from '@/lib/enum-options';
 import { INITIAL_FORM_STATE, type FormState } from '@/lib/form-state';
 import { billedHours } from '@/lib/job-finance';
 import {
+  conflictIsWorthAsking,
+  fetchConflicts,
+} from '@/lib/conflict-client';
+import {
   fetchQuote,
   penceToField,
   quoteIsWorthAsking,
@@ -142,6 +146,7 @@ export function JobForm({
   vehicles,
   locations,
   openShifts = [],
+  jobId,
 }: {
   action: (state: FormState, formData: FormData) => Promise<FormState>;
   values?: JobFormValues;
@@ -154,6 +159,11 @@ export function JobForm({
   locations: string[];
   /** Shifts currently open, for attributing a hired driver's job. */
   openShifts?: JobFormOption[];
+  /**
+   * Set when editing, so the conflict check does not report the job clashing
+   * with itself — which it always would, perfectly.
+   */
+  jobId?: string;
 }) {
   const [state, formAction, submitting] = useActionState(
     action,
@@ -187,6 +197,8 @@ export function JobForm({
   const formRef = useRef<HTMLFormElement>(null);
   const [revision, setRevision] = useState(0);
   const [quote, setQuote] = useState<Quote | null>(null);
+  /** Spec 6.2.3 — a warning, never a block. */
+  const [clashes, setClashes] = useState<string[]>([]);
   /**
    * What the rate card put in each field.
    *
@@ -315,6 +327,66 @@ export function JobForm({
     revision,
     submitting,
   ]);
+
+  /**
+   * Is this driver already busy? — spec 6.2.3.
+   *
+   * Its own effect rather than folded into the quote, because it depends on
+   * different fields and asking the rate card again every time somebody picks
+   * a driver would be a request for nothing.
+   *
+   * Same discipline as the quote throughout: debounced, aborted, and silent
+   * once the form has been submitted. A late answer touching state inside the
+   * submit's transition is what makes a form sit there having apparently done
+   * nothing.
+   */
+  const askedAboutClash = useRef('');
+
+  useEffect(() => {
+    const form = formRef.current;
+    if (!form) return;
+
+    const field = (name: string) => String(new FormData(form).get(name) ?? '');
+
+    // The driver and vehicle come from state, not from the form: both selects
+    // are controlled, and a driver chosen as the last action on the form
+    // never blurs it — so reading FormData here would leave the warning
+    // unshown for exactly the operator who picks the driver last.
+    const input = {
+      jobId: jobId ?? null,
+      driverId: driverId || null,
+      vehicleId: vehicleId || null,
+      scheduledDate: field('scheduledDate'),
+      scheduledTime: field('scheduledTime'),
+      hours: customerHours.trim() === '' ? null : Number(customerHours),
+    };
+
+    if (submitted.current || submitting) return;
+
+    if (!conflictIsWorthAsking(input)) {
+      setClashes([]);
+      return;
+    }
+
+    const key = JSON.stringify(input);
+    if (key === askedAboutClash.current) return;
+
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      if (submitted.current) return;
+      askedAboutClash.current = key;
+
+      const answer = await fetchConflicts(input, controller.signal);
+      if (controller.signal.aborted || submitted.current) return;
+
+      setClashes(answer.warnings);
+    }, 400);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [jobId, driverId, vehicleId, customerHours, revision, submitting]);
 
   const clientFromCard =
     suggestedClient !== '' && clientPrice === suggestedClient;
@@ -618,6 +690,33 @@ export function JobForm({
           <BadgePoundSterling className="size-4" aria-hidden />
           Price
         </h2>
+
+        {/*
+          Spec 6.2.3 and 6.2.4. A warning, never a block: two airport runs
+          ninety minutes apart may be perfectly workable, and the operator
+          knows the traffic and the driver where the system does not. It names
+          the job, because "conflict detected" tells somebody there is a
+          problem without telling them whether it is one they care about.
+        */}
+        {clashes.length > 0 ? (
+          <div
+            className="flex items-start gap-2 rounded-md border border-warning bg-warning/10 p-3 text-xs"
+            data-testid="conflict-warning"
+          >
+            <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+            <div>
+              <p className="font-medium">Already booked</p>
+              {clashes.map((clash) => (
+                <p key={clash} className="mt-0.5">
+                  {clash}
+                </p>
+              ))}
+              <p className="mt-1 text-muted-foreground">
+                You can book it anyway.
+              </p>
+            </div>
+          </div>
+        ) : null}
 
         {/*
           Spec 4.2.7. The suggestion is stated, not silently applied: an

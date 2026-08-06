@@ -46,6 +46,7 @@ export default async function EditJobPage({
         vehicles={options.vehicles}
         locations={options.locations}
         openShifts={openShifts}
+        jobId={job.id}
         values={{
           clientId: job.clientId ?? '',
           accountId: job.accountId ?? '',
