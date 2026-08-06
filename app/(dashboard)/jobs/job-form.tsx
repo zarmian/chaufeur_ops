@@ -29,6 +29,7 @@ import {
   quoteIsWorthAsking,
   type Quote,
 } from '@/lib/pricing/quote-client';
+import { RepeatFields } from './repeat-fields';
 import { StopsField, type StopValue } from './stops-field';
 
 /**
@@ -147,6 +148,9 @@ export function JobForm({
   locations,
   openShifts = [],
   jobId,
+  allowRepeat = false,
+  returnOfJobId,
+  inSeries = false,
 }: {
   action: (state: FormState, formData: FormData) => Promise<FormState>;
   values?: JobFormValues;
@@ -164,6 +168,16 @@ export function JobForm({
    * with itself — which it always would, perfectly.
    */
   jobId?: string;
+  /**
+   * Offer the recurrence fields — spec 6.3.3. New bookings only: turning an
+   * existing job into a series retrospectively would have to decide what the
+   * job it came from now is, and the answer is that it is still that job.
+   */
+  allowRepeat?: boolean;
+  /** The outbound leg this booking returns from — spec 6.3.2. */
+  returnOfJobId?: string;
+  /** This job came from a recurring series, so offer the reach — spec 6.3.5. */
+  inSeries?: boolean;
 }) {
   const [state, formAction, submitting] = useActionState(
     action,
@@ -438,6 +452,12 @@ export function JobForm({
           <AlertCircle aria-hidden />
           <AlertDescription>{state.error}</AlertDescription>
         </Alert>
+      ) : null}
+
+      {/* Spec 6.3.2. Constant for the life of the form, so a plain hidden
+          input is safe here — nothing rewrites it after render. */}
+      {returnOfJobId ? (
+        <input type="hidden" name="returnOfJobId" value={returnOfJobId} readOnly />
       ) : null}
 
       <section className="space-y-4">
@@ -965,6 +985,8 @@ export function JobForm({
         </div>
       </section>
 
+      {allowRepeat ? <RepeatFields /> : null}
+
       <section className="space-y-4">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
           Notes
@@ -996,6 +1018,29 @@ export function JobForm({
           />
         </FormField>
       </section>
+
+      {inSeries ? (
+        <section className="space-y-2 rounded-lg border p-4" data-testid="series-scope-field">
+          <label className="space-y-1.5 text-sm">
+            <span className="font-medium">Apply this change to</span>
+            <select
+              name="seriesScope"
+              defaultValue="this"
+              className="flex h-9 w-full max-w-sm rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
+            >
+              <option value="this">This job only</option>
+              <option value="future">This job and the ones after it</option>
+            </select>
+          </label>
+          {/* Spec 6.3.5. "This job only" is the default because an edit that
+              reaches further than the operator meant is the failure worth
+              designing against — the other way round costs one more edit. */}
+          <p className="text-xs text-muted-foreground">
+            Dates are never copied across. Each later job keeps its own date and
+            takes everything else from this form.
+          </p>
+        </section>
+      ) : null}
 
       <div className="flex items-center gap-3 border-t pt-6">
         {/* Disabled until the warning is acknowledged, so an unpriced save is

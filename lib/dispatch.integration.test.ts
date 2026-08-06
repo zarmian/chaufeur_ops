@@ -30,11 +30,24 @@ const raw = DATABASE_AVAILABLE
 
 const stamp = String(Date.now()).slice(-7);
 
-/** A day of its own, far enough out that no seeded job lands on it. */
-const DAY = new Date('2119-06-15T12:00:00Z');
+/**
+ * A day of its own, far enough out that no seeded job lands on it — and a
+ * *year* of its own, which matters more.
+ *
+ * This was 2119, which `reports.integration.test.ts` reserves for its own
+ * totals. Vitest runs test files in parallel, so whenever the two overlapped,
+ * these fixtures were visible to the reports summary and inflated its
+ * unfiltered revenue by exactly the three jobs below — while leaving the
+ * per-client figure alone, because these jobs are on a different client. That
+ * is a failure that reproduces only under a scheduling race, which is why it
+ * appeared once in every dozen full-suite runs and never in isolation.
+ *
+ * One century per test file. 2119 is taken.
+ */
+const DAY = new Date('2117-06-15T12:00:00Z');
 
 function at(hour: number, minute = 0): Date {
-  return new Date(Date.UTC(2119, 5, 15, hour, minute, 0));
+  return new Date(Date.UTC(2117, 5, 15, hour, minute, 0));
 }
 
 describe.skipIf(!DATABASE_AVAILABLE)('dispatch', () => {

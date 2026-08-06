@@ -8,7 +8,15 @@ import { financeSchema, toFinanceData } from '@/lib/job-finance';
 import { jobPriceSchema } from '@/lib/job-price-schema';
 import { createJob, jobSchema, transitionJob, updateJob } from '@/lib/jobs';
 import { withAudit } from '@/lib/audit';
+import { getLocaleConfig } from '@/lib/locale-store';
 import { actingUser } from '@/lib/request-context';
+import {
+  applySeriesEdit,
+  createSeries,
+  linkReturn,
+  recurrenceSchema,
+  type SeriesScope,
+} from '@/lib/series';
 
 /**
  * Zip the parallel stop arrays back into records.
@@ -79,20 +87,66 @@ function readJobForm(formData: FormData) {
   };
 }
 
+/**
+ * The recurrence fields, or null when the operator did not tick "repeats".
+ *
+ * The end is a radio between a count and a date rather than two optional
+ * boxes, because a form that lets somebody fill in both has to decide which
+ * one wins — and whichever it picks, half the operators will be surprised.
+ */
+function readRecurrence(formData: FormData) {
+  if (formData.get('repeats') !== 'on') return null;
+
+  const endsWith = String(formData.get('repeatEndsWith') ?? 'count');
+  return recurrenceSchema.parse({
+    frequency: formData.get('repeatFrequency') ?? 'WEEKLY',
+    interval: formData.get('repeatInterval') ?? 1,
+    weekdays: formData.getAll('repeatWeekday').map(String),
+    occurrences: endsWith === 'count' ? (formData.get('repeatCount') ?? 1) : null,
+    endsOn: endsWith === 'date' ? (formData.get('repeatEndsOn') ?? null) : null,
+  });
+}
+
 export async function createJobAction(
   _previous: FormState,
   formData: FormData,
 ): Promise<FormState> {
-  let id: string;
+  let destination: string;
   try {
     const { audit } = await actingUser('editJobs');
-    ({ id } = await createJob(jobSchema.parse(readJobForm(formData)), audit));
+    const input = jobSchema.parse(readJobForm(formData));
+    const { timeZone } = await getLocaleConfig();
+    const recurrence = readRecurrence(formData);
+
+    if (recurrence) {
+      // Spec 6.3.3. The whole series is booked here rather than one job now
+      // and the rest later, so an operator never leaves the form believing
+      // they booked twelve airport runs when they booked one.
+      const series = await createSeries(input, recurrence, audit, timeZone);
+      destination = `/jobs/series/${series.seriesId}`;
+    } else {
+      const { id } = await createJob(input, audit, timeZone);
+
+      // Spec 6.3.2. After the booking, and never allowed to fail it — a job
+      // that exists without its link is a display problem, a link that took
+      // the booking down with it is a lost fare.
+      const outbound = String(formData.get('returnOfJobId') ?? '').trim();
+      if (outbound) {
+        try {
+          await linkReturn(outbound, id, audit);
+        } catch (linkError) {
+          console.error('Could not link the return journey', linkError);
+        }
+      }
+
+      destination = `/jobs/${id}`;
+    }
   } catch (error) {
     if (isRedirectError(error)) throw error;
     return toFormState(error);
   }
   revalidatePath('/jobs');
-  redirect(`/jobs/${id}`);
+  redirect(destination);
 }
 
 export async function updateJobAction(
@@ -102,7 +156,28 @@ export async function updateJobAction(
 ): Promise<FormState> {
   try {
     const { audit } = await actingUser('editJobs');
-    await updateJob(jobId, jobSchema.parse(readJobForm(formData)), audit);
+    const input = jobSchema.parse(readJobForm(formData));
+    const { timeZone } = await getLocaleConfig();
+
+    // Spec 6.3.5. Absent on a job with no series, and 'this' by default —
+    // an edit reaching further than the operator meant is the failure worth
+    // designing against, not one that reaches less far.
+    const scope = String(formData.get('seriesScope') ?? 'this') as SeriesScope;
+
+    if (scope === 'this') {
+      await updateJob(jobId, input, audit, timeZone);
+    } else {
+      const result = await applySeriesEdit(jobId, input, scope, audit, timeZone);
+      if (result.refused.length > 0) {
+        // Named, not counted. "Three could not be changed" tells the operator
+        // there is a problem without telling them where.
+        return {
+          error: `Changed ${result.changed.length}. Not changed: ${result.refused
+            .map((row) => `${row.reference} (${row.reason})`)
+            .join('; ')}`,
+        };
+      }
+    }
   } catch (error) {
     if (isRedirectError(error)) throw error;
     return toFormState(error);

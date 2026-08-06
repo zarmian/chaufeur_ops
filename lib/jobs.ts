@@ -560,6 +560,13 @@ export async function getJob(id: string) {
         },
       },
       createdBy: { select: { id: true, name: true } },
+      // Spec 6.3.2 — both directions of the return link, from one column, so
+      // the two can never disagree about which leg is which.
+      returnOf: { select: { id: true, reference: true, scheduledAt: true } },
+      returnJob: { select: { id: true, reference: true, scheduledAt: true } },
+      // Spec 6.3.7 — enough to say "3 of 12" and offer the way back to the
+      // series, without loading its other eleven jobs.
+      series: { select: { id: true, label: true, cancelledAt: true } },
       invoiceLines: {
         select: {
           invoice: { select: { id: true, number: true, status: true } },

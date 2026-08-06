@@ -114,14 +114,22 @@ export default async function JobsPage({
         title="Jobs"
         description="Every booking, with the price captured at the point it was taken."
         actions={
-          mayEdit ? (
-            <Button asChild>
-              <Link href="/jobs/new">
-                <Plus aria-hidden />
-                New job
-              </Link>
+          <div className="flex flex-wrap gap-2">
+            {/* Spec 6.3.7. Here rather than in the sidebar: a recurrence is a
+                way of making jobs, so the place to look for one is the job
+                list. */}
+            <Button asChild variant="outline">
+              <Link href="/jobs/series">Recurring</Link>
             </Button>
-          ) : null
+            {mayEdit ? (
+              <Button asChild>
+                <Link href="/jobs/new">
+                  <Plus aria-hidden />
+                  New job
+                </Link>
+              </Button>
+            ) : null}
+          </div>
         }
       />
 

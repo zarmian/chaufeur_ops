@@ -47,6 +47,7 @@ export default async function EditJobPage({
         locations={options.locations}
         openShifts={openShifts}
         jobId={job.id}
+        inSeries={Boolean(job.seriesId)}
         values={{
           clientId: job.clientId ?? '',
           accountId: job.accountId ?? '',

@@ -33,6 +33,12 @@ enum JobType {
   AIRPORT_TRANSFER
 }
 
+enum RecurrenceFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
 enum JobStatus {
   DRAFT
   PENDING
@@ -231,6 +237,7 @@ model User {
 
   auditEntries AuditLog[]
   createdJobs  Job[]      @relation("JobCreatedBy")
+  createdJobSeries JobSeries[] @relation("JobSeriesCreatedBy")
   createdRentals VehicleRental[] @relation("RentalCreatedBy")
   sessions     Session[]
 
@@ -633,11 +640,27 @@ model Job {
   /// job then contributes no driver payment to its own gross profit.
   shiftId        String?
 
+  /// The series this job was generated from — spec 6.3.4. Nullable, and the
+  /// job is a complete booking without it: generation creates independent
+  /// jobs, so a series that is later deleted leaves its jobs standing.
+  seriesId    String?
+  /// Position in the series, from 1. For display only — "this and future"
+  /// filters on the date, because an individually-edited job may no longer
+  /// sit where its index says.
+  seriesIndex Int?
+  /// The outbound leg this job returns from — spec 6.3.2. Unique because one
+  /// outbound has at most one return; booking a second is a new job, not a
+  /// second link.
+  returnOfJobId String? @unique
+
   createdById String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
 
+  series          JobSeries?    @relation(fields: [seriesId], references: [id])
+  returnOf        Job?          @relation("JobReturn", fields: [returnOfJobId], references: [id])
+  returnJob       Job?          @relation("JobReturn")
   client          Client?       @relation(fields: [clientId], references: [id])
   account         Account?      @relation(fields: [accountId], references: [id])
   driver          Driver?       @relation(fields: [driverId], references: [id])
@@ -664,6 +687,53 @@ model Job {
   @@index([clientId])
   @@index([accountId])
   @@index([shiftId])
+  @@index([seriesId, scheduledAt])
+  @@index([deletedAt])
+}
+
+/// A recurring booking — spec 6.3.3.
+///
+/// Holds the rule, not the jobs. Generation writes independent `Job` rows and
+/// the series never rewrites them afterwards, because every one of them is a
+/// real booking somebody may have already assigned a driver to. What the
+/// series gives is the ability to find them together and act on them as a
+/// group.
+model JobSeries {
+  id String @id @default(cuid())
+
+  frequency RecurrenceFrequency
+  /// Every N days, weeks or months.
+  interval  Int                 @default(1)
+  /// `WEEKLY` only: 0 = Sunday … 6 = Saturday.
+  weekdays  Int[]
+
+  /// The first occurrence. Its wall clock in the configured timezone fixes
+  /// the time of day for the whole series — stored UTC instants drift by an
+  /// hour across a DST transition, and the local time is what was agreed.
+  startsAt DateTime
+  /// Exactly one of these two. A recurrence with neither is not a long
+  /// series, it is an unanswered question.
+  occurrences Int?
+  endsOn      DateTime? @db.Date
+
+  /// What was booked, in words, so the series list can describe itself
+  /// without loading a job.
+  label String
+
+  /// Stops the series being offered for extension. The jobs it already
+  /// generated are cancelled separately and individually, because each one
+  /// is a booking a client may be expecting.
+  cancelledAt DateTime?
+
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  createdBy User? @relation("JobSeriesCreatedBy", fields: [createdById], references: [id])
+  jobs      Job[]
+
+  @@index([startsAt])
   @@index([deletedAt])
 }
 

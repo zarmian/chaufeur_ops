@@ -134,6 +134,42 @@ export default async function JobDetailPage({
         </Alert>
       ) : null}
 
+      {job.returnOf || job.returnJob || job.series ? (
+        <div
+          className="mb-6 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-lg border px-4 py-3 text-sm"
+          data-testid="job-links"
+        >
+          {/* Spec 6.3.2. Shown from either end, and worth the space: a
+              cancellation that misses the other leg leaves a car sent to
+              collect somebody who already went home. */}
+          {job.returnOf ? (
+            <span>
+              Return leg of{' '}
+              <Link href={`/jobs/${job.returnOf.id}`} className="underline">
+                {job.returnOf.reference}
+              </Link>
+            </span>
+          ) : null}
+          {job.returnJob ? (
+            <span>
+              Returns as{' '}
+              <Link href={`/jobs/${job.returnJob.id}`} className="underline">
+                {job.returnJob.reference}
+              </Link>
+            </span>
+          ) : null}
+          {job.series ? (
+            <span>
+              {job.seriesIndex ? `Job ${job.seriesIndex} of a ` : 'Part of a '}
+              <Link href={`/jobs/series/${job.series.id}`} className="underline">
+                recurring series
+              </Link>
+              {job.series.cancelledAt ? ' (ended)' : null}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
           <Card>

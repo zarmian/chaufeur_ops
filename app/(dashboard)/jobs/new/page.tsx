@@ -2,8 +2,10 @@ import { PageHeader } from '@/components/page-header';
 import { loadJobFormOptions, loadOpenShifts } from '@/lib/job-form-data';
 import { duplicateDefaults, getJob } from '@/lib/jobs';
 import { filterFlag, filterValue, type SearchParams } from '@/lib/list-params';
+import { getLocaleConfig } from '@/lib/locale-store';
 import { pageRequireCapability } from '@/lib/page-guards';
 import { peekNextJobReference } from '@/lib/references';
+import { returnDefaults } from '@/lib/series';
 import { createJobAction } from '../actions';
 import { JobForm, type JobFormValues } from '../job-form';
 
@@ -21,10 +23,11 @@ export default async function NewJobPage({
   await pageRequireCapability('editJobs');
   const params = await searchParams;
 
-  const [options, nextReference, openShifts] = await Promise.all([
+  const [options, nextReference, openShifts, locale] = await Promise.all([
     loadJobFormOptions(),
     peekNextJobReference(),
     loadOpenShifts(),
+    getLocaleConfig(),
   ]);
 
   // `?from=<id>` duplicates an existing job; `&return=true` swaps the
@@ -35,7 +38,14 @@ export default async function NewJobPage({
 
   let values: JobFormValues | undefined;
   if (source) {
-    const defaults = duplicateDefaults(source, { swap: isReturn });
+    // Spec 6.3.1. A return gets the swap `duplicateDefaults` already knows
+    // how to do, plus the one thing a duplicate does not need: a plausible
+    // time. A suggestion, not a rule — the operator will change it, and what
+    // matters is that the field is not empty.
+    const defaults = isReturn
+      ? returnDefaults(source, locale.timeZone)
+      : duplicateDefaults(source, { swap: false });
+
     values = {
       ...defaults,
       customerHours: '',
@@ -43,7 +53,8 @@ export default async function NewJobPage({
       minimumHours: '',
       shiftId: '',
       stops: [],
-      // The date stays blank on purpose — see `duplicateDefaults`.
+      // For a duplicate the date stays blank on purpose — see
+      // `duplicateDefaults`. A return carries the suggested one.
       clientPrice: asPounds(defaults.clientPricePence),
       driverPrice: asPounds(defaults.driverPricePence),
       // A flight number belongs to one specific arrival, never to its copy.
@@ -54,7 +65,7 @@ export default async function NewJobPage({
 
   const description = source
     ? isReturn
-      ? `Return journey from ${source.reference}. The addresses are swapped — set the date and check the price.`
+      ? `Return journey from ${source.reference}. The addresses are swapped and a time is suggested — check both, and the price.`
       : `Copied from ${source.reference}. The date is cleared; set it before saving.`
     : `Will be booked as ${nextReference}. Enter the price now — a job saved without one does not appear in any revenue report.`;
 
@@ -75,6 +86,8 @@ export default async function NewJobPage({
         vehicles={options.vehicles}
         locations={options.locations}
         openShifts={openShifts}
+        allowRepeat={!isReturn}
+        returnOfJobId={isReturn && source ? source.id : undefined}
       />
     </>
   );

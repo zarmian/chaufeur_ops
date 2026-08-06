@@ -14,6 +14,7 @@ import { prisma } from './prisma';
 
 export type AuditEntity =
   | 'Job'
+  | 'JobSeries'
   | 'JobFinance'
   | 'Invoice'
   | 'Driver'
