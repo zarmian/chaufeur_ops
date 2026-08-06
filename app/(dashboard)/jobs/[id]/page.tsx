@@ -146,8 +146,26 @@ export default async function JobDetailPage({
                   <span className="tabular">{formatDateTime(job.scheduledAt)}</span>
                 </Field>
                 <Field label="Type">{jobTypeLabel(job.jobType)}</Field>
-                <Field label="Pickup">{job.pickupText}</Field>
-                <Field label="Destination">{job.dropoffText}</Field>
+                {/* The postcode beside the address, when one was resolved.
+                    It is what prices the job, so an operator checking why a
+                    fare came out as it did should not have to guess whether
+                    the address search actually matched anything. */}
+                <Field label="Pickup">
+                  {job.pickupText}
+                  {job.pickupPostcode ? (
+                    <span className="ml-2 text-xs text-muted-foreground tabular">
+                      {job.pickupPostcode}
+                    </span>
+                  ) : null}
+                </Field>
+                <Field label="Destination">
+                  {job.dropoffText}
+                  {job.dropoffPostcode ? (
+                    <span className="ml-2 text-xs text-muted-foreground tabular">
+                      {job.dropoffPostcode}
+                    </span>
+                  ) : null}
+                </Field>
                 {job.viaText ? <Field label="Via">{job.viaText}</Field> : null}
                 {job.flightNumber ? (
                   <Field label="Flight">{job.flightNumber}</Field>

@@ -222,7 +222,13 @@ describe('duplicateDefaults', () => {
     accountId: 'acc_1',
     jobType: 'TRANSFER' as const,
     pickupText: 'The Dorchester',
+    pickupPostcode: 'W1K 1QA',
+    pickupLat: 51.5074,
+    pickupLng: -0.1523,
     dropoffText: 'Heathrow T5',
+    dropoffPostcode: 'TW6 2GA',
+    dropoffLat: 51.4701,
+    dropoffLng: -0.4543,
     viaText: null,
     driverId: 'drv_1',
     vehicleId: 'veh_1',
@@ -248,6 +254,16 @@ describe('duplicateDefaults', () => {
     const defaults = duplicateDefaults(source, { swap: true });
     expect(defaults.pickupText).toBe('Heathrow T5');
     expect(defaults.dropoffText).toBe('The Dorchester');
+  });
+
+  it('swaps the postcode and coordinates with the text', () => {
+    // Leaving these behind would price the return leg from the outbound
+    // leg's zone, which is the one journey where that is reliably wrong.
+    const defaults = duplicateDefaults(source, { swap: true });
+    expect(defaults.pickupPostcode).toBe('TW6 2GA');
+    expect(defaults.dropoffPostcode).toBe('W1K 1QA');
+    expect(defaults.pickupLat).toBe('51.4701');
+    expect(defaults.dropoffLat).toBe('51.5074');
   });
 
   it('renders nulls as empty strings the form can bind to', () => {

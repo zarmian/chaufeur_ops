@@ -31,6 +31,16 @@ const schema = z.object({
   clientId: z.string().trim().nullable().optional(),
   pickupText: z.string().trim().max(500).nullable().optional(),
   dropoffText: z.string().trim().max(500).nullable().optional(),
+  /**
+   * From an address lookup, when the operator chose a suggestion.
+   *
+   * Spec 4.8.6.7: a correctly-picked address prices correctly. Passing the
+   * postcode lets the matcher resolve a zone by prefix rather than by hoping
+   * the typed text happens to name one — "53 Park Lane" names no zone at all,
+   * but W1K does.
+   */
+  pickupPostcode: z.string().trim().max(12).nullable().optional(),
+  dropoffPostcode: z.string().trim().max(12).nullable().optional(),
   /** `YYYY-MM-DD` and `HH:mm`, as the form holds them. */
   scheduledDate: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/),
   scheduledTime: z.string().trim().regex(/^\d{2}:\d{2}$/),
@@ -70,6 +80,8 @@ export const POST = withErrorHandling(async (request: Request): Promise<Response
     clientId: input.clientId ?? null,
     pickupText: input.pickupText ?? null,
     dropoffText: input.dropoffText ?? null,
+    pickupPostcode: input.pickupPostcode ?? null,
+    dropoffPostcode: input.dropoffPostcode ?? null,
     hours: input.hours ?? null,
     scheduledAt,
   });

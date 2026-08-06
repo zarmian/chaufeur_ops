@@ -44,6 +44,17 @@ function readJobForm(formData: FormData) {
     pickupText: formData.get('pickupText') ?? '',
     dropoffText: formData.get('dropoffText') ?? '',
     viaText: formData.get('viaText') ?? '',
+
+    // What the address field resolved, if a suggestion was chosen. Named
+    // after the text field they belong to, so the two travel together.
+    pickupPostcode: formData.get('pickupTextPostcode') ?? '',
+    pickupLat: formData.get('pickupTextLat') ?? '',
+    pickupLng: formData.get('pickupTextLng') ?? '',
+    pickupLocationId: formData.get('pickupTextLocationId') ?? '',
+    dropoffPostcode: formData.get('dropoffTextPostcode') ?? '',
+    dropoffLat: formData.get('dropoffTextLat') ?? '',
+    dropoffLng: formData.get('dropoffTextLng') ?? '',
+    dropoffLocationId: formData.get('dropoffTextLocationId') ?? '',
     driverId: formData.get('driverId') ?? '',
     vehicleId: formData.get('vehicleId') ?? '',
     passengerName: formData.get('passengerName') ?? '',
