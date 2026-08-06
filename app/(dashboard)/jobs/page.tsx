@@ -6,6 +6,7 @@ import { ListToolbar } from '@/components/list-toolbar';
 import { PageHeader } from '@/components/page-header';
 import { Pagination } from '@/components/pagination';
 import { UnpricedBadge } from '@/components/unpriced-badge';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import {
   Table,
@@ -31,13 +32,8 @@ import { pageRequireCapability } from '@/lib/page-guards';
 import { BACKGROUND_THRESHOLD } from '@/lib/bulk';
 import { prisma } from '@/lib/prisma';
 import {
-  bulkAssignAction,
-  bulkInvoiceAction,
-  bulkPriceAction,
-  bulkTransitionAction,
-} from './actions';
-import {
   BulkActionBar,
+  BulkProgress,
   BulkSelectionProvider,
   JobRowCheckbox,
   JobSelectAllHeader,
@@ -57,6 +53,25 @@ function defaultRange(): { from: string; to: string } {
   const week = new Date();
   week.setDate(week.getDate() + 7);
   return { from: toDateOnlyString(today), to: toDateOnlyString(week) };
+}
+
+/**
+ * The current list URL, minus the last action's outcome.
+ *
+ * Carried through the bulk post so the operator lands back on the view they
+ * were working in — same filters, same page — rather than at the top of an
+ * unfiltered list with their selection and their place both gone.
+ */
+function jobsPath(params: SearchParams): string {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (['bulkMessage', 'bulkError', 'bulkOperation'].includes(key)) continue;
+    for (const entry of Array.isArray(value) ? value : [value]) {
+      if (typeof entry === 'string' && entry !== '') query.append(key, entry);
+    }
+  }
+  const suffix = query.toString();
+  return suffix ? `/jobs?${suffix}` : '/jobs';
 }
 
 export default async function JobsPage({
@@ -117,6 +132,12 @@ export default async function JobsPage({
   const mayEdit = can(user, 'editJobs');
   const mayPrice = can(user, 'editJobFinances');
   const mayInvoice = can(user, 'editInvoices');
+
+  // Spec 6.5. The outcome of the last bulk action, and where to come back to.
+  const bulkMessage = filterValue(params, 'bulkMessage');
+  const bulkError = filterValue(params, 'bulkError');
+  const bulkOperation = filterValue(params, 'bulkOperation');
+  const returnTo = jobsPath(params);
   const jobIds = rows.map((row) => row.id);
   const isFiltered = Boolean(
     listParams.q ||
@@ -241,13 +262,26 @@ export default async function JobsPage({
         />
       ) : (
         <BulkSelectionProvider>
+          {/* Spec 6.5.4. The outcome of a bulk action comes back on the
+              query string, because the action is a form post — see
+              `app/api/jobs/bulk/route.ts` for why it cannot be a Server
+              Action. */}
+          {bulkMessage || bulkError ? (
+            <Alert
+              variant={bulkError ? 'destructive' : 'default'}
+              className="mb-4"
+              data-testid="bulk-result"
+            >
+              <AlertDescription>{bulkError ?? bulkMessage}</AlertDescription>
+            </Alert>
+          ) : null}
+          {bulkOperation ? <BulkProgress operationId={bulkOperation} /> : null}
+
           <BulkActionBar
-            priceAction={bulkPriceAction}
-            transitionAction={bulkTransitionAction}
-            assignAction={mayEdit ? bulkAssignAction : undefined}
-            invoiceAction={mayInvoice ? bulkInvoiceAction : undefined}
             mayPrice={mayPrice}
             mayTransition={mayEdit}
+            mayAssign={mayEdit}
+            mayInvoice={mayInvoice}
             drivers={drivers.map((driver) => ({
               id: driver.id,
               label: driver.name,
@@ -259,6 +293,7 @@ export default async function JobsPage({
               }`,
             }))}
             backgroundThreshold={BACKGROUND_THRESHOLD}
+            returnTo={returnTo}
           />
           <div className="overflow-x-auto">
             <Table>

@@ -846,7 +846,11 @@ export async function transitionJob(
     next,
   );
 
-  if (!verdict.ok) return verdict;
+  // The reference travels with the refusal, not just with success. In bulk
+  // the message is all the operator gets, and "cmshu…3ij: cannot move to
+  // In progress" names a row nobody can find — the whole point of reporting
+  // per job is that somebody can go and look at the one that was refused.
+  if (!verdict.ok) return { ...verdict, reference: job.reference };
 
   const eventType = eventTypeForStatus(next);
 
