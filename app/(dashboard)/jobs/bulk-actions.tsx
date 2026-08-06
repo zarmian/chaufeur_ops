@@ -109,23 +109,52 @@ export function JobSelectAllHeader({ jobIds }: { jobIds: string[] }) {
   );
 }
 
+type BulkMode = 'price' | 'status' | 'assign' | 'invoice';
+
+export interface BulkOption {
+  id: string;
+  label: string;
+}
+
 export function BulkActionBar({
   priceAction,
   transitionAction,
+  assignAction,
+  invoiceAction,
   mayPrice,
   mayTransition,
+  drivers = [],
+  draftInvoices = [],
+  backgroundThreshold,
 }: {
   priceAction: (state: FormState, formData: FormData) => Promise<FormState>;
   transitionAction: (state: FormState, formData: FormData) => Promise<FormState>;
+  assignAction?: (state: FormState, formData: FormData) => Promise<FormState>;
+  invoiceAction?: (state: FormState, formData: FormData) => Promise<FormState>;
   mayPrice: boolean;
   mayTransition: boolean;
+  /** Spec 6.5.2. Empty hides the option rather than offering an empty list. */
+  drivers?: BulkOption[];
+  /** Only drafts: an invoice that has been sent is immutable (spec 4.3). */
+  draftInvoices?: BulkOption[];
+  /** Above this the work runs in the background — spec 6.5.4. */
+  backgroundThreshold: number;
 }) {
   const { selected } = useSelection();
-  const [mode, setMode] = useState<'price' | 'status'>(
-    mayPrice ? 'price' : 'status',
-  );
 
-  if (!mayPrice && !mayTransition) return null;
+  const mayAssign = Boolean(assignAction) && drivers.length > 0;
+  const mayInvoice = Boolean(invoiceAction) && draftInvoices.length > 0;
+
+  const modes: Array<{ value: BulkMode; label: string }> = [
+    ...(mayPrice ? [{ value: 'price' as const, label: 'Set prices' }] : []),
+    ...(mayTransition ? [{ value: 'status' as const, label: 'Change status' }] : []),
+    ...(mayAssign ? [{ value: 'assign' as const, label: 'Assign driver' }] : []),
+    ...(mayInvoice ? [{ value: 'invoice' as const, label: 'Add to invoice' }] : []),
+  ];
+
+  const [mode, setMode] = useState<BulkMode>(modes[0]?.value ?? 'price');
+
+  if (modes.length === 0) return null;
 
   const ids = [...selected];
   // Nothing selected means nothing to offer; the bar would just be noise.
@@ -138,7 +167,7 @@ export function BulkActionBar({
           {ids.length} selected
         </span>
 
-        {mayPrice && mayTransition ? (
+        {modes.length > 1 ? (
           <div>
             <label htmlFor="bulk-mode" className="mb-1.5 block text-sm font-medium">
               Action
@@ -146,11 +175,14 @@ export function BulkActionBar({
             <Select
               id="bulk-mode"
               value={mode}
-              onChange={(event) => setMode(event.target.value as 'price' | 'status')}
+              onChange={(event) => setMode(event.target.value as BulkMode)}
               className="w-44"
             >
-              <option value="price">Set prices</option>
-              <option value="status">Change status</option>
+              {modes.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
             </Select>
           </div>
         ) : null}
@@ -161,8 +193,95 @@ export function BulkActionBar({
         {mode === 'status' && mayTransition ? (
           <BulkStatusForm action={transitionAction} ids={ids} />
         ) : null}
+        {mode === 'assign' && mayAssign ? (
+          <BulkChoiceForm
+            action={assignAction!}
+            ids={ids}
+            name="driverId"
+            label="Driver"
+            placeholder="Choose a driver"
+            options={drivers}
+            verb="Assign"
+            testId="bulk-driver"
+          />
+        ) : null}
+        {mode === 'invoice' && mayInvoice ? (
+          <BulkChoiceForm
+            action={invoiceAction!}
+            ids={ids}
+            name="invoiceId"
+            label="Draft invoice"
+            placeholder="Choose a draft"
+            options={draftInvoices}
+            verb="Add"
+            testId="bulk-invoice"
+          />
+        ) : null}
+
+        {/* Spec 6.5.4. Said before the click, not after — somebody selecting
+            four hundred jobs should know the answer will not be immediate. */}
+        {ids.length > backgroundThreshold ? (
+          <p className="basis-full text-xs text-muted-foreground">
+            More than {backgroundThreshold} jobs, so this runs in the background.
+            You will get the result here when it finishes.
+          </p>
+        ) : null}
       </div>
     </div>
+  );
+}
+
+/**
+ * One dropdown and a button — the shape both new bulk actions need.
+ *
+ * The empty first option is deliberate. A select that defaults to the first
+ * driver in the list is one somebody submits without reading, and the action
+ * being defaulted into here puts a named person on forty jobs.
+ */
+function BulkChoiceForm({
+  action,
+  ids,
+  name,
+  label,
+  placeholder,
+  options,
+  verb,
+  testId,
+}: {
+  action: (state: FormState, formData: FormData) => Promise<FormState>;
+  ids: string[];
+  name: string;
+  label: string;
+  placeholder: string;
+  options: BulkOption[];
+  verb: string;
+  testId: string;
+}) {
+  const [state, formAction] = useActionState(action, INITIAL_FORM_STATE);
+
+  return (
+    <form action={formAction} className="flex flex-wrap items-end gap-3">
+      {ids.map((id) => (
+        <input key={id} type="hidden" name="jobIds" value={id} />
+      ))}
+      <div>
+        <label htmlFor={testId} className="mb-1.5 block text-sm font-medium">
+          {label}
+        </label>
+        <Select id={testId} name={name} className="w-56" defaultValue="">
+          <option value="">{placeholder}</option>
+          {options.map((option) => (
+            <option key={option.id} value={option.id}>
+              {option.label}
+            </option>
+          ))}
+        </Select>
+      </div>
+      <BulkSubmit
+        label={`${verb} ${ids.length} job${ids.length === 1 ? '' : 's'}`}
+      />
+      <BulkResult state={state} />
+    </form>
   );
 }
 

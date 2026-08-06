@@ -78,7 +78,26 @@ export function TrendChart({ points }: { points: TrendPoint[] }) {
           const x = index * (width / points.length) + BAR_GAP / 2;
           const top = y(point.revenuePence);
           return (
-            <g key={point.month}>
+            <g
+              key={point.month}
+              role="img"
+              aria-label={`${point.month}: ${formatGBP(point.revenuePence)} revenue, ${formatGBP(point.profitPence)} profit, ${point.jobs} jobs`}
+            >
+              {/* An `aria-label`, and deliberately not an SVG <title>.
+
+                  A <title> here is the obvious way to get a hover tooltip and
+                  it cannot be used: React validates DOM nesting by HTML rules
+                  even inside an <svg>, and in HTML a <title> may only live in
+                  <head>. One anywhere in this chart fails hydration with
+                  React error #418 on every page that carries it — which, now
+                  the dashboard has a chart, is the two screens people open
+                  most. Moving it from the <rect> to the <g> does not help;
+                  only removing it does.
+
+                  So the figures are announced rather than hovered. The cost
+                  is the mouse tooltip; the gain is that the page hydrates,
+                  and the numbers are still on the page in the tiles and the
+                  reports the chart links to. */}
               <rect
                 x={x}
                 y={top}
@@ -86,12 +105,7 @@ export function TrendChart({ points }: { points: TrendPoint[] }) {
                 height={Math.max(HEIGHT - top, 1)}
                 rx={2}
                 className="fill-primary/25"
-              >
-                <title>
-                  {point.month}: {formatGBP(point.revenuePence)} revenue,{' '}
-                  {formatGBP(point.profitPence)} profit, {point.jobs} jobs
-                </title>
-              </rect>
+              />
               <text
                 x={x + barWidth / 2}
                 y={HEIGHT + 18}

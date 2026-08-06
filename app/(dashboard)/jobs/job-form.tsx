@@ -186,6 +186,8 @@ export function JobForm({
   const errors = state.fields ?? {};
 
   const [jobType, setJobType] = useState(values.jobType);
+  // Spec 6.4.6 — the address fields offer this client's favourites first.
+  const [clientId, setClientId] = useState(values.clientId);
   const [driverId, setDriverId] = useState(values.driverId);
   const [vehicleId, setVehicleId] = useState(values.vehicleId);
   const [clientPrice, setClientPrice] = useState(values.clientPrice);
@@ -469,7 +471,8 @@ export function JobForm({
           <FormField name="clientId" label="Client" errors={errors.clientId}>
             <Select
               {...fieldProps('clientId', errors.clientId)}
-              defaultValue={values.clientId}
+              value={clientId}
+              onChange={(event) => setClientId(event.target.value)}
             >
               <option value="">No client recorded</option>
               {clients.map((client) => (
@@ -571,6 +574,7 @@ export function JobForm({
                 lng: values.pickupLng,
               }}
               placeholder="The Dorchester"
+              clientId={clientId || null}
               onChosen={() => setRevision((count) => count + 1)}
             />
           </FormField>
@@ -595,6 +599,7 @@ export function JobForm({
                 lng: values.dropoffLng,
               }}
               placeholder="Heathrow Terminal 5"
+              clientId={clientId || null}
               onChosen={() => setRevision((count) => count + 1)}
             />
           </FormField>

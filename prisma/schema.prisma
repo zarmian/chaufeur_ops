@@ -238,6 +238,7 @@ model User {
   auditEntries AuditLog[]
   createdJobs  Job[]      @relation("JobCreatedBy")
   createdJobSeries JobSeries[] @relation("JobSeriesCreatedBy")
+  bulkOperations   BulkOperation[] @relation("BulkOperationCreatedBy")
   createdRentals VehicleRental[] @relation("RentalCreatedBy")
   sessions     Session[]
 
@@ -258,6 +259,42 @@ model Session {
 
   @@index([userId])
   @@index([expires])
+}
+
+/// A bulk action over more than a handful of jobs — spec 6.5.4.
+///
+/// Small batches run inside the request and this table never sees them. Past
+/// the threshold the work moves behind the response and its progress lives
+/// here, because a request that spends two minutes applying a status change
+/// to four hundred jobs is one the platform will cut off half way through —
+/// leaving the operator with no idea which half.
+///
+/// The failures are kept per job, by reference. "Twelve refused" tells
+/// somebody there is a problem without telling them where it is.
+model BulkOperation {
+  id   String            @id @default(cuid())
+  kind String
+  status BulkOperationStatus @default(RUNNING)
+
+  total     Int
+  succeeded Int @default(0)
+  failed    Int @default(0)
+  /// One line per refusal: `WLX-000123: reason`.
+  failures  String[]
+
+  createdById String?
+  startedAt   DateTime  @default(now())
+  finishedAt  DateTime?
+
+  createdBy User? @relation("BulkOperationCreatedBy", fields: [createdById], references: [id])
+
+  @@index([createdById, startedAt])
+}
+
+enum BulkOperationStatus {
+  RUNNING
+  DONE
+  FAILED
 }
 
 /// Failed login attempts, keyed by IP, backing the 5-per-15-minutes limit.
@@ -319,6 +356,7 @@ model Client {
   bankTxns       BankTransaction[]
   credits        UnallocatedCredit[]
   messages       ClientMessage[]
+  favouriteLocations ClientFavouriteLocation[]
 
   @@index([normalisedName])
   @@index([deletedAt])
@@ -513,9 +551,30 @@ model Location {
   pickupForJobs  Job[]     @relation("JobPickupLocation")
   dropoffForJobs Job[]     @relation("JobDropoffLocation")
   stops          JobStop[] @relation("JobStopLocation")
+  favouriteOf    ClientFavouriteLocation[]
 
   @@index([useCount])
   @@index([deletedAt])
+}
+
+/// A location a particular client uses — spec 6.4.6.
+///
+/// Offered first when that client is on the booking, ahead of the globally
+/// popular ones. A corporate account whose people always go to the same
+/// office should not have to scroll past Heathrow to find it, and the office
+/// will never out-rank Heathrow on `useCount` across the whole business.
+model ClientFavouriteLocation {
+  clientId   String
+  locationId String
+  /// Free text, e.g. "Head office" or "Mr Ellis's home".
+  note       String?
+  createdAt  DateTime @default(now())
+
+  client   Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@id([clientId, locationId])
+  @@index([locationId])
 }
 
 model Zone {

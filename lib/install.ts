@@ -45,6 +45,40 @@ export const ZONES: Array<{ name: string; postcodes: string[] }> = [
   { name: 'Outside M25', postcodes: [] },
 ];
 
+/**
+ * The airport terminals every London chauffeur operation touches — spec 6.4.5.
+ *
+ * Seeded rather than left to accumulate, because these are the addresses that
+ * matter most and the ones most often typed differently by different people.
+ * "Heathrow T5", "LHR Terminal 5" and "heathrow terminal five" are one place,
+ * and until it is one row the free-airport-wait allowance, the zone lookup and
+ * every report that groups by destination all treat them as three.
+ *
+ * Postcodes are the real published ones, so zone resolution places them
+ * without a lookup. They are the only addresses in this file: everything else
+ * a customer needs comes from their own bookings, and inventing a hotel list
+ * would be guessing at somebody's business.
+ *
+ * Not customer-specific. A UK operator that never goes near Stansted has one
+ * unused row; an operator that does has one they did not have to type.
+ */
+export const AIRPORT_LOCATIONS: Array<{
+  label: string;
+  address: string;
+  postcode: string;
+  zone: string;
+}> = [
+  { label: 'Heathrow Terminal 2', address: 'Heathrow Terminal 2, Hounslow', postcode: 'TW6 1EW', zone: 'Heathrow' },
+  { label: 'Heathrow Terminal 3', address: 'Heathrow Terminal 3, Hounslow', postcode: 'TW6 1QG', zone: 'Heathrow' },
+  { label: 'Heathrow Terminal 4', address: 'Heathrow Terminal 4, Hounslow', postcode: 'TW6 3XA', zone: 'Heathrow' },
+  { label: 'Heathrow Terminal 5', address: 'Heathrow Terminal 5, Longford', postcode: 'TW6 2GA', zone: 'Heathrow' },
+  { label: 'Gatwick North Terminal', address: 'North Terminal, Gatwick Airport, Crawley', postcode: 'RH6 0PJ', zone: 'Gatwick' },
+  { label: 'Gatwick South Terminal', address: 'South Terminal, Gatwick Airport, Crawley', postcode: 'RH6 0NP', zone: 'Gatwick' },
+  { label: 'Luton Airport', address: 'London Luton Airport, Luton', postcode: 'LU2 9LY', zone: 'Luton' },
+  { label: 'Stansted Airport', address: 'London Stansted Airport, Stansted', postcode: 'CM24 1QW', zone: 'Stansted' },
+  { label: 'London City Airport', address: 'London City Airport, Hartmann Road', postcode: 'E16 2PX', zone: 'London City' },
+];
+
 /** Minimum length for the first administrator's password. */
 export const MIN_PASSWORD_LENGTH = 12;
 
@@ -100,6 +134,25 @@ export interface BaselineClient {
       update: { postcodes: string[] };
       create: { name: string; postcodes: string[] };
     }): Promise<unknown>;
+    findFirst(args: { where: { name: string } }): Promise<{ id: string } | null>;
+  };
+  location: {
+    findFirst(args: {
+      where: { label: string };
+    }): Promise<{ id: string; zoneId: string | null } | null>;
+    update(args: {
+      where: { id: string };
+      data: { isAirport: boolean; zoneId: string | null };
+    }): Promise<unknown>;
+    create(args: {
+      data: {
+        label: string;
+        address: string;
+        postcode: string;
+        isAirport: boolean;
+        zoneId: string | null;
+      };
+    }): Promise<unknown>;
   };
   rateCard: {
     findFirst(args: {
@@ -131,6 +184,34 @@ export async function seedBaseline(tx: BaselineClient): Promise<void> {
       where: { name: zone.name },
       update: { postcodes: zone.postcodes },
       create: { name: zone.name, postcodes: zone.postcodes },
+    });
+  }
+
+  // Spec 6.4.5. Keyed on the label so a second run updates rather than
+  // duplicating, and so an operator who has corrected one keeps their
+  // correction on everything except the fields below.
+  for (const airport of AIRPORT_LOCATIONS) {
+    const zone = await tx.zone.findFirst({ where: { name: airport.zone } });
+    const existing = await tx.location.findFirst({
+      where: { label: airport.label },
+    });
+
+    if (existing) {
+      await tx.location.update({
+        where: { id: existing.id },
+        data: { isAirport: true, zoneId: existing.zoneId ?? zone?.id ?? null },
+      });
+      continue;
+    }
+
+    await tx.location.create({
+      data: {
+        label: airport.label,
+        address: airport.address,
+        postcode: airport.postcode,
+        isAirport: true,
+        zoneId: zone?.id ?? null,
+      },
     });
   }
 
