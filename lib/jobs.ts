@@ -15,6 +15,14 @@ import { noteLocationUse } from './pricing/config';
 import { parseMoney } from './money';
 import { vehicleAvailableAt, type RentalRefusal } from './rentals';
 import { prisma } from './prisma';
+import {
+  onDriverReplaced,
+  onJobAssigned,
+  onJobCancelled,
+  onJobEdited,
+  onJobStatusChanged,
+  type JobSnapshot,
+} from './telegram/hooks';
 import { withJobReference } from './references';
 import { emptyToNull, tidy } from './text';
 
@@ -658,7 +666,16 @@ export async function updateJob(
 ): Promise<{ id: string }> {
   noteLocationsUsed(input);
 
-  return withAudit(
+  // Captured inside the transaction and acted on after it commits. A driver
+  // told about a change that then rolled back is worse than one told late.
+  let snapshots: {
+    before: JobSnapshot;
+    after: JobSnapshot;
+    previousDriverId: string | null;
+    nextDriverId: string | null;
+  } | null = null;
+
+  const result = await withAudit(
     'Job',
     'update',
     async (tx) => {
@@ -701,10 +718,48 @@ export async function updateJob(
         });
       }
 
+      snapshots = {
+        before: snapshotOf(before),
+        after: snapshotOf(after),
+        previousDriverId: before.driverId,
+        nextDriverId: after.driverId,
+      };
+
       return { entityId: id, before, after, result: { id } };
     },
     context,
   );
+
+  if (snapshots) {
+    const { before, after, previousDriverId, nextDriverId } =
+      snapshots as NonNullable<typeof snapshots>;
+
+    if (previousDriverId && previousDriverId !== nextDriverId) {
+      await onDriverReplaced(id, previousDriverId);
+      if (nextDriverId) await onJobAssigned(id);
+    } else {
+      await onJobEdited(id, before, after);
+    }
+  }
+
+  return result;
+}
+
+/** Only the fields a driver acts on, for the change notice. */
+function snapshotOf(job: {
+  scheduledAt: Date;
+  pickupText: string;
+  dropoffText: string;
+  flightNumber: string | null;
+  passengerName: string | null;
+}): JobSnapshot {
+  return {
+    scheduledAt: job.scheduledAt,
+    pickupText: job.pickupText,
+    dropoffText: job.dropoffText,
+    flightNumber: job.flightNumber,
+    passengerName: job.passengerName,
+  };
 }
 
 /**
@@ -813,6 +868,11 @@ export async function transitionJob(
     },
     context,
   );
+
+  // After the commit, and never allowed to fail it.
+  if (next === 'ASSIGNED') await onJobAssigned(id);
+  else if (next === 'CANCELLED') await onJobCancelled(id);
+  else await onJobStatusChanged(id);
 
   return { ok: true, reference: job.reference };
 }

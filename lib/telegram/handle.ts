@@ -1,5 +1,12 @@
 import { prisma } from '../prisma';
 import { getTelegramConfig } from './config';
+import {
+  cancelExpense,
+  currentConversation,
+  handleExpenseAmount,
+  handleReceiptPhoto,
+  setExpenseKind,
+} from './expenses';
 import { alertOps, refreshJobMessage } from './dispatch';
 import { applyStep } from './driver-steps';
 import { driverForChat, redeemLinkToken, unlinkChat } from './linking';
@@ -167,14 +174,23 @@ async function handleMessage(
   }
 
   if (message.photo && message.photo.length > 0) {
-    // Expense capture is spec 5.6 and lands in the next commit. Until then
-    // the driver is told plainly rather than left wondering — a photo that
-    // vanishes silently is how drivers stop sending receipts.
-    await sendMessage(
+    return handleReceiptPhoto(
       chatId,
-      escapeMarkdown('Thanks — receipt capture is not switched on yet. Keep hold of it.'),
+      driver.id,
+      message.photo,
+      message.caption ?? null,
     );
-    return { kind: 'photo', outcome: 'not yet handled' };
+  }
+
+  // Mid-conversation: a bare number after a receipt is the amount, not
+  // chatter for ops. Checked before the relay, or every answer would be
+  // forwarded to the office as well as recorded.
+  const conversation = await currentConversation(chatId);
+  if (conversation?.step === 'expense_amount' && text !== '') {
+    const expenseId = conversation.context.expenseId;
+    if (typeof expenseId === 'string') {
+      return handleExpenseAmount(chatId, driver.id, text, expenseId);
+    }
   }
 
   // Anything else goes to ops rather than into the void: a driver typing
@@ -226,6 +242,23 @@ async function handleCallback(
         ? `refused: ${outcome.message}`
         : `${callback.step} recorded`,
     };
+  }
+
+  if (callback.kind === 'expense-kind') {
+    const result = await setExpenseKind(
+      chatId,
+      driver.id,
+      callback.expenseId,
+      callback.expenseKind,
+    );
+    await answerCallback(queryId, result.message);
+    return { kind: 'expense-kind', outcome: result.outcome };
+  }
+
+  if (callback.kind === 'expense-cancel') {
+    const message = await cancelExpense(chatId, driver.id, callback.expenseId);
+    await answerCallback(queryId, message);
+    return { kind: 'expense-cancel', outcome: 'cancelled' };
   }
 
   await answerCallback(queryId, 'Not something I can do yet.');

@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation';
 import { ComplianceBadge, ComplianceItems } from '@/components/compliance-badge';
 import { DocumentPanel } from '@/components/documents/document-panel';
 import { PageHeader } from '@/components/page-header';
+import { TelegramLinkCard } from '@/components/telegram-link-card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -16,22 +17,30 @@ import { formatGBP } from '@/lib/money';
 import { pageRequireCapability } from '@/lib/page-guards';
 import { prisma } from '@/lib/prisma';
 import { getComplianceThresholds } from '@/lib/settings';
+import { getTelegramConfig } from '@/lib/telegram/config';
 import { isStorageConfigured } from '@/lib/storage';
+import { filterValue, type SearchParams } from '@/lib/list-params';
 
 export const metadata = { title: 'Driver' };
 
 export default async function DriverDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<SearchParams>;
 }) {
   const user = await pageRequireCapability('viewJobs');
   const { id } = await params;
+  const query = await searchParams;
 
   const driver = await getDriver(id);
   if (!driver) notFound();
 
-  const thresholds = await getComplianceThresholds();
+  const [thresholds, telegram] = await Promise.all([
+    getComplianceThresholds(),
+    getTelegramConfig(),
+  ]);
   const compliance = combinedComplianceAt(
     driver,
     driver.assignedVehicle,
@@ -143,6 +152,20 @@ export default async function DriverDetailPage({
         </Card>
       ) : null}
 
+      <div className="mb-6">
+        <TelegramLinkCard
+          driverId={driver.id}
+          driverName={driver.name}
+          linkedAt={driver.telegramLinkedAt}
+          url={filterValue(query, 'telegramUrl')}
+          token={filterValue(query, 'telegramToken')}
+          expiresAt={filterValue(query, 'telegramExpires')}
+          error={filterValue(query, 'telegramError')}
+          canEdit={can(user, 'editDrivers')}
+          botConfigured={Boolean(telegram.opsBotUsername)}
+        />
+      </div>
+
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader>
@@ -176,14 +199,6 @@ export default async function DriverDetailPage({
                 <p className="text-muted-foreground">None</p>
               )}
             </div>
-            <Row
-              label="Telegram"
-              value={
-                driver.telegramLinkedAt
-                  ? `Linked ${formatDate(driver.telegramLinkedAt)}`
-                  : 'Not linked — arrives in Phase 5'
-              }
-            />
             {maySeeMoney ? (
               <div>
                 <p className="text-muted-foreground">Paid to date</p>
