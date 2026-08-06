@@ -198,6 +198,68 @@ Summary response:
 
 ---
 
+## Bank reconciliation
+
+Statement rows are never written by a `GET`, and never written twice: every
+row carries a fingerprint — the bank's own reference where there is one,
+otherwise a hash of date, amount and description — and an already-present
+fingerprint is skipped rather than updated.
+
+### `POST /api/reconciliation/preview`
+`{ csv, mapping? }`. Writes nothing. Returns the detected layout, the count
+of fresh and already-imported rows, the rows the parser could not read, and
+the first 25 parsed rows. `needsMapping` is true only when the columns were
+unrecognised *and* no mapping was supplied.
+
+### `POST /api/reconciliation/import`
+`{ filename, csv, mapping? }`. Writes the statement and its fresh rows,
+classifying each against `BankRule`. Returns `{ statementId, imported,
+duplicates, problems }`.
+
+### `POST /api/reconciliation/:id/actions`
+Form post. `intent` is one of:
+
+| Intent | Does |
+|---|---|
+| `classify` | Sets the kind and counterparty by hand. Refused once allocated |
+| `allocate` | Applies the invoice proposal — payments, statuses, credit — in one transaction |
+| `payout` | Marks the chosen approved `DriverPayout` paid. Refuses an amount mismatch |
+| `cost` | Records a `VehicleCost` against the chosen vehicle |
+| `ignore` | Marks an own transfer as needing nothing |
+| `undo` | Reverses everything the transaction created |
+
+The proposal is recomputed server-side on confirm rather than trusted from
+the client: the screen the operator saw is a view, and the invoices may have
+moved since it rendered.
+
+### `GET /api/reconciliation/export`
+The statement with its classifications and allocations as `.xlsx`, honouring
+the list's filters.
+
+### `POST /api/reconciliation/rules`
+Form post: `create`, `toggle`, `delete`.
+
+---
+
+## Address search
+
+Both proxied. A Places key in the browser is a key anybody can spend, so it
+never leaves the server — spec 4.8.6.9.
+
+### `GET /api/places/suggest`
+`?q=&session=`. Saved `Location` rows first, then the configured provider,
+de-duplicated on the primary line. A query under three characters returns
+nothing without asking the provider. A provider failure degrades to the
+saved list and reports `warning` rather than erroring.
+
+### `POST /api/places/resolve`
+`{ id, session }`. Closes the provider session, so the keystrokes that led
+here are billed as one. Saves the place as a `Location` if it is not already
+one, resolves its postcode to a zone, and returns the formatted address,
+postcode, coordinates, `locationId` and `zoneId`.
+
+---
+
 ## Telegram
 
 ### `POST /api/telegram/webhook`
