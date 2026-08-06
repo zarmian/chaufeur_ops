@@ -127,6 +127,13 @@ export const NAVIGATION: NavSection[] = [
         matchPrefix: true,
       },
       {
+        href: '/reconciliation',
+        label: 'Reconciliation',
+        icon: 'Landmark',
+        capability: 'viewInvoices',
+        matchPrefix: true,
+      },
+      {
         href: '/fleet',
         label: 'Fleet profit',
         icon: 'Wrench',

@@ -278,9 +278,11 @@ model Client {
   updatedAt        DateTime  @updatedAt
   deletedAt        DateTime?
 
-  defaultAccount Account?  @relation(fields: [defaultAccountId], references: [id])
+  defaultAccount Account?            @relation(fields: [defaultAccountId], references: [id])
   jobs           Job[]
   invoices       Invoice[]
+  bankTxns       BankTransaction[]
+  credits        UnallocatedCredit[]
 
   @@index([normalisedName])
   @@index([deletedAt])
@@ -306,10 +308,12 @@ model Account {
   createdAt        DateTime    @default(now())
   deletedAt        DateTime?
 
-  rateCard RateCard? @relation(fields: [rateCardId], references: [id])
+  rateCard RateCard?           @relation(fields: [rateCardId], references: [id])
   jobs     Job[]
   clients  Client[]
   invoices Invoice[]
+  bankTxns BankTransaction[]
+  credits  UnallocatedCredit[]
 
   @@index([deletedAt])
 }
@@ -349,6 +353,7 @@ model Driver {
   documents       Document[]
   jobs            Job[]
   payouts         DriverPayout[]
+  bankTxns        BankTransaction[]
   linkTokens      LinkToken[]
   engagements     DriverEngagement[]
   shifts          DriverShift[]
@@ -406,6 +411,7 @@ model Vehicle {
   ownerDriver   Driver?               @relation("VehicleOwner", fields: [ownerDriverId], references: [id])
   costs         VehicleCost[]
   standingCosts VehicleStandingCost[]
+  bankTxns      BankTransaction[]
 
   documents Document[]
   drivers   Driver[]
@@ -556,8 +562,17 @@ model Job {
   /// as typed
   pickupText        String
   pickupLocationId  String?
+  /// From an address lookup. Feeds zone resolution, which is why it is on
+  /// the job rather than only on the saved location — a one-off address
+  /// still has to price correctly.
+  pickupPostcode    String?
+  pickupLat         Float?
+  pickupLng         Float?
   dropoffText       String
   dropoffLocationId String?
+  dropoffPostcode   String?
+  dropoffLat        Float?
+  dropoffLng        Float?
   viaText           String?
 
   driverId  String?
@@ -984,10 +999,11 @@ model Invoice {
   createdAt        DateTime      @default(now())
   deletedAt        DateTime?
 
-  client   Client?       @relation(fields: [clientId], references: [id])
-  account  Account?      @relation(fields: [accountId], references: [id])
-  lines    InvoiceLine[]
-  payments Payment[]
+  client      Client?          @relation(fields: [clientId], references: [id])
+  account     Account?         @relation(fields: [accountId], references: [id])
+  lines       InvoiceLine[]
+  payments    Payment[]
+  allocations BankAllocation[]
 
   @@index([status, dueDate])
   @@index([deletedAt])
@@ -1045,8 +1061,9 @@ model DriverPayout {
   createdAt        DateTime     @default(now())
   deletedAt        DateTime?
 
-  driver Driver             @relation(fields: [driverId], references: [id])
-  lines  DriverPayoutLine[]
+  driver      Driver             @relation(fields: [driverId], references: [id])
+  lines       DriverPayoutLine[]
+  allocations BankAllocation[]
 
   @@unique([driverId, periodStart, periodEnd])
   @@index([status])
@@ -1114,4 +1131,184 @@ model LinkToken {
   driver Driver @relation(fields: [driverId], references: [id])
 
   @@index([driverId])
+}
+
+// ------------------------------------------------- bank reconciliation
+
+/// How a statement line was classified. `UNCLASSIFIED` is a first-class
+/// state, not a failure: a line nobody has categorised must stay visible
+/// rather than being guessed into a bucket to make the list look finished.
+enum BankTxnKind {
+  CLIENT_PAYMENT
+  DRIVER_PAYOUT
+  FUEL
+  VEHICLE_COST
+  RENTAL_INCOME
+  /// Between the operator's own accounts. Neither income nor cost, and
+  /// counting it would double every figure on the reports.
+  TRANSFER
+  UNCLASSIFIED
+}
+
+/// One CSV upload.
+model BankStatement {
+  id       String @id @default(cuid())
+  /// The file as the operator named it, so they can tell two uploads apart.
+  filename String
+  /// Which bank's layout the parser matched, or `custom`.
+  layout   String
+
+  periodStart DateTime? @db.Date
+  periodEnd   DateTime? @db.Date
+
+  rowCount      Int @default(0)
+  importedCount Int @default(0)
+  /// Rows skipped because they had already been imported.
+  duplicateCount Int @default(0)
+
+  uploadedById String?
+  createdAt    DateTime  @default(now())
+  deletedAt    DateTime?
+
+  transactions BankTransaction[]
+
+  @@index([deletedAt])
+}
+
+model BankTransaction {
+  id          String @id @default(cuid())
+  statementId String
+
+  occurredOn  DateTime @db.Date
+  description String
+  /// Signed: negative is money out. Integer pence like everything else.
+  amountPence Int
+  /// The bank's own reference where the export carries one.
+  bankRef     String?
+  balancePence Int?
+
+  kind BankTxnKind @default(UNCLASSIFIED)
+  /// Set when a rule classified it, so a wrong rule can be traced back.
+  matchedRuleId String?
+
+  /// Who the money is from or to, once attributed. At most one is set.
+  clientId  String?
+  accountId String?
+  driverId  String?
+  vehicleId String?
+
+  /// What was created from it, so an allocation can be undone.
+  allocatedAt DateTime?
+  /// Sum of the allocations made from this transaction, in pence. Less than
+  /// the amount when a credit exceeded what was owed.
+  allocatedPence Int @default(0)
+
+  /**
+   * Stable across re-imports of the same statement.
+   *
+   * The bank's reference when there is one; otherwise a hash of the date,
+   * amount and description. Uniqueness is what stops a second upload of an
+   * overlapping period crediting every invoice twice.
+   */
+  fingerprint String @unique
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  statement   BankStatement       @relation(fields: [statementId], references: [id])
+  client      Client?             @relation(fields: [clientId], references: [id])
+  account     Account?            @relation(fields: [accountId], references: [id])
+  driver      Driver?             @relation(fields: [driverId], references: [id])
+  vehicle     Vehicle?            @relation(fields: [vehicleId], references: [id])
+  allocations BankAllocation[]
+
+  @@index([statementId])
+  @@index([kind, allocatedAt])
+  @@index([occurredOn])
+  @@index([deletedAt])
+}
+
+/// One transaction's money landing on one thing.
+///
+/// A row per invoice rather than a link per transaction, because a single
+/// £1,000 credit routinely clears four invoices and leaves a fifth part
+/// paid — and undoing it has to reverse exactly those five.
+model BankAllocation {
+  id            String @id @default(cuid())
+  transactionId String
+
+  invoiceId String?
+  payoutId  String?
+  costId    String?
+
+  amountPence Int
+
+  /// The `Payment` row this created, so undoing removes it.
+  paymentId String?
+
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  transaction BankTransaction @relation(fields: [transactionId], references: [id])
+  invoice     Invoice?        @relation(fields: [invoiceId], references: [id])
+  payout      DriverPayout?   @relation(fields: [payoutId], references: [id])
+
+  @@index([transactionId])
+  @@index([invoiceId])
+}
+
+/// A phrase, and what it means. Nothing cleverer on purpose.
+model BankRule {
+  id String @id @default(cuid())
+
+  /// Matched case-insensitively against the description.
+  phrase String
+  kind   BankTxnKind
+
+  /// Optional: pin a matched transaction to a specific counterparty.
+  clientId  String?
+  accountId String?
+  driverId  String?
+  vehicleId String?
+
+  /// Higher wins when two rules match the same description.
+  priority  Int      @default(0)
+  active    Boolean  @default(true)
+  /// How many transactions this rule has classified, for pruning dead rules.
+  hitCount  Int      @default(0)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([active, priority])
+  @@index([deletedAt])
+}
+
+/// Money received that no invoice needed.
+///
+/// Kept rather than dropped: a client who overpays has a balance, and the
+/// next invoice should be able to draw on it.
+model UnallocatedCredit {
+  id String @id @default(cuid())
+
+  clientId      String?
+  accountId     String?
+  transactionId String?
+
+  amountPence Int
+  /// Reduced as later invoices draw on it.
+  remainingPence Int
+
+  note      String?
+  createdAt DateTime  @default(now())
+  deletedAt DateTime?
+
+  client  Client?  @relation(fields: [clientId], references: [id])
+  account Account? @relation(fields: [accountId], references: [id])
+
+  @@index([clientId])
+  @@index([accountId])
+  @@index([deletedAt])
 }

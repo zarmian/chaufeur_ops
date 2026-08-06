@@ -10,6 +10,7 @@ import {
   CreditCard,
   FileText,
   KeyRound,
+  Landmark,
   LayoutDashboard,
   Settings,
   ShieldCheck,
@@ -40,6 +41,7 @@ const ICONS: Record<string, LucideIcon> = {
   ShieldCheck,
   Timer,
   KeyRound,
+  Landmark,
   Wrench,
 };
 
