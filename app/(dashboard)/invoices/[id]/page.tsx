@@ -24,6 +24,8 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { can } from '@/lib/authz';
+import { getAllGatewayConfigs } from '@/lib/gateways/store';
+import { gatewayUsable } from '@/lib/gateways/types';
 import { formatDate, toDateOnlyString } from '@/lib/dates';
 import { getInvoice } from '@/lib/invoice-list';
 import { canEdit, daysOverdue, outstandingPence } from '@/lib/invoices';
@@ -44,14 +46,22 @@ export default async function InvoiceDetailPage({
   const { id } = await params;
   const query = await searchParams;
 
-  const invoice = await getInvoice(id);
+  const [invoice, configured] = await Promise.all([
+    getInvoice(id),
+    getAllGatewayConfigs(),
+  ]);
   if (!invoice) notFound();
+
+  const gateways = configured.filter(gatewayUsable);
+  const paymentLink = filterValue(query, 'paymentLink');
 
   const mayEdit = can(user, 'editInvoices');
   const editable = canEdit({ status: invoice.status });
   const outstanding = outstandingPence(invoice);
   const late = outstanding > 0 && daysOverdue(invoice.dueDate) > 0;
   const error = filterValue(query, 'invoiceError');
+  const warning = filterValue(query, 'invoiceWarning');
+  const notice = filterValue(query, 'invoiceNotice');
 
   return (
     <>
@@ -95,6 +105,20 @@ export default async function InvoiceDetailPage({
       {error ? (
         <Alert variant="destructive" className="mb-6" data-testid="invoice-error">
           <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {/* Sending and emailing are different things, and the difference
+          matters: an invoice can be sent without an email going out, and
+          somebody has to know which happened. */}
+      {notice ? (
+        <Alert className="mb-6" data-testid="invoice-notice">
+          <AlertDescription>{notice}</AlertDescription>
+        </Alert>
+      ) : null}
+      {warning ? (
+        <Alert className="mb-6" data-testid="invoice-warning">
+          <AlertDescription>{warning}</AlertDescription>
         </Alert>
       ) : null}
 
@@ -358,7 +382,8 @@ export default async function InvoiceDetailPage({
                       Send invoice
                     </Button>
                     <p className="mt-2 text-xs text-muted-foreground">
-                      After this it cannot be edited — only credited.
+                      After this it cannot be edited — only credited. It is
+                      emailed to the billing address if a provider is set up.
                     </p>
                   </form>
                 ) : null}
@@ -391,6 +416,50 @@ export default async function InvoiceDetailPage({
                       Record payment
                     </Button>
                   </form>
+                ) : null}
+
+                {/* Spec 4.7.3. Only when something is still owed and a
+                    gateway is on — a link for nothing would confuse whoever
+                    received it, and one for a gateway nobody enabled would
+                    404 on the client's phone. */}
+                {gateways.length > 0 && outstanding > 0 && invoice.status !== 'DRAFT' ? (
+                  <form
+                    method="post"
+                    action={`/api/invoices/${invoice.id}/payment-link`}
+                    className="space-y-2"
+                    data-testid="payment-link-form"
+                  >
+                    <label className="block text-xs text-muted-foreground">
+                      Payment link
+                    </label>
+                    {gateways.map((gateway) => (
+                      <Button
+                        key={gateway.name}
+                        type="submit"
+                        name="gateway"
+                        value={gateway.name}
+                        variant="outline"
+                        className="w-full"
+                      >
+                        {gateway.name === 'revolut' ? 'Revolut' : 'SumUp'}
+                        {gateway.environment === 'sandbox' ? ' (sandbox)' : ''}
+                      </Button>
+                    ))}
+                  </form>
+                ) : null}
+
+                {paymentLink ? (
+                  <div className="rounded-md border p-2" data-testid="payment-link">
+                    <p className="text-xs text-muted-foreground">Send this to the client</p>
+                    <a
+                      href={paymentLink}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-1 block break-all text-xs font-medium underline"
+                    >
+                      {paymentLink}
+                    </a>
+                  </div>
                 ) : null}
 
                 {invoice.status !== 'DRAFT' && !invoice.creditsInvoiceId ? (

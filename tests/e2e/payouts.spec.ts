@@ -92,7 +92,14 @@ test.describe('payouts', () => {
     // Waited on the job's own status control, not on the absence of a
     // warning: `toHaveCount(0)` passes on any page, including the booking
     // form the browser has not left yet.
-    await expect(page.getByTestId('job-status')).toBeVisible({ timeout: 15_000 });
+    try {
+      await expect(page.getByTestId('job-status')).toBeVisible({ timeout: 15_000 });
+    } catch {
+      const messages = await page.locator('[role="alert"], .text-destructive').allInnerTexts();
+      throw new Error(
+        `Booking did not land. url=${page.url()} messages=${JSON.stringify(messages)}`,
+      );
+    }
     await expect(page.getByTestId('unpriced-alert')).toHaveCount(0);
 
     for (const status of ['Assigned', 'In progress', 'Completed']) {

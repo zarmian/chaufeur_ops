@@ -132,10 +132,25 @@ async function completedJob(page: Page, clientName: string, price: string) {
   await selectByOptionText(page, '#clientId', clientName);
   await selectByOptionText(page, '#driverId', driverName);
   await page.getByRole('button', { name: 'Book job' }).click();
+
+  // If the booking was refused, say why rather than timing out on the job
+  // page that never loaded — a bare "element not found" is unreadable.
+  const refusal = page.getByTestId('form-error');
+  if ((await refusal.count()) > 0) {
+    throw new Error(`Booking refused: ${await refusal.innerText()}`);
+  }
+
   // Waited on the job's own status control, not on the absence of a
   // warning: `toHaveCount(0)` passes on any page, including the booking
   // form the browser has not left yet.
-  await expect(page.getByTestId('job-status')).toBeVisible({ timeout: 15_000 });
+  try {
+    await expect(page.getByTestId('job-status')).toBeVisible({ timeout: 15_000 });
+  } catch {
+    const messages = await page.locator('[role="alert"], .text-destructive').allInnerTexts();
+    throw new Error(
+      `Booking did not land. url=${page.url()} messages=${JSON.stringify(messages)}`,
+    );
+  }
   await expect(page.getByTestId('unpriced-alert')).toHaveCount(0);
 
   for (const status of ['Assigned', 'In progress', 'Completed']) {

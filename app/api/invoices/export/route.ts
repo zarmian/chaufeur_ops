@@ -31,6 +31,7 @@ export const GET = withErrorHandling(async (request: Request) => {
           name: 'Invoices',
           rows: toLedgerExportRows(
             await invoicesForExport({
+              q: filter(params, 'q'),
               status: filter(params, 'status'),
               clientId: filter(params, 'clientId'),
               accountId: filter(params, 'accountId'),

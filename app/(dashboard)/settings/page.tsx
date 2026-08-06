@@ -1,8 +1,18 @@
-import { Globe, Palette, ShieldCheck, Table2, Upload } from 'lucide-react';
+import {
+  CreditCard,
+  Globe,
+  Mail,
+  Palette,
+  ShieldCheck,
+  Table2,
+  Upload,
+} from 'lucide-react';
 import Link from 'next/link';
 import { PageHeader } from '@/components/page-header';
 import { Card, CardContent } from '@/components/ui/card';
 import { getBranding } from '@/lib/branding-store';
+import { getEmailConfig } from '@/lib/email-store';
+import { getAllGatewayConfigs } from '@/lib/gateways/store';
 import { getLocaleConfig } from '@/lib/locale-store';
 import { pageRequireCapability } from '@/lib/page-guards';
 import { prisma } from '@/lib/prisma';
@@ -22,6 +32,22 @@ export default async function SettingsPage() {
       select: { name: true, _count: { select: { rules: true } } },
     }),
   ]);
+
+  const [email, gateways] = await Promise.all([
+    getEmailConfig(),
+    getAllGatewayConfigs(),
+  ]);
+
+  const emailSummary =
+    email.provider === 'none'
+      ? 'Not configured — invoices are sent by hand'
+      : `${email.provider} · ${email.fromAddress || 'no from address'}`;
+
+  const live = gateways.filter((gateway) => gateway.enabled);
+  const gatewaySummary =
+    live.length === 0
+      ? 'None enabled — payments recorded by hand'
+      : live.map((g) => `${g.name} (${g.environment})`).join(', ');
 
   const pricing = defaultCard
     ? `${defaultCard.name} · ${defaultCard._count.rules} rule${defaultCard._count.rules === 1 ? '' : 's'}`
@@ -50,6 +76,20 @@ export default async function SettingsPage() {
       title: 'Pricing',
       description: 'Zones, rate cards and the saved addresses that feed them.',
       current: pricing,
+    },
+    {
+      href: '/settings/email',
+      icon: Mail,
+      title: 'Email',
+      description: 'Where invoices are emailed from. Optional.',
+      current: emailSummary,
+    },
+    {
+      href: '/settings/gateways',
+      icon: CreditCard,
+      title: 'Payment gateways',
+      description: 'Revolut and SumUp, for payment links and webhooks. Optional.',
+      current: gatewaySummary,
     },
     {
       href: '/settings/compliance',

@@ -55,6 +55,29 @@ async function selectByOptionText(page: Page, selectId: string, text: string) {
 test.describe('rate cards', () => {
   test.skip(!CREDENTIALS_SET, 'seeded credentials not configured');
 
+  /**
+   * Leave no live default card behind, even when the test fails part way.
+   *
+   * A default rate card is global state: every booking in every other spec
+   * asks it for a price. One left enabled by a failed run makes the *next*
+   * run's failures look like flakes in whichever spec happened to go second.
+   */
+  test.afterEach(async ({ page }) => {
+    await page.goto('/settings/pricing/rate-cards').catch(() => {});
+    const retire = page
+      .locator('[data-testid^="retire-"]')
+      .filter({ has: page.getByRole('button', { name: 'Retire' }) });
+
+    for (const card of await page.locator('[data-testid^="retire-"]').all()) {
+      const enclosing = card.locator('..').locator('..');
+      if ((await enclosing.getByText(/E2E card/).count()) === 0) continue;
+      await card.getByRole('button', { name: 'Retire' }).click();
+      await page.waitForLoadState('load').catch(() => {});
+      await page.goto('/settings/pricing/rate-cards').catch(() => {});
+    }
+    void retire;
+  });
+
   test('a rule configured in settings prices a booking, and can be overridden', async ({
     page,
   }) => {
@@ -118,6 +141,10 @@ test.describe('rate cards', () => {
     await page.getByLabel('Time').fill('14:30');
     await page.getByLabel('Pickup').fill(`Somewhere, ${TEST_PREFIX} 1AA`);
     await page.getByLabel('Destination').fill('Mayfair');
+    // The card is asked when a field is left, not on every keystroke — so
+    // the destination has to lose focus, exactly as it would for somebody
+    // tabbing on to the next field.
+    await page.getByLabel('Destination').blur();
 
     const suggestion = page.getByTestId('rate-card-suggestion');
     await expect(suggestion).toBeVisible({ timeout: 15_000 });

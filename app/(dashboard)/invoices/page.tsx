@@ -62,6 +62,7 @@ export default async function InvoicesPage({
 
   const listParams = parseListParams(params, { defaultSort: 'issueDate' });
   const filters = {
+    q: listParams.q,
     status: filterValue(params, 'status'),
     clientId: filterValue(params, 'clientId'),
     accountId: filterValue(params, 'accountId'),
@@ -72,7 +73,7 @@ export default async function InvoicesPage({
 
   const { rows, total, totals } = await listInvoices(listParams, filters);
   const isFiltered = Boolean(
-    filters.status || filters.from || filters.to || filters.overdueOnly,
+    filters.q || filters.status || filters.from || filters.to || filters.overdueOnly,
   );
 
   return (

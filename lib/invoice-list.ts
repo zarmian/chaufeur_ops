@@ -22,6 +22,8 @@ import { prisma } from './prisma';
  */
 
 export interface InvoiceFilters {
+  /** Free text: the invoice number, or the client or account name. */
+  q: string | null;
   status: string | null;
   clientId: string | null;
   accountId: string | null;
@@ -35,6 +37,18 @@ export function buildInvoiceWhere(
   now: Date = new Date(),
 ): Prisma.InvoiceWhereInput {
   const where: Prisma.InvoiceWhereInput = {};
+
+  // The number, or whoever is being billed. The toolbar offers a search box,
+  // and one that silently matched nothing would be worse than none — an
+  // operator would conclude the invoice had gone rather than that the box was
+  // ornamental.
+  if (filters.q) {
+    where.OR = [
+      { number: { contains: filters.q, mode: 'insensitive' } },
+      { client: { name: { contains: filters.q, mode: 'insensitive' } } },
+      { account: { name: { contains: filters.q, mode: 'insensitive' } } },
+    ];
+  }
 
   if (filters.status) where.status = filters.status as never;
   if (filters.clientId) where.clientId = filters.clientId;

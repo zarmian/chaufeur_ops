@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { apiError } from '@/lib/api';
 import { requireCapability } from '@/lib/authz';
 import { fromDateOnlyString } from '@/lib/dates';
+import { emailInvoice } from '@/lib/invoice-email';
 import {
   createCreditNote,
   markSent,
@@ -41,7 +42,16 @@ export async function POST(
 
     if (intent === 'send') {
       const result = await markSent(id, audit);
-      if (!result.ok) query.set('invoiceError', result.message);
+      if (!result.ok) {
+        query.set('invoiceError', result.message);
+      } else {
+        // Spec 4.3.9. The status change is what "send" means and it has
+        // already happened; emailing is best-effort on top. An unconfigured
+        // mailbox or a missing billing address must not leave an invoice
+        // half-sent, so the outcome is reported rather than thrown.
+        const email = await emailInvoice(id, { requestUrl: request.url });
+        query.set(email.sent ? 'invoiceNotice' : 'invoiceWarning', email.message);
+      }
     } else if (intent === 'payment') {
       const result = await recordPayment(
         id,
@@ -81,7 +91,9 @@ export async function POST(
     );
   }
 
-  if (!query.has('invoiceError')) query.set('updated', String(Date.now()));
+  if (!query.has('invoiceError') && !query.has('invoiceWarning')) {
+    query.set('updated', String(Date.now()));
+  }
 
   return new NextResponse(null, {
     status: 303,

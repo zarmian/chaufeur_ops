@@ -142,7 +142,10 @@ export function JobForm({
   /** Shifts currently open, for attributing a hired driver's job. */
   openShifts?: JobFormOption[];
 }) {
-  const [state, formAction] = useActionState(action, INITIAL_FORM_STATE);
+  const [state, formAction, submitting] = useActionState(
+    action,
+    INITIAL_FORM_STATE,
+  );
   const errors = state.fields ?? {};
 
   const [jobType, setJobType] = useState(values.jobType);
@@ -155,13 +158,21 @@ export function JobForm({
   const [customerRate, setCustomerRate] = useState(values.customerRate);
   const [minimumHours, setMinimumHours] = useState(values.minimumHours);
 
-  // The rate card's answer, and what it pre-filled. Spec 4.2.7.
-  const [clientId, setClientId] = useState(values.clientId);
-  const [accountId, setAccountId] = useState(values.accountId);
-  const [scheduledDate, setScheduledDate] = useState(values.scheduledDate);
-  const [scheduledTime, setScheduledTime] = useState(values.scheduledTime);
-  const [pickupText, setPickupText] = useState(values.pickupText);
-  const [dropoffText, setDropoffText] = useState(values.dropoffText);
+  /**
+   * The rate card's answer — spec 4.2.7.
+   *
+   * The fields the quote depends on stay **uncontrolled**. Making them
+   * controlled re-renders the whole form on every keystroke, and this form
+   * submits through a Server Action: a render landing inside the action's
+   * transition swallows the submit, and the operator sees a Book button that
+   * did nothing. So the values are read off the form when one of them loses
+   * focus, and `revision` is the only thing that changes.
+   *
+   * Blur is a better trigger anyway. Asking on every keystroke made the
+   * suggested price flicker while somebody was still typing the address.
+   */
+  const formRef = useRef<HTMLFormElement>(null);
+  const [revision, setRevision] = useState(0);
   const [quote, setQuote] = useState<Quote | null>(null);
   /**
    * What the rate card put in each field.
@@ -189,18 +200,42 @@ export function JobForm({
    * arrive after a fast answer to the new one and overwrite it.
    */
   const askedFor = useRef('');
+
+  /**
+   * Set the instant Book is pressed, before React starts the action.
+   *
+   * `submitting` from `useActionState` only becomes true once the transition
+   * has begun, which is a render too late: a debounced quote scheduled
+   * moments earlier can still fire in between, and a `setState` landing
+   * inside the action's transition restarts it — the form sits there having
+   * apparently done nothing. An operator who types an address and clicks Book
+   * within the debounce window sees exactly that.
+   *
+   * A ref rather than state, because the guard has to hold synchronously in
+   * the submit handler and be readable by a callback that resolves later.
+   */
+  const submitted = useRef(false);
+  const pendingQuote = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
+    const form = formRef.current;
+    if (!form) return;
+
+    const field = (name: string) =>
+      String(new FormData(form).get(name) ?? '');
+
     const input = {
       jobType,
       vehicleClass,
-      accountId: accountId || null,
-      clientId: clientId || null,
-      pickupText,
-      dropoffText,
-      scheduledDate,
-      scheduledTime,
+      accountId: field('accountId') || null,
+      clientId: field('clientId') || null,
+      pickupText: field('pickupText'),
+      dropoffText: field('dropoffText'),
+      scheduledDate: field('scheduledDate'),
+      scheduledTime: field('scheduledTime'),
       hours: customerHours.trim() === '' ? null : Number(customerHours),
     };
+
+    if (submitted.current || submitting) return;
 
     if (!quoteIsWorthAsking(input)) {
       setQuote(null);
@@ -212,9 +247,12 @@ export function JobForm({
 
     const controller = new AbortController();
     const timer = setTimeout(async () => {
+      if (submitted.current) return;
       askedFor.current = key;
       const suggestion = await fetchQuote(input, controller.signal);
-      if (controller.signal.aborted) return;
+      // Checked again on the way back: the submit may have started while the
+      // request was in flight, and a late answer must not touch state then.
+      if (controller.signal.aborted || submitted.current) return;
 
       setQuote(suggestion);
       if (!suggestion) return;
@@ -243,6 +281,8 @@ export function JobForm({
       }
     }, 400);
 
+    pendingQuote.current = timer;
+
     return () => {
       clearTimeout(timer);
       controller.abort();
@@ -254,13 +294,9 @@ export function JobForm({
   }, [
     jobType,
     vehicleClass,
-    accountId,
-    clientId,
-    pickupText,
-    dropoffText,
-    scheduledDate,
-    scheduledTime,
     customerHours,
+    revision,
+    submitting,
   ]);
 
   const clientFromCard =
@@ -297,7 +333,17 @@ export function JobForm({
   }
 
   return (
-    <form action={formAction} className="max-w-4xl space-y-8">
+    <form
+      action={formAction}
+      className="max-w-4xl space-y-8"
+      ref={formRef}
+      onBlur={() => setRevision((current) => current + 1)}
+      onSubmit={() => {
+        // Synchronous, and before the transition starts.
+        submitted.current = true;
+        if (pendingQuote.current) clearTimeout(pendingQuote.current);
+      }}
+    >
       {state.error ? (
         <Alert variant="destructive" data-testid="form-error">
           <AlertCircle aria-hidden />
@@ -314,8 +360,7 @@ export function JobForm({
           <FormField name="clientId" label="Client" errors={errors.clientId}>
             <Select
               {...fieldProps('clientId', errors.clientId)}
-              value={clientId}
-              onChange={(event) => setClientId(event.target.value)}
+              defaultValue={values.clientId}
             >
               <option value="">No client recorded</option>
               {clients.map((client) => (
@@ -334,8 +379,7 @@ export function JobForm({
           >
             <Select
               {...fieldProps('accountId', errors.accountId)}
-              value={accountId}
-              onChange={(event) => setAccountId(event.target.value)}
+              defaultValue={values.accountId}
             >
               <option value="">No account</option>
               {accounts.map((account) => (
@@ -371,8 +415,7 @@ export function JobForm({
                 {...fieldProps('scheduledDate', errors.scheduledDate)}
                 type="date"
                 required
-                value={scheduledDate}
-                onChange={(event) => setScheduledDate(event.target.value)}
+                defaultValue={values.scheduledDate}
               />
             </FormField>
             <FormField
@@ -386,8 +429,7 @@ export function JobForm({
                 {...fieldProps('scheduledTime', errors.scheduledTime)}
                 type="time"
                 required
-                value={scheduledTime}
-                onChange={(event) => setScheduledTime(event.target.value)}
+                defaultValue={values.scheduledTime}
               />
             </FormField>
           </div>
@@ -406,8 +448,7 @@ export function JobForm({
               required
               autoFocus
               list="saved-locations"
-              value={pickupText}
-              onChange={(event) => setPickupText(event.target.value)}
+              defaultValue={values.pickupText}
               placeholder="The Dorchester"
             />
           </FormField>
@@ -422,8 +463,7 @@ export function JobForm({
               {...fieldProps('dropoffText', errors.dropoffText)}
               required
               list="saved-locations"
-              value={dropoffText}
-              onChange={(event) => setDropoffText(event.target.value)}
+              defaultValue={values.dropoffText}
               placeholder="Heathrow Terminal 5"
             />
           </FormField>
