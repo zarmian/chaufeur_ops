@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { uniqueDigits } from './unique';
 
 /**
  * Phase 4.1 and 4.2 acceptance, end to end.
@@ -83,7 +84,7 @@ test.describe('rate cards', () => {
   }) => {
     await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
 
-    const stamp = String(Date.now()).slice(-6);
+    const stamp = uniqueDigits(6);
     const zoneName = `Testport ${stamp}`;
     const cardName = `E2E card ${stamp}`;
 

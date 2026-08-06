@@ -278,8 +278,34 @@ Handles:
 
 Respond `200` within 5 seconds always; queue anything slow.
 
-### `POST /api/telegram/send`
-Internal. `{ driverId | chatId, template, params }`.
+### `POST /api/telegram/admin-webhook`
+The staff bot, on its own endpoint because it is its own token — mixing them
+would mean one compromised token reaching both audiences. Same three rules.
+Everything it does is read-only: somebody with a phone in a pub should be able
+to see whether tomorrow is covered, and should not be able to reassign a job.
+
+### `POST /api/drivers/:id/telegram`
+Form post: `link` issues a one-time `LinkToken` valid for seven days and
+returns the URL on the query string, shown once; `unlink` clears the binding.
+Any outstanding unused token for the same driver is spent first, so "it says
+expired" always has an answer.
+
+### `POST /api/settings/telegram`
+Form post. Tokens are write-only — stored encrypted, never returned. Enabling
+the bot without an ops token is refused: a bot that cannot send anything would
+leave every driver silently unreachable with the screen claiming otherwise.
+
+### `POST /api/settings/messaging`
+Form post. Per-template opt-in for client email and SMS, all off by default,
+plus the Twilio credentials. Twilio is refused unless the SID, token and from
+number are all present.
+
+### `GET /api/cron/telegram`
+Requires the cron bearer token. Chases expiring documents at 30, 14 and 7 days
+then daily once expired; alerts on unassigned jobs and unanswered assignments;
+purges position pings past the retention window. Each step is independent and
+none may stop the others — a failure to chase documents must not leave pings
+unpurged, which is a privacy commitment rather than housekeeping.
 
 ---
 
@@ -294,6 +320,7 @@ All require `Authorization: Bearer ${CRON_SECRET}`.
 | `/api/cron/driver-statements` | Sundays 18:00 | Generates and sends weekly payout statements |
 | `/api/cron/invoice-reminders` | daily 09:00 | Chases invoices overdue by the configured number of days |
 | `/api/cron/unpriced-digest` | daily 07:00 | Emails ops the list of completed-but-unpriced jobs |
+| `/api/cron/telegram` | daily 08:00 | Document chasing, unassigned and unanswered alerts, position purge |
 
 ## Rate limiting
 

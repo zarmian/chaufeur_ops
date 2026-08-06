@@ -48,6 +48,7 @@ export default async function EditClientPage({
         values={{
           name: client.name,
           contactPhone: client.contactPhone ?? '',
+          contactChannel: client.contactChannel,
           contactEmail: client.contactEmail ?? '',
           billingEmail: client.billingEmail ?? '',
           billingAddress: client.billingAddress ?? '',

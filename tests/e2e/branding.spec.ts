@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { uniqueDigits } from './unique';
 
 /**
  * Phase 3 acceptance: the install is re-skinnable by changing settings.
@@ -83,7 +84,7 @@ test.describe('branding', () => {
     await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
     await page.goto('/settings/branding');
 
-    const name = `Northwind ${String(Date.now()).slice(-5)}`;
+    const name = `Northwind ${uniqueDigits(5)}`;
     await page.getByLabel('Trading name').fill(name);
     await saveBranding(page);
 

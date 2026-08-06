@@ -19,6 +19,7 @@ function readForm(formData: FormData) {
   return {
     name: formData.get('name') ?? '',
     contactPhone: formData.get('contactPhone') ?? '',
+    contactChannel: formData.get('contactChannel') ?? 'EMAIL',
     contactEmail: formData.get('contactEmail') ?? '',
     billingEmail: formData.get('billingEmail') ?? '',
     billingAddress: formData.get('billingAddress') ?? '',

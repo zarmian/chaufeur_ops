@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { uniquePhone, uniquePlate } from './unique';
 
 /**
  * Phase 2 acceptance, end to end.
@@ -37,7 +38,7 @@ async function signIn(page: Page, email: string, password: string) {
 
 /** Create a compliant driver and vehicle, and return the driver's name. */
 async function createCompliantDriver(page: Page, name: string) {
-  const plate = `PH${String(Date.now()).slice(-5)}`;
+  const plate = uniquePlate('PH');
 
   await page.goto('/vehicles/new');
   await page.getByLabel('Registration').fill(plate);
@@ -54,7 +55,7 @@ async function createCompliantDriver(page: Page, name: string) {
 
   await page.goto('/drivers/new');
   await page.getByLabel('Name').fill(name);
-  await page.getByLabel('Phone').fill(`0770090${String(Date.now()).slice(-4)}`);
+  await page.getByLabel('Phone').fill(uniquePhone());
   await page.getByLabel('DVLA licence expires').fill(dateIn(400));
   await page.getByLabel('PHV badge expires').fill(dateIn(400));
   // Assigning the car matters: a job cannot reach ASSIGNED without both a
@@ -229,7 +230,7 @@ test.describe('jobs', () => {
     // A compliant vehicle, so the only defect is the badge. Without one the
     // "needs a vehicle" check fires first — correctly, but that is a
     // different rule from the one under test.
-    const plate = `LB${String(Date.now()).slice(-5)}`;
+    const plate = uniquePlate('LB');
     await page.goto('/vehicles/new');
     await page.getByLabel('Registration').fill(plate);
     await page.getByLabel('Make').fill('Mercedes-Benz');
@@ -243,7 +244,7 @@ test.describe('jobs', () => {
     const driverName = `Lapsed Badge ${Date.now()}`;
     await page.goto('/drivers/new');
     await page.getByLabel('Name').fill(driverName);
-    await page.getByLabel('Phone').fill(`0770091${String(Date.now()).slice(-4)}`);
+    await page.getByLabel('Phone').fill(uniquePhone());
     await page.getByLabel('DVLA licence expires').fill(dateIn(400));
     await page.getByLabel('PHV badge expires').fill(dateIn(-10));
     await page.getByRole('button', { name: 'Add driver' }).click();

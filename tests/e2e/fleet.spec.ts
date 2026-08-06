@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { uniqueDigits, uniquePhone, uniquePlate } from './unique';
 
 /**
  * Phase 2.6 acceptance: what a car is actually making.
@@ -78,7 +79,7 @@ async function selectByOptionText(page: Page, selectId: string, text: string) {
 async function createCompliantDriver(page: Page, name: string, plate: string) {
   await page.goto('/drivers/new');
   await page.getByLabel('Name').fill(name);
-  await page.getByLabel('Phone').fill(`0770090${String(Date.now()).slice(-4)}`);
+  await page.getByLabel('Phone').fill(uniquePhone());
   await page.getByLabel('DVLA licence expires').fill(dateIn(400));
   await page.getByLabel('PHV badge expires').fill(dateIn(400));
   await selectByOptionText(page, '#assignedVehicleId', plate);
@@ -116,7 +117,7 @@ test.describe('fleet', () => {
   }) => {
     await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
 
-    const registration = `FL${String(Date.now()).slice(-6)}`;
+    const registration = uniquePlate('FL');
     const detailUrl = await addVehicle(page, registration, 'FINANCED');
 
     // A repair, dated inside the window.
@@ -166,7 +167,7 @@ test.describe('fleet', () => {
   }) => {
     await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
 
-    const stamp = String(Date.now()).slice(-6);
+    const stamp = uniqueDigits(6);
     const registration = `DO${stamp}`;
     const detailUrl = await addVehicle(page, registration, 'DRIVER_OWNED');
 
@@ -229,7 +230,7 @@ test.describe('fleet', () => {
     // would silently go nowhere. With storage configured the field appears.
     await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
 
-    const registration = `RC${String(Date.now()).slice(-6)}`;
+    const registration = uniquePlate('RC');
     await addVehicle(page, registration, 'OWNED');
 
     const form = page.getByTestId('cost-form');
@@ -256,7 +257,7 @@ test.describe('fleet', () => {
   test('the fleet view ranks cars and marks the idle ones', async ({ page }) => {
     await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
 
-    const registration = `FR${String(Date.now()).slice(-6)}`;
+    const registration = uniquePlate('FR');
     await addVehicle(page, registration, 'OWNED');
 
     await page.goto('/fleet');

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { uniquePhone, uniquePlate } from './unique';
 
 /**
  * Phase 4.3 and 4.4 acceptance, end to end.
@@ -86,7 +87,7 @@ async function billableFor(page: Page, clientName: string) {
  * without one and cannot reach `COMPLETED` without passing through it.
  */
 async function createCompliantDriver(page: Page, name: string) {
-  const plate = `IN${String(Date.now()).slice(-5)}`;
+  const plate = uniquePlate('IN');
 
   await page.goto('/vehicles/new');
   await page.getByLabel('Registration').fill(plate);
@@ -100,7 +101,7 @@ async function createCompliantDriver(page: Page, name: string) {
 
   await page.goto('/drivers/new');
   await page.getByLabel('Name').fill(name);
-  await page.getByLabel('Phone').fill(`0770091${String(Date.now()).slice(-4)}`);
+  await page.getByLabel('Phone').fill(uniquePhone());
   await page.getByLabel('DVLA licence expires').fill(dateIn(400));
   await page.getByLabel('PHV badge expires').fill(dateIn(400));
   await selectByOptionText(page, '#assignedVehicleId', plate);

@@ -47,6 +47,13 @@ export const financeSchema = z.object({
   baseFarePence: pence,
   waitTimePence: pence,
   waitMinutesBilled: z.coerce.number().int().min(0).max(24 * 60).default(0),
+  /**
+   * Set when an accountant is deliberately replacing a figure the driver's
+   * taps produced — spec 5.5.4. Recorded because "why is this £12 rather than
+   * the £25 the clock says" is the question somebody will ask in six months,
+   * and the answer must not be "somebody typed it".
+   */
+  waitOverrideReason: z.string().trim().max(500).optional().or(z.literal('')),
   extraChargesPence: pence,
   extraChargesNotes: z.string().trim().max(2000).optional().or(z.literal('')),
   customerHours: hours,

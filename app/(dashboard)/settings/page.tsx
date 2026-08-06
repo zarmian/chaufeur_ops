@@ -3,6 +3,8 @@ import {
   Globe,
   Mail,
   MapPin,
+  MessageSquare,
+  Send,
   Palette,
   ShieldCheck,
   Table2,
@@ -15,6 +17,8 @@ import { getBranding } from '@/lib/branding-store';
 import { getEmailConfig } from '@/lib/email-store';
 import { getAllGatewayConfigs } from '@/lib/gateways/store';
 import { getPlacesConfig } from '@/lib/places/store';
+import { getClientMessagingConfig } from '@/lib/client-messaging';
+import { getTelegramConfig } from '@/lib/telegram/config';
 import { getLocaleConfig } from '@/lib/locale-store';
 import { pageRequireCapability } from '@/lib/page-guards';
 import { prisma } from '@/lib/prisma';
@@ -35,11 +39,15 @@ export default async function SettingsPage() {
     }),
   ]);
 
-  const [email, gateways, places] = await Promise.all([
+  const [email, gateways, places, telegram, messaging] = await Promise.all([
     getEmailConfig(),
     getAllGatewayConfigs(),
     getPlacesConfig(),
+    getTelegramConfig(),
+    getClientMessagingConfig(),
   ]);
+
+  const liveTemplates = Object.values(messaging.enabled).filter(Boolean).length;
 
   const emailSummary =
     email.provider === 'none'
@@ -93,6 +101,29 @@ export default async function SettingsPage() {
       title: 'Payment gateways',
       description: 'Revolut and SumUp, for payment links and webhooks. Optional.',
       current: gatewaySummary,
+    },
+    {
+      href: '/settings/telegram',
+      icon: Send,
+      title: 'Telegram',
+      description:
+        'The driver bot: job briefs, status taps and wait time. Optional.',
+      current: telegram.enabled
+        ? 'On'
+        : telegram.opsTokenSet
+          ? 'Configured but off'
+          : 'Not configured',
+    },
+    {
+      href: '/settings/messaging',
+      icon: MessageSquare,
+      title: 'Client messaging',
+      description:
+        'Booking confirmations and driver updates, by email and text. Optional.',
+      current:
+        liveTemplates === 0
+          ? 'Nothing turned on'
+          : `${liveTemplates} template${liveTemplates === 1 ? '' : 's'} on`,
     },
     {
       href: '/settings/places',
