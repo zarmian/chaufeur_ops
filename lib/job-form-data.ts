@@ -28,7 +28,16 @@ export async function loadJobFormOptions() {
     }),
     prisma.vehicle.findMany({
       where: { status: 'ACTIVE' },
-      select: { id: true, registration: true, make: true, model: true },
+      // The class comes along because the rate card matches on it: a rule
+      // for executive cars cannot be applied to a booking whose vehicle the
+      // form knows about but whose class it does not.
+      select: {
+        id: true,
+        registration: true,
+        make: true,
+        model: true,
+        vehicleClass: true,
+      },
       orderBy: { registration: 'asc' },
       take: 500,
     }),
@@ -52,6 +61,7 @@ export async function loadJobFormOptions() {
     vehicles: vehicles.map((v) => ({
       id: v.id,
       label: `${v.registration} · ${v.make} ${v.model}`,
+      vehicleClass: v.vehicleClass as string,
     })),
     locations: locations.map((l) => l.label || l.address),
   };

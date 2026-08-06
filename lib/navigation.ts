@@ -113,6 +113,13 @@ export const NAVIGATION: NavSection[] = [
         matchPrefix: true,
       },
       {
+        href: '/payments',
+        label: 'Payments',
+        icon: 'CreditCard',
+        capability: 'viewInvoices',
+        matchPrefix: true,
+      },
+      {
         href: '/payouts',
         label: 'Payouts',
         icon: 'Wallet',

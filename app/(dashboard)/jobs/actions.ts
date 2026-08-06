@@ -54,6 +54,10 @@ function readJobForm(formData: FormData) {
     // The form asks for pounds; the schema converts to pence.
     clientPricePence: formData.get('clientPrice') ?? '',
     driverPricePence: formData.get('driverPrice') ?? '',
+    // What the rate card offered, for the audit entry. Never the saved price.
+    rateCardRuleId: formData.get('rateCardRuleId') ?? '',
+    suggestedClientPricePence: formData.get('suggestedClientPrice') ?? '',
+    suggestedDriverPricePence: formData.get('suggestedDriverPrice') ?? '',
     customerHours: formData.get('customerHours') ?? '',
     customerRatePence: formData.get('customerRate') ?? '',
     minimumHours: formData.get('minimumHours') ?? '',

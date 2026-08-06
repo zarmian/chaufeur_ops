@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildPayoutLines, type PayoutJob, type PayoutShift } from './payout-lines';
+import {
+  buildPayoutLines,
+  type PayoutExpense,
+  type PayoutJob,
+  type PayoutShift,
+} from './payout-lines';
 
 /**
  * What a driver is owed, and the rule that stops them being paid twice.
@@ -150,6 +155,112 @@ describe('never paying twice', () => {
   });
 });
 
+describe('the settled figure beats the booked one', () => {
+  it('pays what the finance record says when there is one', () => {
+    // The finance panel is where a fee actually gets adjusted — waiting time
+    // agreed after the job, a correction. Paying the booking price when a
+    // settled figure exists would quietly short the driver.
+    const draft = buildPayoutLines({
+      jobs: [job({ driverPricePence: 8000, financeDriverPaymentPence: 9250 })],
+      shifts: [],
+    });
+
+    expect(draft.lines[0]?.amountPence).toBe(9250);
+    expect(draft.totalPence).toBe(9250);
+  });
+
+  it('falls back to the booking price when nothing was settled', () => {
+    const draft = buildPayoutLines({
+      jobs: [job({ driverPricePence: 8000, financeDriverPaymentPence: null })],
+      shifts: [],
+    });
+
+    expect(draft.lines[0]?.amountPence).toBe(8000);
+  });
+
+  it('excludes a job settled at nothing rather than paying the booked price', () => {
+    // A zero on the finance record is a statement, not an absence — and a
+    // payout that quietly substituted the booking price would be paying a
+    // figure somebody deliberately overrode.
+    const draft = buildPayoutLines({
+      jobs: [job({ driverPricePence: 8000, financeDriverPaymentPence: 0 })],
+      shifts: [],
+    });
+
+    expect(draft.lines).toEqual([]);
+    expect(draft.excluded[0]?.reason).toContain('No driver price');
+  });
+});
+
+describe('reimbursed expenses', () => {
+  function expense(overrides: Partial<PayoutExpense> = {}): PayoutExpense {
+    return {
+      id: 'exp-1',
+      jobId: 'job-1',
+      jobReference: 'JOB-000001',
+      occurredAt: d('2026-06-10'),
+      kind: 'PARKING',
+      amountPence: 1200,
+      note: null,
+      ...overrides,
+    };
+  }
+
+  it('adds a line of its own rather than folding into the fee', () => {
+    // A driver checking a payout against their receipts needs the parking to
+    // appear as parking.
+    const draft = buildPayoutLines({
+      jobs: [job()],
+      shifts: [],
+      expenses: [expense()],
+    });
+
+    expect(draft.lines).toHaveLength(2);
+    expect(draft.jobPence).toBe(8000);
+    expect(draft.expensePence).toBe(1200);
+    expect(draft.totalPence).toBe(9200);
+  });
+
+  it('names the expense and the job it belongs to', () => {
+    const draft = buildPayoutLines({
+      jobs: [],
+      shifts: [],
+      expenses: [expense({ kind: 'CONGESTION_CHARGE', note: 'inbound' })],
+    });
+
+    expect(draft.lines[0]?.description).toBe(
+      'Congestion charge on JOB-000001 — inbound',
+    );
+    // Traceable: a reimbursement pointing at nothing is unanswerable the
+    // moment anybody queries it.
+    expect(draft.lines[0]?.jobId).toBe('job-1');
+  });
+
+  it('ignores an expense of nothing', () => {
+    const draft = buildPayoutLines({
+      jobs: [],
+      shifts: [],
+      expenses: [expense({ amountPence: 0 })],
+    });
+    expect(draft.lines).toEqual([]);
+  });
+
+  it('reimburses on a shift-paid job, which carries no fee of its own', () => {
+    // The fee is excluded because the shift covers it; the parking is not,
+    // because the driver is still out of pocket for it.
+    const draft = buildPayoutLines({
+      jobs: [job({ shiftId: 'shift-1' })],
+      shifts: [shift()],
+      expenses: [expense()],
+    });
+
+    expect(draft.jobPence).toBe(0);
+    expect(draft.shiftPence).toBe(15300);
+    expect(draft.expensePence).toBe(1200);
+    expect(draft.totalPence).toBe(16500);
+  });
+});
+
 describe('ordering', () => {
   it('reads chronologically, not jobs-then-shifts', () => {
     // A statement should read as the week happened.
@@ -167,6 +278,7 @@ describe('an empty period', () => {
     const draft = buildPayoutLines({ jobs: [], shifts: [] });
     expect(draft.lines).toEqual([]);
     expect(draft.totalPence).toBe(0);
+    expect(draft.expensePence).toBe(0);
     expect(draft.excluded).toEqual([]);
   });
 });

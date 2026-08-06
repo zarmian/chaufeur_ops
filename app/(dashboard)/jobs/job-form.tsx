@@ -1,8 +1,13 @@
 'use client';
 
-import { AlertCircle, AlertTriangle, BadgePoundSterling } from 'lucide-react';
+import {
+  AlertCircle,
+  AlertTriangle,
+  BadgePoundSterling,
+  Sparkles,
+} from 'lucide-react';
 import Link from 'next/link';
-import { useActionState, useState } from 'react';
+import { useActionState, useEffect, useRef, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { FormField, fieldProps } from '@/components/form-field';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -13,6 +18,12 @@ import { Textarea } from '@/components/ui/textarea';
 import { JOB_TYPES } from '@/lib/enum-options';
 import { INITIAL_FORM_STATE, type FormState } from '@/lib/form-state';
 import { billedHours } from '@/lib/job-finance';
+import {
+  fetchQuote,
+  penceToField,
+  quoteIsWorthAsking,
+  type Quote,
+} from '@/lib/pricing/quote-client';
 import { StopsField, type StopValue } from './stops-field';
 
 /**
@@ -93,6 +104,11 @@ export interface DriverOption extends JobFormOption {
   assignedVehicleId: string | null;
 }
 
+export interface VehicleOption extends JobFormOption {
+  /** The rate card matches on it, so the form has to know it. */
+  vehicleClass: string;
+}
+
 function SubmitButton({ label }: { label: string }) {
   const { pending } = useFormStatus();
   return (
@@ -121,25 +137,172 @@ export function JobForm({
   clients: JobFormOption[];
   accounts: JobFormOption[];
   drivers: DriverOption[];
-  vehicles: JobFormOption[];
+  vehicles: VehicleOption[];
   locations: string[];
   /** Shifts currently open, for attributing a hired driver's job. */
   openShifts?: JobFormOption[];
 }) {
-  const [state, formAction] = useActionState(action, INITIAL_FORM_STATE);
+  const [state, formAction, submitting] = useActionState(
+    action,
+    INITIAL_FORM_STATE,
+  );
   const errors = state.fields ?? {};
 
   const [jobType, setJobType] = useState(values.jobType);
   const [driverId, setDriverId] = useState(values.driverId);
   const [vehicleId, setVehicleId] = useState(values.vehicleId);
   const [clientPrice, setClientPrice] = useState(values.clientPrice);
+  const [driverPrice, setDriverPrice] = useState(values.driverPrice);
   const [confirmedUnpriced, setConfirmedUnpriced] = useState(false);
   const [customerHours, setCustomerHours] = useState(values.customerHours);
   const [customerRate, setCustomerRate] = useState(values.customerRate);
   const [minimumHours, setMinimumHours] = useState(values.minimumHours);
 
+  /**
+   * The rate card's answer — spec 4.2.7.
+   *
+   * The fields the quote depends on stay **uncontrolled**. Making them
+   * controlled re-renders the whole form on every keystroke, and this form
+   * submits through a Server Action: a render landing inside the action's
+   * transition swallows the submit, and the operator sees a Book button that
+   * did nothing. So the values are read off the form when one of them loses
+   * focus, and `revision` is the only thing that changes.
+   *
+   * Blur is a better trigger anyway. Asking on every keystroke made the
+   * suggested price flicker while somebody was still typing the address.
+   */
+  const formRef = useRef<HTMLFormElement>(null);
+  const [revision, setRevision] = useState(0);
+  const [quote, setQuote] = useState<Quote | null>(null);
+  /**
+   * What the rate card put in each field.
+   *
+   * Kept as the *value* rather than a boolean, so a field still holding
+   * exactly what was suggested is marked and one the operator has since
+   * changed is not — spec 4.2.7's "visible marker with full manual override".
+   * The original travels to the server as a hidden field so the audit entry
+   * records what was suggested alongside what was saved (4.2.8).
+   */
+  const [suggestedClient, setSuggestedClient] = useState('');
+  const [suggestedDriver, setSuggestedDriver] = useState('');
+
   const isAirport = jobType === 'AIRPORT_TRANSFER';
   const isHourly = jobType === 'AS_DIRECTED';
+
+  const vehicleClass =
+    vehicles.find((vehicle) => vehicle.id === vehicleId)?.vehicleClass ?? null;
+
+  /**
+   * Ask the rate card whenever the booking changes enough to matter.
+   *
+   * Debounced, because this fires while somebody is still typing an address,
+   * and aborted on the next change so a slow answer to an old question cannot
+   * arrive after a fast answer to the new one and overwrite it.
+   */
+  const askedFor = useRef('');
+
+  /**
+   * Set the instant Book is pressed, before React starts the action.
+   *
+   * `submitting` from `useActionState` only becomes true once the transition
+   * has begun, which is a render too late: a debounced quote scheduled
+   * moments earlier can still fire in between, and a `setState` landing
+   * inside the action's transition restarts it — the form sits there having
+   * apparently done nothing. An operator who types an address and clicks Book
+   * within the debounce window sees exactly that.
+   *
+   * A ref rather than state, because the guard has to hold synchronously in
+   * the submit handler and be readable by a callback that resolves later.
+   */
+  const submitted = useRef(false);
+  const pendingQuote = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    const form = formRef.current;
+    if (!form) return;
+
+    const field = (name: string) =>
+      String(new FormData(form).get(name) ?? '');
+
+    const input = {
+      jobType,
+      vehicleClass,
+      accountId: field('accountId') || null,
+      clientId: field('clientId') || null,
+      pickupText: field('pickupText'),
+      dropoffText: field('dropoffText'),
+      scheduledDate: field('scheduledDate'),
+      scheduledTime: field('scheduledTime'),
+      hours: customerHours.trim() === '' ? null : Number(customerHours),
+    };
+
+    if (submitted.current || submitting) return;
+
+    if (!quoteIsWorthAsking(input)) {
+      setQuote(null);
+      return;
+    }
+
+    const key = JSON.stringify(input);
+    if (key === askedFor.current) return;
+
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      if (submitted.current) return;
+      askedFor.current = key;
+      const suggestion = await fetchQuote(input, controller.signal);
+      // Checked again on the way back: the submit may have started while the
+      // request was in flight, and a late answer must not touch state then.
+      if (controller.signal.aborted || submitted.current) return;
+
+      setQuote(suggestion);
+      if (!suggestion) return;
+
+      // Only fill a field the operator has not put something in. Overwriting
+      // a typed price with a suggested one is how an agreed fare silently
+      // becomes the wrong number.
+      const client = penceToField(suggestion.clientPricePence);
+      setClientPrice((current) => {
+        if (current.trim() === '' || current === suggestedClient) {
+          setSuggestedClient(client);
+          return client;
+        }
+        return current;
+      });
+
+      const driver = penceToField(suggestion.driverPricePence);
+      if (driver) {
+        setDriverPrice((current) => {
+          if (current.trim() === '' || current === suggestedDriver) {
+            setSuggestedDriver(driver);
+            return driver;
+          }
+          return current;
+        });
+      }
+    }, 400);
+
+    pendingQuote.current = timer;
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+    // `suggestedClient` and `suggestedDriver` are read inside the setters
+    // rather than depended on: including them would re-run the effect every
+    // time it fills a field, which is a loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    jobType,
+    vehicleClass,
+    customerHours,
+    revision,
+    submitting,
+  ]);
+
+  const clientFromCard =
+    suggestedClient !== '' && clientPrice === suggestedClient;
+  const driverFromCard =
+    suggestedDriver !== '' && driverPrice === suggestedDriver;
 
   // The hourly total, shown as it is typed (spec 2.5.6.3). Calculated with the
   // same `billedHours` the server uses, so the quote on screen and the figure
@@ -170,7 +333,17 @@ export function JobForm({
   }
 
   return (
-    <form action={formAction} className="max-w-4xl space-y-8">
+    <form
+      action={formAction}
+      className="max-w-4xl space-y-8"
+      ref={formRef}
+      onBlur={() => setRevision((current) => current + 1)}
+      onSubmit={() => {
+        // Synchronous, and before the transition starts.
+        submitted.current = true;
+        if (pendingQuote.current) clearTimeout(pendingQuote.current);
+      }}
+    >
       {state.error ? (
         <Alert variant="destructive" data-testid="form-error">
           <AlertCircle aria-hidden />
@@ -185,7 +358,10 @@ export function JobForm({
 
         <div className="grid gap-4 sm:grid-cols-2">
           <FormField name="clientId" label="Client" errors={errors.clientId}>
-            <Select {...fieldProps('clientId', errors.clientId)} defaultValue={values.clientId}>
+            <Select
+              {...fieldProps('clientId', errors.clientId)}
+              defaultValue={values.clientId}
+            >
               <option value="">No client recorded</option>
               {clients.map((client) => (
                 <option key={client.id} value={client.id}>
@@ -201,7 +377,10 @@ export function JobForm({
             hint="Who gets invoiced. Often not the person riding."
             errors={errors.accountId}
           >
-            <Select {...fieldProps('accountId', errors.accountId)} defaultValue={values.accountId}>
+            <Select
+              {...fieldProps('accountId', errors.accountId)}
+              defaultValue={values.accountId}
+            >
               <option value="">No account</option>
               {accounts.map((account) => (
                 <option key={account.id} value={account.id}>
@@ -401,14 +580,82 @@ export function JobForm({
           Price
         </h2>
 
+        {/*
+          Spec 4.2.7. The suggestion is stated, not silently applied: an
+          operator who cannot see where a number came from has no way to
+          judge whether to keep it. Overwriting either field clears its
+          marker, which is what "full manual override" has to look like.
+        */}
+        {quote ? (
+          <div
+            className="flex items-start gap-2 rounded-md border border-dashed bg-background/60 p-3 text-xs"
+            data-testid="rate-card-suggestion"
+          >
+            <Sparkles className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+            <div>
+              <p className="font-medium">From the rate card</p>
+              <p className="mt-0.5 text-muted-foreground">
+                {quote.explanation}
+                {quote.fromZoneName || quote.toZoneName
+                  ? ` · ${quote.fromZoneName ?? 'anywhere'} → ${quote.toZoneName ?? 'anywhere'}`
+                  : ''}
+              </p>
+              {!clientFromCard ? (
+                <button
+                  type="button"
+                  className="mt-1 font-medium underline"
+                  onClick={() => {
+                    const client = (quote.clientPricePence / 100).toFixed(2);
+                    setClientPrice(client);
+                    setSuggestedClient(client);
+                    setConfirmedUnpriced(false);
+                    if (quote.driverPricePence !== null) {
+                      const driver = (quote.driverPricePence / 100).toFixed(2);
+                      setDriverPrice(driver);
+                      setSuggestedDriver(driver);
+                    }
+                  }}
+                >
+                  Use {(quote.clientPricePence / 100).toFixed(2)}
+                </button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
+        {/*
+          What the card suggested, carried to the server so the audit entry
+          can record it next to what was actually saved — spec 4.2.8. Not the
+          price itself: the server never trusts a posted total.
+        */}
+        {quote ? (
+          <>
+            <input type="hidden" name="rateCardRuleId" value={quote.rateCardRuleId} />
+            {/* In pounds, like the visible price fields — the schema does
+                the conversion to pence in one place. */}
+            <input
+              type="hidden"
+              name="suggestedClientPrice"
+              value={penceToField(quote.clientPricePence)}
+            />
+            <input
+              type="hidden"
+              name="suggestedDriverPrice"
+              value={penceToField(quote.driverPricePence)}
+            />
+          </>
+        ) : null}
+
         <div className="grid gap-4 sm:grid-cols-2">
           <FormField
             name="clientPrice"
             label="Client price"
             hint={
-              isHourly
-                ? 'The agreed total. Hourly rates are set in the finance panel.'
-                : 'The fare agreed with whoever booked it.'
+              clientFromCard
+                ? 'From the rate card — change it and this note goes away.'
+                : isHourly
+                  ? 'The agreed total. Hourly rates are set in the finance panel.'
+                  : 'The fare agreed with whoever booked it.'
             }
             errors={errors.clientPricePence}
           >
@@ -427,14 +674,19 @@ export function JobForm({
           <FormField
             name="driverPrice"
             label="Driver price"
-            hint="What the driver is paid for this job."
+            hint={
+              driverFromCard
+                ? 'From the rate card — change it and this note goes away.'
+                : 'What the driver is paid for this job.'
+            }
             errors={errors.driverPricePence}
           >
             <Input
               {...fieldProps('driverPrice', errors.driverPricePence)}
               inputMode="decimal"
               placeholder="80.00"
-              defaultValue={values.driverPrice}
+              value={driverPrice}
+              onChange={(event) => setDriverPrice(event.target.value)}
             />
           </FormField>
         </div>
