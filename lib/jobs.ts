@@ -73,6 +73,35 @@ const optionalCount = z.preprocess(
 );
 
 /**
+ * A postcode from an address lookup.
+ *
+ * Stored in the canonical spaced, upper-cased form, because zone resolution
+ * and every downstream comparison expect it and a lower-cased one would
+ * silently fail to match.
+ */
+const optionalPostcode = z
+  .string()
+  .trim()
+  .max(12)
+  .optional()
+  .transform((value) =>
+    value === undefined || value === '' ? null : value.toUpperCase(),
+  );
+
+/**
+ * A latitude or longitude.
+ *
+ * Blank mapped before coercion, for the same reason as `optionalCount`:
+ * `z.coerce.number()` turns `''` into 0, and 0,0 is a point in the Atlantic
+ * that would look like a real location on every map this ever reaches.
+ */
+const optionalCoordinate = z.preprocess(
+  (value) =>
+    value === '' || value === null || value === undefined ? null : value,
+  z.coerce.number().min(-180).max(180).nullable(),
+);
+
+/**
  * One stop, as the form posts it.
  *
  * Stops arrive as parallel arrays (`stopAddress[]`, `stopCharge[]`), which is
@@ -127,6 +156,20 @@ export const jobSchema = z
     viaText: z.string().trim().max(500).optional().or(z.literal('')),
     pickupLocationId: optionalId,
     dropoffLocationId: optionalId,
+
+    /**
+     * From an address lookup — spec 4.8.6.5.
+     *
+     * Optional throughout: an operator typing a one-off address by hand is
+     * still taking a booking, and refusing it because no provider is
+     * configured would make address search a requirement rather than a help.
+     */
+    pickupPostcode: optionalPostcode,
+    pickupLat: optionalCoordinate,
+    pickupLng: optionalCoordinate,
+    dropoffPostcode: optionalPostcode,
+    dropoffLat: optionalCoordinate,
+    dropoffLng: optionalCoordinate,
 
     driverId: optionalId,
     vehicleId: optionalId,
@@ -229,8 +272,14 @@ function toData(input: JobInput, timeZone?: string) {
 
     pickupText: tidy(input.pickupText),
     pickupLocationId: input.pickupLocationId,
+    pickupPostcode: input.pickupPostcode,
+    pickupLat: input.pickupLat,
+    pickupLng: input.pickupLng,
     dropoffText: tidy(input.dropoffText),
     dropoffLocationId: input.dropoffLocationId,
+    dropoffPostcode: input.dropoffPostcode,
+    dropoffLat: input.dropoffLat,
+    dropoffLng: input.dropoffLng,
     viaText: emptyToNull(input.viaText),
 
     driverId: input.driverId,
@@ -892,6 +941,11 @@ export async function listUnpricedCompleted(limit = 100) {
   });
 }
 
+/** A nullable number as a form field holds it. */
+function asField(value: number | null): string {
+  return value === null ? '' : String(value);
+}
+
 /**
  * Pre-fill for "duplicate job" and "create return journey" (spec 2.3.8–9).
  *
@@ -904,7 +958,13 @@ export function duplicateDefaults(
     accountId: string | null;
     jobType: JobType;
     pickupText: string;
+    pickupPostcode: string | null;
+    pickupLat: number | null;
+    pickupLng: number | null;
     dropoffText: string;
+    dropoffPostcode: string | null;
+    dropoffLat: number | null;
+    dropoffLng: number | null;
     viaText: string | null;
     driverId: string | null;
     vehicleId: string | null;
@@ -924,8 +984,16 @@ export function duplicateDefaults(
     jobType: job.jobType,
     scheduledDate: '',
     scheduledTime: '',
+    // Swapped together with the text, or a return journey would carry the
+    // outbound leg's coordinates and price from the wrong zone.
     pickupText: options.swap ? job.dropoffText : job.pickupText,
+    pickupPostcode: (options.swap ? job.dropoffPostcode : job.pickupPostcode) ?? '',
+    pickupLat: asField(options.swap ? job.dropoffLat : job.pickupLat),
+    pickupLng: asField(options.swap ? job.dropoffLng : job.pickupLng),
     dropoffText: options.swap ? job.pickupText : job.dropoffText,
+    dropoffPostcode: (options.swap ? job.pickupPostcode : job.dropoffPostcode) ?? '',
+    dropoffLat: asField(options.swap ? job.pickupLat : job.dropoffLat),
+    dropoffLng: asField(options.swap ? job.pickupLng : job.dropoffLng),
     viaText: job.viaText ?? '',
     driverId: job.driverId ?? '',
     vehicleId: job.vehicleId ?? '',

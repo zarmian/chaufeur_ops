@@ -29,6 +29,8 @@ The order below differs deliberately from the enhancement roadmap in the origina
 | **2.6 — Fleet** | Vehicle ownership, running and standing costs, servicing, profit per vehicle | 2.5 |
 | **3 — Branding & import** | White-label theming, install script, CSV import for drivers/vehicles/clients | 2.6 |
 | **4 — Money** | Rate cards, invoicing with VAT, invoice ledger, driver payouts, reports and exports | 3 |
+| **4.7 — Email & gateways** | Invoice email, Revolut and SumUp payment links and webhooks | 4 |
+| **4.8 — Reconciliation & addresses** | Bank statement import, classification, allocation to invoices, address search | 4.7 |
 | **5 — Telegram** | Driver bot, assignment, status events, wait-time capture, expenses, admin bot | 4 |
 | **6 — Dispatch & scale** | Day timeline, conflict detection, recurring jobs, saved locations, payment gateways | 5 |
 
@@ -151,6 +153,8 @@ lib/
   install.ts                           first-run bootstrap, shared with the seed
   auth.ts  permissions.ts  authz.ts
   storage.ts                           Vercel Blob, private + signed URLs
+  bank/                                statement parsing, classification, allocation
+  places/                              address lookup behind a provider seam
 prisma/
   schema.prisma
   migrations/
@@ -162,8 +166,11 @@ docs/
     phase-0-foundation.md
     phase-1-core-records.md
     phase-2-jobs.md
+    phase-2.5-commercial-models.md
+    phase-2.6-fleet.md
     phase-3-branding-and-import.md
     phase-4-money.md
+    phase-4.8-reconciliation-and-locations.md
     phase-5-telegram.md
     phase-6-dispatch.md
 reference/

@@ -534,6 +534,56 @@ model LinkToken {
 }
 ```
 
+### Bank reconciliation
+
+Four tables and a rule table. The one that carries the weight is
+`BankTransaction.fingerprint`: unique, derived from the bank's own reference
+where there is one and otherwise from a hash of date, amount and description.
+It is what stops a second upload of an overlapping period crediting every
+invoice twice — the thing an operator does whenever they are unsure last
+week's import worked.
+
+`BankAllocation` is a row per landing, not a link per transaction, because a
+single £1,000 credit routinely clears four invoices and leaves a fifth part
+paid — and undoing it has to reverse exactly those five. It holds the
+`paymentId` it created, so the undo has something to delete rather than
+something to guess.
+
+`UnallocatedCredit` exists because money over is a balance the payer is
+entitled to. Forcing it onto an invoice makes that invoice read as overpaid;
+dropping it loses money. So it is kept, with `remainingPence` reduced as
+later invoices draw on it — and an allocation whose credit has been drawn on
+refuses to undo, because unpicking that silently is how a ledger stops
+adding up.
+
+```prisma
+enum BankTxnKind {
+  CLIENT_PAYMENT
+  DRIVER_PAYOUT
+  FUEL
+  VEHICLE_COST
+  RENTAL_INCOME
+  TRANSFER
+  UNCLASSIFIED
+}
+```
+
+| Model | Holds |
+|---|---|
+| `BankStatement` | One upload: filename, detected layout, period, and the row counts in each state |
+| `BankTransaction` | One line: signed `amountPence`, `kind`, the counterparty once attributed, `fingerprint`, and how much of it has been allocated |
+| `BankAllocation` | One transaction's money landing on one invoice, payout or cost |
+| `BankRule` | A phrase and what it means, with a priority and a hit count |
+| `UnallocatedCredit` | Money received that no invoice needed, against the payer |
+
+### Addresses on a job
+
+`Job` carries `pickupPostcode`, `pickupLat`, `pickupLng` and the dropoff
+equivalents, alongside the existing `pickupLocationId`. On the job rather
+than only on the saved `Location`, because a one-off address still has to
+price correctly — the postcode is what resolves a zone, and "53 Park Lane"
+names no zone at all.
+
 ---
 
 ## Derived values — computed server-side, never trusted from the client

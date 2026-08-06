@@ -2,6 +2,7 @@ import {
   CreditCard,
   Globe,
   Mail,
+  MapPin,
   Palette,
   ShieldCheck,
   Table2,
@@ -13,6 +14,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { getBranding } from '@/lib/branding-store';
 import { getEmailConfig } from '@/lib/email-store';
 import { getAllGatewayConfigs } from '@/lib/gateways/store';
+import { getPlacesConfig } from '@/lib/places/store';
 import { getLocaleConfig } from '@/lib/locale-store';
 import { pageRequireCapability } from '@/lib/page-guards';
 import { prisma } from '@/lib/prisma';
@@ -33,9 +35,10 @@ export default async function SettingsPage() {
     }),
   ]);
 
-  const [email, gateways] = await Promise.all([
+  const [email, gateways, places] = await Promise.all([
     getEmailConfig(),
     getAllGatewayConfigs(),
+    getPlacesConfig(),
   ]);
 
   const emailSummary =
@@ -90,6 +93,19 @@ export default async function SettingsPage() {
       title: 'Payment gateways',
       description: 'Revolut and SumUp, for payment links and webhooks. Optional.',
       current: gatewaySummary,
+    },
+    {
+      href: '/settings/places',
+      icon: MapPin,
+      title: 'Address search',
+      description:
+        'Where pickup and destination suggestions come from. Optional.',
+      current:
+        places.provider === 'google'
+          ? places.keySet
+            ? 'Google Places'
+            : 'Google Places — no key set'
+          : 'Postcode lookup — no key needed',
     },
     {
       href: '/settings/compliance',

@@ -15,6 +15,9 @@ export interface QuoteInput {
   clientId?: string | null;
   pickupText?: string | null;
   dropoffText?: string | null;
+  /** From an address lookup. Resolves a zone by prefix rather than by name. */
+  pickupPostcode?: string | null;
+  dropoffPostcode?: string | null;
   scheduledDate: string;
   scheduledTime: string;
   hours?: number | null;

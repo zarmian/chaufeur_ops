@@ -9,6 +9,7 @@ import {
 import Link from 'next/link';
 import { useActionState, useEffect, useRef, useState } from 'react';
 import { useFormStatus } from 'react-dom';
+import { AddressField } from '@/components/address-field';
 import { FormField, fieldProps } from '@/components/form-field';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -47,7 +48,13 @@ export interface JobFormValues {
   scheduledDate: string;
   scheduledTime: string;
   pickupText: string;
+  pickupPostcode: string;
+  pickupLat: string;
+  pickupLng: string;
   dropoffText: string;
+  dropoffPostcode: string;
+  dropoffLat: string;
+  dropoffLng: string;
   viaText: string;
   driverId: string;
   vehicleId: string;
@@ -74,7 +81,13 @@ const BLANK: JobFormValues = {
   scheduledDate: '',
   scheduledTime: '',
   pickupText: '',
+  pickupPostcode: '',
+  pickupLat: '',
+  pickupLng: '',
   dropoffText: '',
+  dropoffPostcode: '',
+  dropoffLat: '',
+  dropoffLng: '',
   viaText: '',
   driverId: '',
   vehicleId: '',
@@ -230,6 +243,10 @@ export function JobForm({
       clientId: field('clientId') || null,
       pickupText: field('pickupText'),
       dropoffText: field('dropoffText'),
+      // Present only once a suggestion has been chosen. The matcher resolves
+      // a zone from a postcode where the typed text names none.
+      pickupPostcode: field('pickupTextPostcode') || null,
+      dropoffPostcode: field('dropoffTextPostcode') || null,
       scheduledDate: field('scheduledDate'),
       scheduledTime: field('scheduledTime'),
       hours: customerHours.trim() === '' ? null : Number(customerHours),
@@ -442,14 +459,27 @@ export function JobForm({
         </h2>
 
         <div className="grid gap-4 sm:grid-cols-2">
+          {/* Suggests as you type, and stores the postcode and coordinates
+              alongside the text — spec 4.8.6. With no provider configured it
+              still completes UK postcodes and offers saved locations, so it
+              is never worse than the plain box it replaced. */}
           <FormField name="pickupText" label="Pickup" required errors={errors.pickupText}>
-            <Input
-              {...fieldProps('pickupText', errors.pickupText)}
+            <AddressField
+              name="pickupText"
               required
               autoFocus
-              list="saved-locations"
-              defaultValue={values.pickupText}
+              invalid={Boolean(errors.pickupText?.length)}
+              describedBy={
+                errors.pickupText?.length ? 'pickupText-error' : undefined
+              }
+              defaultValue={{
+                text: values.pickupText,
+                postcode: values.pickupPostcode,
+                lat: values.pickupLat,
+                lng: values.pickupLng,
+              }}
               placeholder="The Dorchester"
+              onChosen={() => setRevision((count) => count + 1)}
             />
           </FormField>
 
@@ -459,12 +489,21 @@ export function JobForm({
             required
             errors={errors.dropoffText}
           >
-            <Input
-              {...fieldProps('dropoffText', errors.dropoffText)}
+            <AddressField
+              name="dropoffText"
               required
-              list="saved-locations"
-              defaultValue={values.dropoffText}
+              invalid={Boolean(errors.dropoffText?.length)}
+              describedBy={
+                errors.dropoffText?.length ? 'dropoffText-error' : undefined
+              }
+              defaultValue={{
+                text: values.dropoffText,
+                postcode: values.dropoffPostcode,
+                lat: values.dropoffLat,
+                lng: values.dropoffLng,
+              }}
               placeholder="Heathrow Terminal 5"
+              onChosen={() => setRevision((count) => count + 1)}
             />
           </FormField>
 
