@@ -233,6 +233,11 @@ export async function importStatement(
   const seen = new Set(known.map((row) => row.fingerprint));
   const fresh = parse.rows.filter((row) => !seen.has(row.fingerprint));
 
+  // A year-end statement is thousands of rows, and Prisma's default
+  // interactive-transaction timeout is five seconds. A partially-imported
+  // statement is not a thing this can produce — either all of it lands or
+  // none of it does — so the ceiling is raised rather than the transaction
+  // broken up.
   const statement = await prisma.$transaction(async (tx) => {
     const created = await tx.bankStatement.create({
       data: {
@@ -284,7 +289,7 @@ export async function importStatement(
     }
 
     return created;
-  });
+  }, { maxWait: 15_000, timeout: 120_000 });
 
   return {
     ok: true,
@@ -558,7 +563,8 @@ export async function confirmInvoiceAllocation(
     };
   }
 
-  await prisma.$transaction(async (tx) => {
+  try {
+    await prisma.$transaction(async (tx) => {
     for (const allocation of proposal.proposal.allocations) {
       const before = await tx.invoice.findUniqueOrThrow({
         where: { id: allocation.invoiceId },
@@ -631,14 +637,14 @@ export async function confirmInvoiceAllocation(
       });
     }
 
-    await tx.bankTransaction.update({
-      where: { id: transactionId },
-      data: {
-        allocatedAt: new Date(),
-        allocatedPence: proposal.proposal.allocatedPence,
-      },
+    await claim(tx, transactionId, proposal.proposal.allocatedPence);
     });
-  });
+  } catch (error) {
+    if (error instanceof AlreadyAllocatedError) {
+      return { ok: false, code: 'ALLOCATED', message: error.message };
+    }
+    throw error;
+  }
 
   return {
     ok: true,
@@ -746,13 +752,10 @@ export async function confirmPayoutMatch(
         },
       });
 
+      await claim(tx, transactionId, Math.abs(txn.amountPence));
       await tx.bankTransaction.update({
         where: { id: transactionId },
-        data: {
-          allocatedAt: new Date(),
-          allocatedPence: Math.abs(txn.amountPence),
-          driverId: payout.driverId,
-        },
+        data: { driverId: payout.driverId },
       });
 
       return { entityId: payoutId, before, after, result: null };
@@ -819,13 +822,10 @@ export async function confirmVehicleCost(
       },
     });
 
+    await claim(tx, transactionId, Math.abs(txn.amountPence));
     await tx.bankTransaction.update({
       where: { id: transactionId },
-      data: {
-        allocatedAt: new Date(),
-        allocatedPence: Math.abs(txn.amountPence),
-        vehicleId: input.vehicleId,
-      },
+      data: { vehicleId: input.vehicleId },
     });
   });
 
@@ -867,10 +867,7 @@ export async function confirmIgnore(
         createdById: context.userId ?? null,
       },
     });
-    await tx.bankTransaction.update({
-      where: { id: transactionId },
-      data: { allocatedAt: new Date(), allocatedPence: Math.abs(txn.amountPence) },
-    });
+    await claim(tx, transactionId, Math.abs(txn.amountPence));
   });
 
   return { ok: true, id: transactionId };
@@ -1008,6 +1005,49 @@ export async function undoAllocation(
   });
 
   return { ok: true, id: transactionId, reversed: txn.allocations.length };
+}
+
+/**
+ * Claim a transaction inside the transaction that is about to act on it.
+ *
+ * `proposeFor` checks `allocatedAt` before the write begins, which is a
+ * check-then-act with a gap in it: two confirms racing — a double-clicked
+ * button is enough — both read "not allocated" and both allocate, and the
+ * invoices end up paid twice from one credit.
+ *
+ * The conditional update closes it. Only one of the two matches
+ * `allocatedAt: null`, and the loser throws, which rolls its whole
+ * transaction back rather than leaving half an allocation behind.
+ */
+async function claim(
+  // Only what it needs, rather than the full transaction client: the
+  // extended client's `$transaction` hands out a slightly different type,
+  // and widening this is cheaper than casting at every call site.
+  tx: {
+    bankTransaction: {
+      updateMany: (args: {
+        where: { id: string; allocatedAt: null };
+        data: { allocatedAt: Date; allocatedPence: number };
+      }) => Promise<{ count: number }>;
+    };
+  },
+  transactionId: string,
+  allocatedPence: number,
+): Promise<void> {
+  const claimed = await tx.bankTransaction.updateMany({
+    where: { id: transactionId, allocatedAt: null },
+    data: { allocatedAt: new Date(), allocatedPence },
+  });
+  if (claimed.count !== 1) {
+    throw new AlreadyAllocatedError();
+  }
+}
+
+class AlreadyAllocatedError extends Error {
+  constructor() {
+    super('This transaction was allocated a moment ago.');
+    this.name = 'AlreadyAllocatedError';
+  }
 }
 
 function toJson(value: unknown): Prisma.InputJsonValue {

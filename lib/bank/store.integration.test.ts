@@ -333,6 +333,64 @@ describe.skipIf(!DATABASE_AVAILABLE)('bank reconciliation', () => {
     expect(reset.allocatedPence).toBe(0);
   });
 
+  it('refuses a second confirm of the same payment', async () => {
+    // A double-clicked button is enough. `proposeFor` checks `allocatedAt`
+    // before the write begins, which is a check-then-act with a gap in it —
+    // without the conditional claim inside the transaction, both confirms
+    // land and one credit pays the invoices twice.
+    const invoiceId = await raiseInvoice({
+      number: `INV-${YEAR}-0005`,
+      grossPence: 50_000,
+      issueDate: `${YEAR}-02-05`,
+    });
+
+    const imported = await importStatement(
+      {
+        filename: 'race.csv',
+        csv: statementCsv([`06/03/${YEAR},250.00,${payerName} RACE`]),
+      },
+      audit,
+    );
+    if (!imported.ok) throw new Error(imported.message);
+    statementIds.push(imported.outcome.statementId);
+
+    const txn = await raw!.bankTransaction.findFirstOrThrow({
+      where: { statementId: imported.outcome.statementId },
+    });
+
+    const [first, second] = await Promise.all([
+      confirmInvoiceAllocation(txn.id, audit),
+      confirmInvoiceAllocation(txn.id, audit),
+    ]);
+
+    // Exactly one wins, and the loser says why rather than throwing.
+    expect([first.ok, second.ok].filter(Boolean)).toHaveLength(1);
+    const loser = first.ok ? second : first;
+    if (loser.ok) throw new Error('both confirms succeeded');
+    expect(loser.code).toBe('ALLOCATED');
+
+    // And the money landed once. Asserted on the allocations rather than on
+    // a named invoice: which invoice the £250 reaches depends on what else
+    // this account has outstanding, and the invariant under test is that the
+    // credit was spent exactly once whatever it settled.
+    const allocations = await raw!.bankAllocation.findMany({
+      where: { transactionId: txn.id },
+    });
+    expect(
+      allocations.reduce((sum, allocation) => sum + allocation.amountPence, 0),
+    ).toBe(25_000);
+    expect(
+      await raw!.payment.count({ where: { gatewayTxnId: txn.fingerprint } }),
+    ).toBe(allocations.length);
+
+    await undoAllocation(txn.id, audit);
+    // Cancelled so it does not absorb the next test's payment.
+    await raw!.invoice.update({
+      where: { id: invoiceId },
+      data: { status: 'CANCELLED' },
+    });
+  });
+
   it('records money over as a credit rather than forcing it onto an invoice', async () => {
     await raw!.invoice.updateMany({
       where: { id: { in: invoiceIds } },
