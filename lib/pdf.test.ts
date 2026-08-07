@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
  * What the PDF failure tells the operator.
@@ -14,6 +14,62 @@ vi.mock('@sparticuz/chromium', () => ({
 }));
 
 const { tryRenderPdf } = await import('./pdf');
+
+/**
+ * The Lambda hint, which is the fix itself.
+ *
+ * `@sparticuz/chromium` unpacks the browser unconditionally but its shared
+ * libraries only when it thinks it is on Lambda. Vercel is Lambda and says
+ * nothing, so the browser arrived without `libnss3.so` and every PDF was a
+ * 503. These assert the hint is set where it is needed and nowhere else — a
+ * developer's machine must not be told it is Lambda, or the package unpacks
+ * Amazon Linux libraries onto a laptop.
+ */
+describe('the Lambda runtime hint', () => {
+  const saved = { ...process.env };
+
+  beforeEach(() => {
+    for (const key of ['VERCEL', 'AWS_LAMBDA_FUNCTION_NAME', 'AWS_EXECUTION_ENV', 'AWS_LAMBDA_JS_RUNTIME']) {
+      delete process.env[key];
+    }
+  });
+  afterEach(() => {
+    process.env = { ...saved };
+  });
+
+  /** Re-imported per test: the hint runs once, on first load. */
+  async function hint() {
+    vi.resetModules();
+    const { __hintLambdaRuntimeForTests } = await import('./pdf');
+    __hintLambdaRuntimeForTests();
+  }
+
+  it('names the runtime after the running Node version on Vercel', async () => {
+    process.env.VERCEL = '1';
+    await hint();
+    expect(process.env.AWS_LAMBDA_JS_RUNTIME).toBe(
+      `nodejs${Number.parseInt(process.versions.node, 10)}.x`,
+    );
+  });
+
+  it('applies on any other Lambda host too', async () => {
+    process.env.AWS_LAMBDA_FUNCTION_NAME = 'invoices-pdf';
+    await hint();
+    expect(process.env.AWS_LAMBDA_JS_RUNTIME).toMatch(/^nodejs\d+\.x$/);
+  });
+
+  it('leaves a developer machine alone', async () => {
+    await hint();
+    expect(process.env.AWS_LAMBDA_JS_RUNTIME).toBeUndefined();
+  });
+
+  it('never overrides what the host already said', async () => {
+    process.env.VERCEL = '1';
+    process.env.AWS_EXECUTION_ENV = 'AWS_Lambda_nodejs18.x';
+    await hint();
+    expect(process.env.AWS_LAMBDA_JS_RUNTIME).toBeUndefined();
+  });
+});
 
 describe('tryRenderPdf', () => {
   it('names a packaging failure as a packaging failure', async () => {
