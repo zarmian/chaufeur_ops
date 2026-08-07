@@ -73,8 +73,31 @@ function hintLambdaRuntime(): void {
   // this function does.
   if (process.env.AWS_EXECUTION_ENV || process.env.AWS_LAMBDA_JS_RUNTIME) return;
 
+  process.env.AWS_LAMBDA_JS_RUNTIME = amazonLinuxGeneration();
+}
+
+/**
+ * Which Amazon Linux generation's libraries to unpack, spelled as a runtime.
+ *
+ * The string is not really a Node version, whatever it looks like: the package
+ * matches it against a fixed list to choose an archive. `20.x` and `22.x`
+ * select `al2023.tar.br`; anything else containing `nodejs` selects
+ * `al2.tar.br`. There is no entry for anything newer.
+ *
+ * Naming the running version therefore broke on the deployment the moment it
+ * was Node 24: the hint read `nodejs24.x`, matched no Node 20 case, fell
+ * through to the Amazon Linux 2 branch, and unpacked a library set the
+ * browser was not built against — `/tmp/al2/lib` existed and Chromium died on
+ * `libnspr4.so` instead of `libnss3.so`. A newer Node made it worse, not
+ * better, which is not a way for this to fail.
+ *
+ * So the question asked is the one the package is really answering. Node 20
+ * and above run on Amazon Linux 2023, and say so in the only dialect it reads.
+ * Node 18 and below get Amazon Linux 2. Node 26 will keep working.
+ */
+function amazonLinuxGeneration(): string {
   const major = Number.parseInt(process.versions.node, 10);
-  process.env.AWS_LAMBDA_JS_RUNTIME = `nodejs${major}.x`;
+  return major >= 20 ? 'nodejs22.x' : 'nodejs18.x';
 }
 
 /** Exposed for the test that guards where the hint applies. */

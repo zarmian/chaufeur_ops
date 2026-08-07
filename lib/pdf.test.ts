@@ -59,16 +59,47 @@ describe('the Lambda runtime hint', () => {
 
   it('applies wherever the bundled Linux x64 browser will be launched', async () => {
     await hint();
-    expect(process.env.AWS_LAMBDA_JS_RUNTIME).toBe(
-      `nodejs${Number.parseInt(process.versions.node, 10)}.x`,
-    );
+    expect(process.env.AWS_LAMBDA_JS_RUNTIME).toMatch(/^nodejs(18|22)\.x$/);
   });
 
   it('does not depend on Vercel advertising itself', async () => {
     // The whole point: no VERCEL, no AWS_LAMBDA_FUNCTION_NAME, still hinted.
     expect(process.env.VERCEL).toBeUndefined();
     await hint();
-    expect(process.env.AWS_LAMBDA_JS_RUNTIME).toMatch(/^nodejs\d+\.x$/);
+    expect(process.env.AWS_LAMBDA_JS_RUNTIME).toBeDefined();
+  });
+
+  /**
+   * The regression that cost the second deploy. Vercel runs Node 24, and
+   * `nodejs24.x` is not a string the package knows: it matched no Node 20
+   * case, fell through to the Amazon Linux 2 archive, and handed Chromium a
+   * library set it was not built against. Only `20.x` and `22.x` select
+   * AL2023, so a newer runtime must still ask for one of those.
+   */
+  it.each([20, 22, 24, 26])('asks for Amazon Linux 2023 on Node %i', async (major) => {
+    const real = process.versions.node;
+    Object.defineProperty(process.versions, 'node', {
+      value: `${major}.0.0`,
+      configurable: true,
+    });
+    try {
+      await hint();
+      // The two dialects the package reads as AL2023.
+      expect(process.env.AWS_LAMBDA_JS_RUNTIME).toMatch(/nodejs(20|22)\.x/);
+    } finally {
+      Object.defineProperty(process.versions, 'node', { value: real, configurable: true });
+    }
+  });
+
+  it('still asks for Amazon Linux 2 on Node 18', async () => {
+    const real = process.versions.node;
+    Object.defineProperty(process.versions, 'node', { value: '18.20.0', configurable: true });
+    try {
+      await hint();
+      expect(process.env.AWS_LAMBDA_JS_RUNTIME).toBe('nodejs18.x');
+    } finally {
+      Object.defineProperty(process.versions, 'node', { value: real, configurable: true });
+    }
   });
 
   it('stays out of the way when a browser is configured', async () => {
