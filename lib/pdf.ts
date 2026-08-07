@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import type ChromiumType from '@sparticuz/chromium';
 import puppeteer, { type Browser } from 'puppeteer-core';
 
@@ -44,12 +45,29 @@ export interface PdfOptions {
  * right archive — `al2023.tar.br` for Node 20 and 22, `al2.tar.br` below that.
  * Set before the import, because the `LD_LIBRARY_PATH` half runs at module
  * load; setting it afterwards unpacks libraries the browser cannot find.
+ *
+ * The condition is deliberately *not* "am I on Vercel". The first attempt at
+ * this asked exactly that, via `VERCEL` and `AWS_LAMBDA_FUNCTION_NAME`, and
+ * changed nothing on the deployment: whether a Vercel function sees those at
+ * runtime depends on a project setting, so the check answered "no" on the one
+ * host it existed for.
+ *
+ * What actually matters is narrower and observable from inside the process: we
+ * are about to launch the browser this package unpacks, and that browser is a
+ * Linux x64 build that needs the libraries in the archive beside it. Wherever
+ * that is true, extracting them is right — on Lambda because nothing else
+ * provides them, and on a Linux developer machine because the browser's own
+ * libraries are the ones it was built against. Anywhere else — macOS, ARM, or
+ * a configured `CHROMIUM_EXECUTABLE_PATH` — this binary is never launched and
+ * the hint is not set.
  */
 function hintLambdaRuntime(): void {
-  // Somewhere that is genuinely Lambda-like. `VERCEL` covers the deployment,
-  // `AWS_LAMBDA_FUNCTION_NAME` any other Lambda host.
-  const onLambda = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME;
-  if (!onLambda) return;
+  // A configured browser is somebody else's, and needs none of this.
+  if (process.env.CHROMIUM_EXECUTABLE_PATH) return;
+
+  // The bundled binary is Linux x64 only. Elsewhere it cannot run at all, and
+  // unpacking Amazon Linux libraries would achieve nothing.
+  if (process.platform !== 'linux' || process.arch !== 'x64') return;
 
   // Never override a real one. If the host sets these, it knows better than
   // this function does.
@@ -152,15 +170,36 @@ export async function tryRenderPdf(
  * shared libraries beside it that are missing. Somebody following that advice
  * on a deployment is being sent to configure a path that is already correct.
  */
+/**
+ * What the process could see when it failed.
+ *
+ * A deployment cannot be attached to a debugger, and the first fix for this
+ * failed silently for want of exactly these four facts. Reporting them turns
+ * the next 503 into something readable rather than another round of guessing.
+ */
+function observed(): string {
+  let libDir = 'unknown';
+  try {
+    const base = (process.env.LD_LIBRARY_PATH ?? '').split(':')[0];
+    libDir = base && existsSync(base) ? `${base} exists` : `${base || '(unset)'} missing`;
+  } catch {
+    // Reading /tmp must never be what turns a 503 into a 500.
+  }
+  return [
+    `runtime hint=${process.env.AWS_LAMBDA_JS_RUNTIME ?? '(unset)'}`,
+    `AWS_EXECUTION_ENV=${process.env.AWS_EXECUTION_ENV ?? '(unset)'}`,
+    `LD_LIBRARY_PATH ${libDir}`,
+    `${process.platform}/${process.arch} node ${process.versions.node}`,
+  ].join(', ');
+}
+
 function diagnose(detail: string): string {
   if (/libnss3|shared libraries|cannot open shared object/i.test(detail)) {
     return (
       'The bundled browser started without its shared libraries. `@sparticuz/chromium` ' +
       'unpacks them from `bin/al2023.tar.br` only when it believes it is on Lambda, which ' +
       'it reads from AWS_LAMBDA_JS_RUNTIME or AWS_EXECUTION_ENV — neither of which Vercel ' +
-      'sets. `hintLambdaRuntime` in lib/pdf.ts supplies it; if this is still failing, check ' +
-      'that VERCEL or AWS_LAMBDA_FUNCTION_NAME is set in the function environment, and that ' +
-      'the archives shipped (`serverExternalPackages` plus `outputFileTracingIncludes`).'
+      `sets. \`hintLambdaRuntime\` in lib/pdf.ts supplies it. Observed: ${observed()}.`
     );
   }
 
