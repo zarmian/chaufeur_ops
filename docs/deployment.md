@@ -130,12 +130,13 @@ If you would rather not expose a bootstrap page at all:
 npm ci
 cp .env.example .env   # fill in the two connection strings
 npm run db:deploy      # only if you have not deployed yet — Vercel does this
-npm run db:seed        # admin user, zones, default rate card
+npm run db:seed        # admin user, zones, airport terminals, default rate card
 npm run verify
 ```
 
 The seed prints a generated password once. Save it before closing the
-terminal. It also writes the same completion marker, so `/setup` is inert
+terminal. For a scripted install, set `SEED_ADMIN_EMAIL` and
+`SEED_ADMIN_PASSWORD` first and it uses those instead of generating one. It also writes the same completion marker, so `/setup` is inert
 before the deployment is ever reachable.
 
 `npm run verify` should end with `Ready.` It checks the pooler flags, that
