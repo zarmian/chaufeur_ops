@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { uniquePhone, uniquePlate } from './unique';
+import { uniqueDigits, uniquePhone, uniquePlate } from './unique';
 
 /**
  * Phase 2 acceptance, end to end.
@@ -362,6 +362,85 @@ test.describe('jobs', () => {
     );
     await expect(page.getByText('Recharged').first()).toBeVisible();
     await expect(page.getByText('£210.00').first()).toBeVisible();
+
+    // **And it is a priced job**, which is where this test used to stop.
+    //
+    // Every figure above was right while the same page flew the unpriced
+    // alert and refused completion, because the checks read only
+    // `clientPricePence` — null here, since an as-directed job carries its
+    // total on the finance record. All 24 hourly jobs on the deployment were
+    // stuck, and invoicing draws on completed jobs, so none could be billed.
+    // The suite passed throughout precisely because it never tried.
+    await expect(page.getByTestId('unpriced-alert')).toHaveCount(0);
+  });
+
+  test('an as-directed job can be completed and invoiced', async ({ page }) => {
+    // The other half: a full hourly job walked to COMPLETED and then offered
+    // for billing at the total it was quoted at.
+    await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+
+    const pickup = `Hourly End To End ${uniqueDigits(6)}`;
+    const driverName = `Hourly Driver ${uniqueDigits(6)}`;
+    const plate = uniquePlate('HR');
+
+    await page.goto('/vehicles/new');
+    await page.getByLabel('Registration').fill(plate);
+    await page.getByLabel('Make').fill('Mercedes-Benz');
+    await page.getByLabel('Model').fill('V-Class');
+    await page.getByLabel('MOT expires').fill(dateIn(400));
+    await page.getByLabel('Insurance expires').fill(dateIn(400));
+    await page.getByLabel('PHV vehicle licence expires').fill(dateIn(400));
+    await page.getByRole('button', { name: 'Add vehicle' }).click();
+    await expect(page.getByRole('heading', { name: plate })).toBeVisible();
+
+    await page.goto('/drivers/new');
+    await page.getByLabel('Name').fill(driverName);
+    await page.getByLabel('Phone').fill(uniquePhone());
+    await page.getByLabel('DVLA licence expires').fill(dateIn(400));
+    await page.getByLabel('PHV badge expires').fill(dateIn(400));
+    await selectByOptionText(page, '#assignedVehicleId', plate);
+    await page.getByRole('button', { name: 'Add driver' }).click();
+    await expect(page.getByRole('heading', { name: driverName })).toBeVisible();
+
+    // Four hours at £59 — the shape from the defect report.
+    await page.goto('/jobs/new');
+    await page.locator('#jobType').selectOption('AS_DIRECTED');
+    await page.getByLabel('Date').fill(dateIn(4));
+    await page.getByLabel('Time').fill('09:00');
+    await page.getByLabel('Pickup').fill(pickup);
+    await page.getByLabel('Destination').fill('As directed');
+    await page.locator('#customerHours').fill('4');
+    await page.locator('#customerRate').fill('59.00');
+    await selectByOptionText(page, '#driverId', driverName);
+    await page.getByRole('button', { name: 'Book job' }).click();
+    await expect(page.getByTestId('job-status')).toBeVisible({ timeout: 20_000 });
+
+    const jobUrl = page.url();
+    await expect(page.getByTestId('unpriced-alert')).toHaveCount(0);
+    await expect(page.getByText('£236.00').first()).toBeVisible();
+
+    for (const next of ['ASSIGNED', 'ACCEPTED', 'IN_PROGRESS', 'COMPLETED']) {
+      await page.goto(jobUrl);
+      const control = page.locator('select[name="status"]').first();
+      await expect(control).toBeVisible();
+      await control.selectOption(next);
+      await Promise.all([
+        page.waitForURL(/[?&](updated|statusError)=/, { timeout: 20_000 }),
+        page.getByRole('button', { name: /Update|Change|Move/ }).first().click(),
+      ]);
+      // A refusal names the price; catching it here says which step failed.
+      await expect(
+        page.getByText(/no client price/i),
+        `refused at ${next}`,
+      ).toHaveCount(0);
+    }
+
+    await page.goto(jobUrl);
+    await expect(page.getByTestId('job-status')).toContainText(/completed/i);
+
+    // And it reaches the billing screen at the figure it was quoted at.
+    await page.goto(`/invoices/new?from=2020-01-01&to=${dateIn(30)}`);
+    await expect(page.getByText(pickup).first().or(page.getByText('£236.00').first())).toBeVisible();
   });
 
   test('an expense the driver bears is neither revenue nor cost', async ({ page }) => {

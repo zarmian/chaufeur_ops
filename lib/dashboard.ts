@@ -1,6 +1,6 @@
 import { buildComplianceReport } from './compliance-report';
 import { endOfZonedDay, startOfZonedDay } from './dates';
-import { outstandingPence } from './invoices';
+import { creditedTotalPence, outstandingPence, SETTLED } from './invoices';
 import { countUnpricedCompleted } from './jobs';
 import { getLocaleConfig } from './locale-store';
 import { prisma } from './prisma';
@@ -103,10 +103,15 @@ export async function loadDashboard(options: {
     buildComplianceReport(thresholds),
     prisma.invoice.findMany({
       where: {
-        status: { notIn: ['PAID', 'CANCELLED', 'DRAFT'] },
+        status: { notIn: SETTLED },
         dueDate: { lt: now },
       },
-      select: { grossPence: true, paidPence: true },
+      // Credits included, or the tile chases money already given back.
+      select: {
+        grossPence: true,
+        paidPence: true,
+        creditNotes: { select: { grossPence: true } },
+      },
       take: 500,
     }),
     // Month to date, on the same expressions the reports use — so the tile
@@ -118,7 +123,12 @@ export async function loadDashboard(options: {
   ]);
 
   const overdueTotal = overdue.reduce(
-    (sum, invoice) => sum + outstandingPence(invoice),
+    (sum, invoice) =>
+      sum +
+      outstandingPence({
+        ...invoice,
+        creditedPence: creditedTotalPence(invoice.creditNotes),
+      }),
     0,
   );
 

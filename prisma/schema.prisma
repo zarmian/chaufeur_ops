@@ -122,6 +122,11 @@ enum InvoiceStatus {
   PAID
   PART_PAID
   OVERDUE
+  /// Fully reversed by a credit note. Distinct from PAID on purpose: no
+  /// money arrived, and a ledger that called it paid would not reconcile
+  /// against a bank statement. Distinct from CANCELLED too — the invoice was
+  /// legitimately issued and the credit note is the document that undoes it.
+  CREDITED
   CANCELLED
 }
 
@@ -1174,7 +1179,15 @@ model Invoice {
   payments    Payment[]
   allocations BankAllocation[]
 
+  /// The invoice this one reverses, and the credit notes reversing this one.
+  /// The column existed without a relation, so nothing could ask "what has
+  /// been credited against this invoice?" — which is why a credited invoice
+  /// kept its full balance and went on being chased.
+  credits     Invoice?         @relation("InvoiceCredit", fields: [creditsInvoiceId], references: [id])
+  creditNotes Invoice[]        @relation("InvoiceCredit")
+
   @@index([status, dueDate])
+  @@index([creditsInvoiceId])
   @@index([deletedAt])
 }
 

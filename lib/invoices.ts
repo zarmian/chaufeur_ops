@@ -17,6 +17,7 @@ export type InvoiceStatus =
   | 'SENT'
   | 'PART_PAID'
   | 'PAID'
+  | 'CREDITED'
   | 'OVERDUE'
   | 'CANCELLED';
 
@@ -45,12 +46,49 @@ export function invoiceTotals(
   return { netPence, vatPence, grossPence: netPence + vatPence };
 }
 
-/** What is still owed. Never negative — an overpayment is not a debt. */
-export function outstandingPence(invoice: {
+export interface SettleableInvoice {
   grossPence: number;
   paidPence: number;
-}): number {
-  return Math.max(0, invoice.grossPence - invoice.paidPence);
+  /**
+   * What credit notes against this invoice come to, as a positive number.
+   *
+   * Absent means "not loaded", not "none" — a caller that forgets it gets the
+   * old answer, which is why every caller in this repository passes it.
+   */
+  creditedPence?: number;
+}
+
+/**
+ * What is still owed.
+ *
+ * Never negative — an overpayment is not a debt, and flooring per invoice
+ * before any sum is what stops one client's overpayment quietly offsetting
+ * another's arrears.
+ *
+ * **Credit notes settle the invoice they credit.** Without that, a fully
+ * credited invoice kept its whole balance: the ledger showed Outstanding
+ * £2,005.20 against Invoiced £1,789.80 — more owed than was ever billed —
+ * because the credit note netted out of the invoiced total but contributed
+ * nothing to outstanding, while the invoice it cancelled kept its £338.40.
+ * The invoice would then age into `OVERDUE` and be chased for money already
+ * credited, which is a letter no client should ever receive.
+ *
+ * A credit note has negative gross and is not itself a debt, so it floors to
+ * zero on its own account.
+ */
+export function outstandingPence(invoice: SettleableInvoice): number {
+  return Math.max(
+    0,
+    invoice.grossPence - invoice.paidPence - (invoice.creditedPence ?? 0),
+  );
+}
+
+/** What a credit note reverses, as a positive number. */
+export function creditedTotalPence(
+  creditNotes: Array<{ grossPence: number }>,
+): number {
+  // Credit notes carry negative gross, and callers want a positive figure.
+  return creditNotes.reduce((sum, note) => sum - note.grossPence, 0);
 }
 
 /**
@@ -66,6 +104,7 @@ export function statusFor(
     grossPence: number;
     paidPence: number;
     dueDate: Date;
+    creditedPence?: number;
   },
   now: Date = new Date(),
 ): InvoiceStatus {
@@ -77,6 +116,14 @@ export function statusFor(
     return 'PAID';
   }
 
+  // Reversed rather than paid, and said so. Without this a fully credited
+  // invoice aged into `OVERDUE` and was chased for money already given back;
+  // calling it `PAID` would have stopped the chasing but left a ledger that
+  // cannot be reconciled against a bank statement, because no money arrived.
+  if (outstandingPence(invoice) === 0 && invoice.grossPence > 0) {
+    return 'CREDITED';
+  }
+
   // Overdue outranks part-paid: a half-paid invoice three weeks late is a
   // chasing problem, and calling it `PART_PAID` hides that.
   if (invoice.dueDate < now) return 'OVERDUE';
@@ -86,8 +133,16 @@ export function statusFor(
   return 'SENT';
 }
 
+/**
+ * Statuses that owe nothing, so they are never chased and never counted as
+ * debt. Named once because four separate `notIn` lists had already drifted
+ * apart, and a credit note that appears in one of them but not another is
+ * exactly how an invoice gets chased after it has been reversed.
+ */
+export const SETTLED: InvoiceStatus[] = ['PAID', 'CREDITED', 'CANCELLED', 'DRAFT'];
+
 /** Statuses at which the document has left the building. */
-const ISSUED: InvoiceStatus[] = ['SENT', 'PART_PAID', 'PAID', 'OVERDUE'];
+const ISSUED: InvoiceStatus[] = ['SENT', 'PART_PAID', 'PAID', 'OVERDUE', 'CREDITED'];
 
 export function isIssued(status: InvoiceStatus): boolean {
   return ISSUED.includes(status);
@@ -199,7 +254,7 @@ export const AGING_LABELS: Array<{ key: keyof AgingBuckets; label: string }> = [
  * make the aging report cry wolf until nobody read it.
  */
 export function ageInvoices(
-  invoices: Array<{ grossPence: number; paidPence: number; dueDate: Date }>,
+  invoices: Array<SettleableInvoice & { dueDate: Date }>,
   now: Date = new Date(),
 ): AgingBuckets {
   const buckets: AgingBuckets = {

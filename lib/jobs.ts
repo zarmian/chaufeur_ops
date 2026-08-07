@@ -427,15 +427,26 @@ export function isSortableJobKey(key: string | null): key is JobSortKey {
 }
 
 /**
- * "Unpriced" in SQL: no positive client price, and no written reason.
+ * "Unpriced" in SQL: no client-facing total from either home, and no written
+ * reason.
  *
  * Kept beside `hasPriceOrReason` in `job-status.ts` deliberately — the two
  * must agree, and a comment is cheaper than a divergence. `zeroValueReason`
  * is stored trimmed-or-null, so an empty-string check is not needed here.
+ *
+ * The `finance` clause is what makes an as-directed job count as priced. Its
+ * absence had this filter reporting hourly jobs as unpriced for ever, no
+ * matter how carefully they had been quoted — see `billableClientPence`.
  */
 export const UNPRICED_WHERE = {
   AND: [
     { OR: [{ clientPricePence: null }, { clientPricePence: { lte: 0 } }] },
+    {
+      OR: [
+        { finance: { is: null } },
+        { finance: { totalClientPence: { lte: 0 } } },
+      ],
+    },
     { zeroValueReason: null },
   ],
 } satisfies Prisma.JobWhereInput;
@@ -623,8 +634,11 @@ export async function createJob(
           },
         });
 
-        // A price agreed at booking is itself a recorded decision.
-        if (hasPriceOrReason(created)) {
+        // A price agreed at booking is itself a recorded decision. The
+        // hourly total counts as one: an as-directed job quoted at hours ×
+        // rate is every bit as priced as a fixed fare, and `created` alone
+        // does not carry that figure.
+        if (hasPriceOrReason({ ...created, finance: hourly })) {
           await tx.jobEvent.create({
             data: {
               jobId: created.id,
@@ -799,6 +813,9 @@ export async function transitionJob(
       scheduledAt: true,
       clientPricePence: true,
       zeroValueReason: true,
+      // The hourly total. Without it an as-directed job — fully quoted, with
+      // hours and a rate — is refused completion for having "no price".
+      finance: { select: { totalClientPence: true } },
       invoiceLines: {
         select: { invoice: { select: { number: true, status: true } } },
       },
@@ -835,6 +852,7 @@ export async function transitionJob(
       driverId: job.driverId,
       vehicleId: job.vehicleId,
       clientPricePence: job.clientPricePence,
+      finance: job.finance,
       zeroValueReason,
       lockedByInvoice: locked
         ? { reference: locked.number, status: locked.status }

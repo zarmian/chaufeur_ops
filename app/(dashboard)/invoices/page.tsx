@@ -37,6 +37,7 @@ const STATUSES = [
   { value: 'PART_PAID', label: 'Part paid' },
   { value: 'OVERDUE', label: 'Overdue' },
   { value: 'PAID', label: 'Paid' },
+  { value: 'CREDITED', label: 'Credited' },
   { value: 'CANCELLED', label: 'Cancelled' },
 ];
 

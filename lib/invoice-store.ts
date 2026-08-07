@@ -9,6 +9,7 @@ import {
   statusFor,
   type InvoiceStatus,
 } from './invoices';
+import { billableClientPence } from './job-status';
 import { getLocaleConfig } from './locale-store';
 import { prisma } from './prisma';
 
@@ -603,6 +604,11 @@ export async function addJobLine(
       pickupText: true,
       dropoffText: true,
       clientPricePence: true,
+      // The hourly total, for an as-directed job. Without it this refused
+      // every as-directed job as "no client price" and, worse, would have
+      // billed one at zero if it had let it through.
+      finance: { select: { totalClientPence: true } },
+      zeroValueReason: true,
       status: true,
       invoiceLines: { select: { invoice: { select: { number: true } } } },
     },
@@ -621,7 +627,11 @@ export async function addJobLine(
     };
   }
 
-  if (job.clientPricePence === null) {
+  // From wherever the figure lives: a fixed fare, or hours × rate for
+  // as-directed work.
+  const amountPence = billableClientPence(job);
+
+  if (amountPence <= 0 && !job.zeroValueReason) {
     return {
       ok: false,
       code: 'NO_PRICE',
@@ -643,7 +653,7 @@ export async function addJobLine(
           invoiceId,
           jobId: job.id,
           description: `${job.reference} — ${job.pickupText} to ${job.dropoffText}`,
-          amountPence: job.clientPricePence ?? 0,
+          amountPence,
           sortOrder: before.lines.length,
         },
       });
@@ -707,6 +717,11 @@ export async function refreshOverdue(now: Date = new Date()): Promise<number> {
     where: {
       status: { in: ['SENT', 'PART_PAID'] },
       dueDate: { lt: now },
+      // Nothing left to collect is not overdue. A fully credited invoice
+      // reached `CREDITED` and is excluded by the status filter above, but an
+      // invoice credited in full while still `SENT` would otherwise be swept
+      // into `OVERDUE` before anything recomputed its status.
+      NOT: { creditNotes: { some: {} } },
     },
     data: { status: 'OVERDUE' },
   });

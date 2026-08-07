@@ -28,7 +28,12 @@ import { getAllGatewayConfigs } from '@/lib/gateways/store';
 import { gatewayUsable } from '@/lib/gateways/types';
 import { formatDate, toDateOnlyString } from '@/lib/dates';
 import { getInvoice } from '@/lib/invoice-list';
-import { canEdit, daysOverdue, outstandingPence } from '@/lib/invoices';
+import {
+  canEdit,
+  creditedTotalPence,
+  daysOverdue,
+  outstandingPence,
+} from '@/lib/invoices';
 import { filterValue, type SearchParams } from '@/lib/list-params';
 import { formatGBP } from '@/lib/money';
 import { pageRequireCapability } from '@/lib/page-guards';
@@ -57,7 +62,11 @@ export default async function InvoiceDetailPage({
 
   const mayEdit = can(user, 'editInvoices');
   const editable = canEdit({ status: invoice.status });
-  const outstanding = outstandingPence(invoice);
+  // Credits settle the invoice they reverse, so the balance on this page has
+  // to net them off — otherwise a fully credited invoice still shows its
+  // whole value as owed.
+  const creditedPence = creditedTotalPence(invoice.creditNotes);
+  const outstanding = outstandingPence({ ...invoice, creditedPence });
   const late = outstanding > 0 && daysOverdue(invoice.dueDate) > 0;
   const error = filterValue(query, 'invoiceError');
   const warning = filterValue(query, 'invoiceWarning');
@@ -70,7 +79,15 @@ export default async function InvoiceDetailPage({
         description={`${invoice.account?.name ?? invoice.client?.name ?? 'No recipient'} · issued ${formatDate(invoice.issueDate)}`}
         actions={
           <div className="flex items-center gap-2">
-            <Badge variant={invoice.status === 'PAID' ? 'success' : 'secondary'}>
+            <Badge
+              variant={
+                invoice.status === 'PAID'
+                  ? 'success'
+                  : invoice.status === 'CREDITED'
+                    ? 'outline'
+                    : 'secondary'
+              }
+            >
               {invoice.status.replace('_', ' ').toLowerCase()}
             </Badge>
             <Button asChild variant="outline">

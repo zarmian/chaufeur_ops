@@ -2,7 +2,9 @@ import type { Prisma } from '@prisma/client';
 import {
   ageInvoices,
   AGING_LABELS,
+  creditedTotalPence,
   outstandingPence,
+  SETTLED,
   type AgingBuckets,
 } from './invoices';
 import type { ListParams } from './list-params';
@@ -65,7 +67,7 @@ export function buildInvoiceWhere(
     // Past due *and* not settled. Status alone is not enough — an invoice
     // paid this morning may still be sitting at OVERDUE until the cron runs.
     where.dueDate = { lt: now };
-    where.status = { notIn: ['PAID', 'CANCELLED', 'DRAFT'] };
+    where.status = { notIn: SETTLED };
   }
 
   return where;
@@ -82,9 +84,21 @@ const LIST_SELECT = {
   paidPence: true,
   status: true,
   creditsInvoiceId: true,
+  // Spec: a credit note settles the invoice it reverses. Selected here so
+  // every consumer of LIST_SELECT — the ledger, the export, the row mapper —
+  // computes outstanding the same way.
+  creditNotes: { select: { grossPence: true } },
   client: { select: { id: true, name: true } },
   account: { select: { id: true, name: true } },
 } as const;
+
+/** A row's outstanding balance, credits included. */
+function settled<T extends { grossPence: number; paidPence: number; creditNotes: Array<{ grossPence: number }> }>(
+  row: T,
+): T & { outstandingPence: number; creditedPence: number } {
+  const creditedPence = creditedTotalPence(row.creditNotes);
+  return { ...row, creditedPence, outstandingPence: outstandingPence({ ...row, creditedPence }) };
+}
 
 export interface LedgerTotals {
   invoicedPence: number;
@@ -122,10 +136,7 @@ export async function listInvoices(
   const paidPence = aggregate._sum.paidPence ?? 0;
 
   return {
-    rows: rows.map((row) => ({
-      ...row,
-      outstandingPence: outstandingPence(row),
-    })),
+    rows: rows.map(settled),
     total,
     totals: {
       invoicedPence,
@@ -157,9 +168,23 @@ async function outstandingAcross(
 ): Promise<number> {
   const rows = await prisma.invoice.findMany({
     where,
-    select: { grossPence: true, paidPence: true },
+    select: {
+      grossPence: true,
+      paidPence: true,
+      // What credit notes against this invoice come to. Without it a fully
+      // credited invoice kept its whole balance and the ledger reported more
+      // outstanding than was ever invoiced.
+      creditNotes: { select: { grossPence: true } },
+    },
   });
-  return sumPence(...rows.map((row) => outstandingPence(row)));
+  return sumPence(
+    ...rows.map((row) =>
+      outstandingPence({
+        ...row,
+        creditedPence: creditedTotalPence(row.creditNotes),
+      }),
+    ),
+  );
 }
 
 function orderFor(params: ListParams): Prisma.InvoiceOrderByWithRelationInput {
@@ -194,11 +219,12 @@ export async function agingReport(
 ): Promise<{ rows: AgingRow[]; totals: AgingBuckets }> {
   const invoices = await prisma.invoice.findMany({
     where: {
-      status: { notIn: ['DRAFT', 'CANCELLED', 'PAID'] },
+      status: { notIn: SETTLED },
     },
     select: {
       grossPence: true,
       paidPence: true,
+      creditNotes: { select: { grossPence: true } },
       dueDate: true,
       clientId: true,
       accountId: true,
@@ -210,7 +236,9 @@ export async function agingReport(
   const groups = new Map<string, { row: AgingRow; invoices: typeof invoices }>();
 
   for (const invoice of invoices) {
-    if (outstandingPence(invoice) === 0) continue;
+    if (outstandingPence({ ...invoice, creditedPence: creditedTotalPence(invoice.creditNotes) }) === 0) {
+      continue;
+    }
 
     const key = invoice.accountId ?? invoice.clientId ?? 'unassigned';
     const name =
@@ -260,6 +288,11 @@ export async function getInvoice(id: string) {
         },
       },
       payments: { orderBy: { receivedAt: 'desc' } },
+      // Both directions: the credit notes reversing this invoice, and the
+      // invoice this one reverses. The detail page shows the balance and
+      // needs the first; it links to the original and needs the second.
+      creditNotes: { select: { id: true, number: true, grossPence: true } },
+      credits: { select: { id: true, number: true } },
     },
   });
 }
@@ -282,7 +315,7 @@ export async function invoicesForExport(
     take: 10_000,
   });
 
-  return rows.map((row) => ({ ...row, outstandingPence: outstandingPence(row) }));
+  return rows.map(settled);
 }
 
 /** Rows for the spreadsheet export, already human-readable. */

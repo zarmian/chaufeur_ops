@@ -1,5 +1,7 @@
 import { endOfZonedDay, formatDate, formatDateTime, startOfZonedDay } from '../dates';
 import { getLocaleConfig } from '../locale-store';
+import { billableClientPence } from '../job-status';
+import { UNPRICED_WHERE } from '../jobs';
 import { formatMoney } from '../money';
 import { prisma } from '../prisma';
 import { escapeMarkdown } from './protocol';
@@ -161,8 +163,10 @@ async function unassignedView(): Promise<string> {
 async function unpricedView(seesMoney: boolean): Promise<string> {
   const jobs = await prisma.job.findMany({
     where: {
-      clientPricePence: null,
-      zeroValueReason: null,
+      // The shared definition, so this agrees with the job list, the
+      // dashboard tile and the digest. Its own hand-rolled version reported
+      // every as-directed job as unpriced however carefully it was quoted.
+      ...UNPRICED_WHERE,
       status: { notIn: ['CANCELLED', 'DRAFT'] },
     },
     orderBy: { scheduledAt: 'desc' },
@@ -288,6 +292,8 @@ async function jobView(reference: string, seesMoney: boolean): Promise<string> {
       pickupText: true,
       dropoffText: true,
       clientPricePence: true,
+      zeroValueReason: true,
+      finance: { select: { totalClientPence: true } },
       driver: { select: { name: true, phone: true } },
       client: { select: { name: true } },
       events: {
@@ -312,11 +318,13 @@ async function jobView(reference: string, seesMoney: boolean): Promise<string> {
   ];
 
   if (seesMoney) {
+    // Whichever home the figure lives in — a fixed fare, or hours × rate.
+    const pence = billableClientPence(job);
     lines.push(
       escapeMarkdown(
-        job.clientPricePence === null
+        pence <= 0
           ? '⚠️ no price'
-          : `Price: ${formatMoney(job.clientPricePence, { currency: locale.currency, locale: locale.locale })}`,
+          : `Price: ${formatMoney(pence, { currency: locale.currency, locale: locale.locale })}`,
       ),
     );
   }

@@ -198,7 +198,19 @@ describe('UNPRICED_WHERE', () => {
       { clientPricePence: null },
       { clientPricePence: { lte: 0 } },
     ]);
-    expect(UNPRICED_WHERE.AND[1]).toEqual({ zeroValueReason: null });
+    expect(UNPRICED_WHERE.AND[2]).toEqual({ zeroValueReason: null });
+  });
+
+  it('counts an hourly total as a price', () => {
+    // The clause this test used to be missing. An as-directed job carries its
+    // figure on `JobFinance.totalClientPence` and leaves `clientPricePence`
+    // null, so a filter reading only the first column reported every hourly
+    // job as unpriced however carefully it had been quoted — and the same
+    // blind spot stopped them being completed or invoiced at all.
+    expect(UNPRICED_WHERE.AND[1]?.OR).toEqual([
+      { finance: { is: null } },
+      { finance: { totalClientPence: { lte: 0 } } },
+    ]);
   });
 });
 

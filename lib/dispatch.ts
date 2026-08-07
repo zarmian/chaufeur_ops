@@ -1,5 +1,6 @@
 import { findConflicts, occupiedBy, type ConflictCandidate } from './conflicts';
 import { endOfZonedDay, formatInZone, startOfZonedDay } from './dates';
+import { hasPriceOrReason } from './job-status';
 import { getLocaleConfig } from './locale-store';
 import { prisma } from './prisma';
 import { getSettings } from './settings';
@@ -94,7 +95,7 @@ const JOB_SELECT = {
   vehicleId: true,
   client: { select: { name: true } },
   vehicle: { select: { registration: true } },
-  finance: { select: { customerHours: true } },
+  finance: { select: { customerHours: true, totalClientPence: true } },
 } as const;
 
 export async function loadDispatchDay(
@@ -212,7 +213,9 @@ export async function loadDispatchDay(
       passengerName: job.passengerName,
       vehicleRegistration: job.vehicle?.registration ?? null,
       flightNumber: job.flightNumber,
-      unpriced: job.clientPricePence === null && !job.zeroValueReason,
+      // Through the shared helper, so an as-directed job priced by the hour
+      // is not flagged on the board as though nobody had quoted it.
+      unpriced: !hasPriceOrReason(job),
       conflictsWith: conflictIds.get(job.id) ?? [],
       ...position(window.from, window.to, span),
     };
@@ -251,10 +254,7 @@ export async function loadDispatchDay(
       unassigned: unassigned.length,
       conflicts: conflictIds.size,
       unpriced: jobs.filter(
-        (job) =>
-          job.scheduledAt >= from &&
-          job.clientPricePence === null &&
-          !job.zeroValueReason,
+        (job) => job.scheduledAt >= from && !hasPriceOrReason(job),
       ).length,
     },
   };

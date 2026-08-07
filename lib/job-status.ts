@@ -88,6 +88,12 @@ export interface TransitionContext {
   vehicleId: string | null;
   clientPricePence: number | null;
   zeroValueReason: string | null;
+  /**
+   * The hourly total, for an as-directed job. Without it `canTransition`
+   * refuses to complete work that is fully priced — see
+   * `billableClientPence`.
+   */
+  finance?: { totalClientPence: number } | null;
   /** Set when the job sits on an invoice that has left draft. */
   lockedByInvoice?: { reference: string; status: string } | null;
   /** Result of `isDriverCompliantAt(scheduledAt)`, when assignment is in play. */
@@ -169,23 +175,56 @@ export function canTransition(
 }
 
 /**
+ * What a job is worth to the client, from wherever that figure lives.
+ *
+ * **There are two homes for it, and this is the bug that made hourly work
+ * unbillable.** A `TRANSFER` is a fixed fare and carries it in
+ * `clientPricePence`. An `AS_DIRECTED` job is priced by the hour, so its
+ * figure is `customerHours × customerRatePence`, computed at booking and
+ * stored on `JobFinance.totalClientPence` — `clientPricePence` stays null
+ * because there is no fixed fare to put in it.
+ *
+ * Every "is this priced?" check read only the first of those. The result was
+ * a four-hour job at £59/hour showing "Revenue £236.00" and a gross profit on
+ * the same page that said "Client price: No", flew the unpriced alert, and
+ * refused completion — and since invoicing draws on completed jobs, no
+ * as-directed job could be billed at all without somebody retyping the total
+ * into the fixed-price field.
+ *
+ * As-directed hire is one of three job types, so this is not an edge case.
+ */
+export function billableClientPence(job: PricedJob): number {
+  const fixed = job.clientPricePence ?? 0;
+  const hourly = job.finance?.totalClientPence ?? 0;
+  // Whichever is set. The finance total already includes the base fare when
+  // there is one, so this is a max rather than a sum — adding them would
+  // double-count a job that has both.
+  return Math.max(fixed, hourly);
+}
+
+export interface PricedJob {
+  clientPricePence: number | null;
+  zeroValueReason: string | null;
+  /**
+   * The finance record, when the caller has it. Absent means "not loaded",
+   * not "zero" — so a caller that forgets it gets the old, wrong answer for
+   * hourly jobs. Every call site in this repository passes it; the field is
+   * optional only because a job genuinely may not have a finance row.
+   */
+  finance?: { totalClientPence: number } | null;
+}
+
+/**
  * A job is priced if money changed hands, or if someone said in writing why
  * it did not. A blank reason is not a reason.
  */
-export function hasPriceOrReason(job: {
-  clientPricePence: number | null;
-  zeroValueReason: string | null;
-}): boolean {
-  if ((job.clientPricePence ?? 0) > 0) return true;
+export function hasPriceOrReason(job: PricedJob): boolean {
+  if (billableClientPence(job) > 0) return true;
   return (job.zeroValueReason ?? '').trim().length > 0;
 }
 
 /** A job that has been done but never priced — what the dashboard counts. */
-export function isUnpriced(job: {
-  status: JobStatus;
-  clientPricePence: number | null;
-  zeroValueReason: string | null;
-}): boolean {
+export function isUnpriced(job: PricedJob & { status: JobStatus }): boolean {
   return !hasPriceOrReason(job);
 }
 

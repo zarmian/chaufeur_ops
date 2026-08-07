@@ -80,9 +80,39 @@ export async function tryRenderPdf(
   try {
     return { ok: true, pdf: await renderPdf(html, options) };
   } catch (error) {
+    const detail = error instanceof Error ? error.message : 'unknown error';
     return {
       ok: false,
-      message: `No PDF renderer is available on this deployment, so the printable version is the one to use. Set CHROMIUM_EXECUTABLE_PATH to a Chrome or Chromium binary to enable PDFs. (${error instanceof Error ? error.message.slice(0, 200) : 'unknown error'})`,
+      message: `${diagnose(detail)} The printable version works and is the one to use meanwhile. (${detail.slice(0, 200)})`,
     };
   }
+}
+
+/**
+ * Say what actually went wrong.
+ *
+ * This message used to be one line telling everybody to set
+ * `CHROMIUM_EXECUTABLE_PATH`, which is right on a developer's Mac and
+ * actively misleading on Vercel — where the browser is present and it is the
+ * shared libraries beside it that are missing. Somebody following that advice
+ * on a deployment is being sent to configure a path that is already correct.
+ */
+function diagnose(detail: string): string {
+  if (/libnss3|shared libraries|cannot open shared object/i.test(detail)) {
+    return (
+      'The bundled browser unpacked without its shared libraries, so it cannot start. ' +
+      'That is a packaging problem, not a missing binary: `@sparticuz/chromium` keeps them ' +
+      'in `bin/al2023.tar.br`, which reaches the deployment only if the package is listed ' +
+      'in `serverExternalPackages` and its `bin/` directory in `outputFileTracingIncludes`.'
+    );
+  }
+
+  if (/ENOENT|spawn|executablePath|no such file/i.test(detail)) {
+    return (
+      'No browser binary was found. `@sparticuz/chromium` ships Linux x64 only, so on macOS ' +
+      'or ARM set CHROMIUM_EXECUTABLE_PATH to a local Chrome or Chromium.'
+    );
+  }
+
+  return 'The PDF renderer failed.';
 }
