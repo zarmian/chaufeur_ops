@@ -1,6 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createCreditNote, createInvoice, markSent } from './invoice-store';
+import { createCreditNote, createInvoice, markSent, recordPayment } from './invoice-store';
 import { listInvoices } from './invoice-list';
 import { statusFor } from './invoices';
 
@@ -31,8 +31,16 @@ const raw = DATABASE_AVAILABLE
 
 const stamp = String(Date.now()).slice(-7);
 
-/** Its own year, so these totals meet nothing else. */
-const ISSUED = new Date('2113-03-10T00:00:00.000Z');
+/**
+ * Its own year, so these totals meet nothing else — and a *past* one.
+ *
+ * This was originally 2113. Every money assertion below held, and the one
+ * that mattered — that a credited invoice stops being chased — could not
+ * fail: `overdueOnly` selects `dueDate < now`, and nothing dated 87 years
+ * from now is ever past due. The suite was green while a fully credited
+ * invoice sat in the live chasing list owing £0.00.
+ */
+const ISSUED = new Date('1987-03-10T00:00:00.000Z');
 const GROSS_PENCE = 33_840; // £338.40, the figure from the report
 
 describe.skipIf(!DATABASE_AVAILABLE)('credit notes settle their invoice', () => {
@@ -74,6 +82,7 @@ describe.skipIf(!DATABASE_AVAILABLE)('credit notes settle their invoice', () => 
       where: { id: { in: invoiceIds } },
       data: { creditsInvoiceId: null },
     });
+    await raw.payment.deleteMany({ where: { invoiceId: { in: invoiceIds } } });
     await raw.invoiceLine.deleteMany({ where: { invoiceId: { in: invoiceIds } } });
     await raw.invoice.deleteMany({ where: { id: { in: invoiceIds } } });
     await raw.client.deleteMany({ where: { id: clientId } });
@@ -88,6 +97,18 @@ describe.skipIf(!DATABASE_AVAILABLE)('credit notes settle their invoice', () => 
 
     expect(totals.invoicedPence).toBe(GROSS_PENCE);
     expect(totals.outstandingPence).toBe(GROSS_PENCE);
+  });
+
+  it('is chased while it is genuinely owed', async () => {
+    // The control for the assertion further down. Without it, "not in the
+    // overdue list" passes just as well when the filter matches nothing at
+    // all — which is exactly how this defect survived a green suite.
+    const { rows } = await listInvoices(
+      { page: 1, pageSize: 50, skip: 0, take: 50, q: null, sort: null, dir: 'asc' },
+      { q: null, status: null, clientId: null, accountId: null, from: ISSUED, to: ISSUED, overdueOnly: true },
+    );
+
+    expect(rows.map((row) => row.id)).toContain(invoiceId);
   });
 
   it('never reports more outstanding than was ever invoiced', async () => {
@@ -145,6 +166,48 @@ describe.skipIf(!DATABASE_AVAILABLE)('credit notes settle their invoice', () => 
     const original = rows.find((row) => row.id === invoiceId);
     expect(original).toBeTruthy();
     expect(original!.outstandingPence).toBe(0);
+  });
+
+  it('writes CREDITED onto the invoice, not just into the arithmetic', async () => {
+    // `statusFor` has returned CREDITED all along. Nothing ever called it when
+    // a credit note was raised, so the invoice stayed SENT: the ledger's
+    // Credited filter was permanently empty and the chasing list still had it.
+    if (!raw) return;
+
+    const row = await raw.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
+    expect(row.status).toBe('CREDITED');
+  });
+
+  it('can be found by filtering the ledger for credited invoices', async () => {
+    const { rows } = await listInvoices(
+      { page: 1, pageSize: 50, skip: 0, take: 50, q: null, sort: null, dir: 'asc' },
+      { q: null, status: 'CREDITED', clientId: null, accountId: null, from: ISSUED, to: ISSUED, overdueOnly: false },
+    );
+
+    expect(rows.map((row) => row.id)).toContain(invoiceId);
+  });
+
+  it('stays credited when a payment lands afterwards', async () => {
+    // Every `statusFor` call site had to learn about credits, not just the
+    // credit note itself. One that cannot see them writes OVERDUE straight
+    // back over CREDITED, and the invoice returns to the chasing list.
+    if (!raw) return;
+
+    const paid = await recordPayment(
+      invoiceId,
+      { amountPence: 1_000, receivedAt: new Date('1987-04-01T00:00:00.000Z'), reference: 'stray' },
+      {},
+    );
+    expect(paid.ok, paid.ok ? '' : paid.message).toBe(true);
+
+    const row = await raw.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
+    expect(row.status).toBe('CREDITED');
+
+    const { rows } = await listInvoices(
+      { page: 1, pageSize: 50, skip: 0, take: 50, q: null, sort: null, dir: 'asc' },
+      { q: null, status: null, clientId: null, accountId: null, from: ISSUED, to: ISSUED, overdueOnly: true },
+    );
+    expect(rows.map((row) => row.id)).not.toContain(invoiceId);
   });
 
   it('calls it credited, not paid', () => {

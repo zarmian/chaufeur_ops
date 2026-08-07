@@ -1,4 +1,5 @@
 import { withAudit, type AuditContext } from '../audit';
+import { creditedPenceFor } from '../invoice-store';
 import { statusFor, type InvoiceStatus } from '../invoices';
 import { prisma } from '../prisma';
 import {
@@ -322,6 +323,7 @@ export async function recordGatewayPayment(
               grossPence: before.grossPence,
               paidPence,
               dueDate: before.dueDate,
+              creditedPence: await creditedPenceFor(tx, invoice.id),
             },
             payment.receivedAt,
           ),

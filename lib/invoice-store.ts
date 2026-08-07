@@ -1,8 +1,9 @@
 import { Prisma } from '@prisma/client';
-import { withAudit, type AuditContext } from './audit';
+import { toJsonSnapshot, withAudit, type AuditContext } from './audit';
 import { getBranding } from './branding-store';
 import {
   canEdit,
+  creditedTotalPence,
   creditNoteLines,
   formatInvoiceNumber,
   invoiceTotals,
@@ -346,6 +347,7 @@ export async function recordPayment(
               grossPence: before.grossPence,
               paidPence,
               dueDate: before.dueDate,
+              creditedPence: await creditedPenceFor(tx, invoiceId),
             },
             input.receivedAt,
           ),
@@ -368,6 +370,91 @@ export async function recordPayment(
  * The original keeps its number and its total; what changes is that there is
  * now a second document saying it was reversed.
  */
+/**
+ * What credit notes against this invoice come to, from inside a transaction.
+ *
+ * Every place that writes a status needs it. A credit note is what settles the
+ * invoice it reverses, so a `statusFor` call that cannot see one writes
+ * `OVERDUE` straight back over `CREDITED` the next time a payment lands — and
+ * the invoice returns to the chasing list owing nothing.
+ */
+/**
+ * The sliver of a client this needs: anything that can read invoices.
+ *
+ * Structural rather than `Prisma.TransactionClient` because the callers are
+ * split — `withAudit` hands back a plain transaction client, and
+ * reconciliation's undo path runs on the extended one. Both can do this much.
+ */
+export interface CreditNoteReader {
+  invoice: {
+    findMany(args: {
+      where: { creditsInvoiceId: string };
+      select: { grossPence: true };
+    }): Promise<Array<{ grossPence: number }>>;
+  };
+}
+
+export async function creditedPenceFor(
+  tx: CreditNoteReader,
+  invoiceId: string,
+): Promise<number> {
+  const notes = await tx.invoice.findMany({
+    where: { creditsInvoiceId: invoiceId },
+    select: { grossPence: true },
+  });
+  return creditedTotalPence(notes);
+}
+
+/**
+ * Settle the invoice a credit note reverses, in the same transaction.
+ *
+ * Raising the note was only ever half of it. The document existed and nothing
+ * read it: the original stayed `SENT`, the ledger's `Credited` filter was
+ * permanently empty, and a fully credited invoice went on being chased as
+ * overdue for money that had already been given back. `SETTLED` has contained
+ * `CREDITED` all along — nothing ever wrote it.
+ *
+ * Audited separately because a second entity changed here: `withAudit` records
+ * the credit note, and this is the invoice.
+ */
+async function settleCreditedInvoice(
+  tx: Prisma.TransactionClient,
+  invoiceId: string,
+  at: Date,
+  context: AuditContext,
+): Promise<void> {
+  const before = await tx.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
+
+  const status = statusFor(
+    {
+      status: before.status as InvoiceStatus,
+      grossPence: before.grossPence,
+      paidPence: before.paidPence,
+      dueDate: before.dueDate,
+      creditedPence: await creditedPenceFor(tx, invoiceId),
+    },
+    at,
+  );
+
+  // A partial credit leaves a balance, and an invoice that still owes
+  // something is still owed — leave it where it is.
+  if (status === before.status) return;
+
+  const after = await tx.invoice.update({ where: { id: invoiceId }, data: { status } });
+
+  await tx.auditLog.create({
+    data: {
+      entity: 'Invoice',
+      entityId: invoiceId,
+      action: 'update',
+      userId: context.userId ?? null,
+      ip: context.ip ?? null,
+      before: toJsonSnapshot(before),
+      after: toJsonSnapshot(after),
+    },
+  });
+}
+
 export async function createCreditNote(
   invoiceId: string,
   context: AuditContext,
@@ -455,6 +542,9 @@ export async function createCreditNote(
         },
         select: { id: true, number: true },
       });
+
+      // After the note exists, so it counts towards what has been credited.
+      await settleCreditedInvoice(tx, original.id, issueDate, context);
 
       return { entityId: note.id, after: note, result: note };
     },

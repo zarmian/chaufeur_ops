@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { recordAudit, withAudit, type AuditContext } from '../audit';
+import { creditedPenceFor } from '../invoice-store';
 import { statusFor, type InvoiceStatus } from '../invoices';
 import { getLocaleConfig } from '../locale-store';
 import { formatMoney } from '../money';
@@ -592,6 +593,7 @@ export async function confirmInvoiceAllocation(
               grossPence: before.grossPence,
               paidPence,
               dueDate: before.dueDate,
+              creditedPence: await creditedPenceFor(tx, allocation.invoiceId),
             },
             txn.occurredOn,
           ),
@@ -943,13 +945,15 @@ export async function undoAllocation(
             paidPence,
             // Recomputed from SENT, because that is the state an invoice
             // returns to when its payments go away; `statusFor` decides
-            // between sent, part-paid and overdue from the dates.
+            // between sent, part-paid and overdue from the dates. Credits are
+            // not payments and do not go away with them, so they still count.
             status: statusFor(
               {
                 status: before.status === 'CANCELLED' ? 'CANCELLED' : 'SENT',
                 grossPence: before.grossPence,
                 paidPence,
                 dueDate: before.dueDate,
+                creditedPence: await creditedPenceFor(tx, allocation.invoiceId),
               },
               new Date(),
             ),
