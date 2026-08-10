@@ -13,7 +13,7 @@ export function RouteLoading() {
         <Skeleton className="h-11 w-full" />
         <Skeleton className="h-11 w-full" />
       </div>
-      <span className="sr-only">Loading</span>
+      <span className="sr-only">Loading…</span>
     </div>
   );
 }

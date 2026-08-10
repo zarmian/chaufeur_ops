@@ -88,6 +88,8 @@ export default async function NewJobPage({
         openShifts={openShifts}
         allowRepeat={!isReturn}
         returnOfJobId={isReturn && source ? source.id : undefined}
+        currency={locale.currency}
+        locale={locale.locale}
       />
     </>
   );

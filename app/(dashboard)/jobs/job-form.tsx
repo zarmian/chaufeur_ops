@@ -19,6 +19,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { JOB_TYPES } from '@/lib/enum-options';
 import { INITIAL_FORM_STATE, type FormState } from '@/lib/form-state';
 import { billedHours } from '@/lib/job-finance';
+import { DEFAULT_CURRENCY, DEFAULT_LOCALE } from '@/lib/locale';
 import {
   conflictIsWorthAsking,
   fetchConflicts,
@@ -151,6 +152,8 @@ export function JobForm({
   allowRepeat = false,
   returnOfJobId,
   inSeries = false,
+  currency = DEFAULT_CURRENCY,
+  locale: localeTag = DEFAULT_LOCALE,
 }: {
   action: (state: FormState, formData: FormData) => Promise<FormState>;
   values?: JobFormValues;
@@ -161,6 +164,13 @@ export function JobForm({
   drivers: DriverOption[];
   vehicles: VehicleOption[];
   locations: string[];
+  /**
+   * From settings, so the hourly quote is in the install's own currency.
+   * Defaulted rather than required: this is a live preview of a figure the
+   * server computes anyway, and a missing prop should not fail the booking.
+   */
+  currency?: string;
+  locale?: string;
   /** Shifts currently open, for attributing a hired driver's job. */
   openShifts?: JobFormOption[];
   /**
@@ -423,6 +433,14 @@ export function JobForm({
     billed !== null && Number.isFinite(rateValue) && rateValue > 0
       ? billed * rateValue
       : null;
+
+  // The rate and the total are typed in major units, so they format straight
+  // rather than round-tripping through minor ones. Currency comes from
+  // settings: this used to print a hardcoded £ on every install.
+  const money = new Intl.NumberFormat(localeTag, {
+    style: 'currency',
+    currency,
+  });
 
   // Blank means "nobody has said", which is the state worth warning about. A
   // typed 0 is a deliberate statement and gets a zero-value reason instead.
@@ -902,11 +920,10 @@ export function JobForm({
             {hourlyTotal !== null ? (
               <p className="text-sm" data-testid="hourly-total">
                 <span className="text-muted-foreground">
-                  {billed} billed hours ×{' '}
-                  {Number(customerRate).toFixed(2)} ={' '}
+                  {billed} billed hours × {money.format(rateValue)} ={' '}
                 </span>
                 <span className="font-semibold tabular">
-                  £{hourlyTotal.toFixed(2)}
+                  {money.format(hourlyTotal)}
                 </span>
                 {billed !== hoursValue ? (
                   <span className="ml-1 text-muted-foreground">

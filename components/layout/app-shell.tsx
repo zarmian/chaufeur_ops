@@ -27,6 +27,18 @@ export function AppShell({
 
   return (
     <div className="min-h-screen">
+      {/*
+        Every page puts the whole navigation before its content in the tab
+        order. Without this, reaching the first control on a job costs a
+        dispatcher thirty-odd tab presses, on every page, all day.
+      */}
+      <a
+        href="#main"
+        className="sr-only z-50 rounded-md bg-primary px-4 py-2 text-primary-foreground focus:not-sr-only focus:absolute focus:left-4 focus:top-4"
+      >
+        Skip to content
+      </a>
+
       {/* Permanent sidebar */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r bg-card lg:flex">
         <div className="flex h-14 shrink-0 items-center border-b px-5">
@@ -58,7 +70,9 @@ export function AppShell({
                 <X />
               </Button>
             </div>
-            <div className="flex-1 overflow-y-auto">
+            {/* Contained, so scrolling to the end of the navigation does not
+                start scrolling the page behind the drawer. */}
+            <div className="flex-1 overflow-y-auto overscroll-contain">
               <SidebarNav sections={sections} onNavigate={() => setOpen(false)} />
             </div>
           </aside>
@@ -78,7 +92,9 @@ export function AppShell({
           </Button>
           {header}
         </header>
-        <main className="px-4 py-6 sm:px-6 lg:px-8">{children}</main>
+        <main id="main" className="px-4 py-6 sm:px-6 lg:px-8">
+          {children}
+        </main>
       </div>
     </div>
   );

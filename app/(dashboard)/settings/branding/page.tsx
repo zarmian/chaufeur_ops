@@ -2,6 +2,8 @@ import { PageHeader } from '@/components/page-header';
 import { brandAssetSrc } from '@/lib/branding';
 import { getBranding } from '@/lib/branding-store';
 import { filterValue, type SearchParams } from '@/lib/list-params';
+import { getLocaleConfig } from '@/lib/locale-store';
+import { formatMoney } from '@/lib/money';
 import { pageRequireCapability } from '@/lib/page-guards';
 import { isStorageConfigured } from '@/lib/storage';
 import { BrandingForm } from './branding-form';
@@ -15,7 +17,10 @@ export default async function BrandingSettingsPage({
 }) {
   await pageRequireCapability('manageSettings');
   const query = await searchParams;
-  const branding = await getBranding();
+  const [branding, locale] = await Promise.all([
+    getBranding(),
+    getLocaleConfig(),
+  ]);
 
   return (
     <>
@@ -34,6 +39,10 @@ export default async function BrandingSettingsPage({
         faviconSrc={brandAssetSrc('faviconUrl', branding.faviconUrl)}
         error={filterValue(query, 'brandingError')}
         saved={Boolean(filterValue(query, 'updated'))}
+        sampleAmount={formatMoney(12_550, {
+          currency: locale.currency,
+          locale: locale.locale,
+        })}
         values={{
           tradingName: branding.tradingName,
           legalName: branding.legalName ?? '',

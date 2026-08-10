@@ -44,11 +44,19 @@ export function BrandMark({
 
   return (
     <span className={cn('inline-flex items-center', className)}>
+      {/*
+        `height` matches the `h-7` these render at, so the line box is the
+        right size before the file arrives. No `width`: the logo belongs to
+        whoever installed this and its aspect ratio is not ours to assert —
+        a fixed width would squash somebody's wordmark. Height being fixed
+        keeps the shift horizontal and small.
+      */}
       {light ? (
         /* eslint-disable-next-line @next/next/no-img-element */
         <img
           src={light}
           alt={tradingName}
+          height={28}
           className={cn('h-7 w-auto object-contain dark:hidden', imageClassName)}
         />
       ) : null}
@@ -57,6 +65,7 @@ export function BrandMark({
         <img
           src={dark}
           alt={tradingName}
+          height={28}
           className={cn(
             'hidden h-7 w-auto object-contain dark:block',
             imageClassName,

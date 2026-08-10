@@ -3,6 +3,7 @@ import { PageHeader } from '@/components/page-header';
 import { getPartsInZone } from '@/lib/dates';
 import { loadJobFormOptions, loadOpenShifts } from '@/lib/job-form-data';
 import { getJob } from '@/lib/jobs';
+import { getLocaleConfig } from '@/lib/locale-store';
 import { pageRequireCapability } from '@/lib/page-guards';
 import { updateJobAction } from '../../actions';
 import { JobForm } from '../../job-form';
@@ -21,10 +22,11 @@ export default async function EditJobPage({
   await pageRequireCapability('editJobs');
   const { id } = await params;
 
-  const [job, options, openShifts] = await Promise.all([
+  const [job, options, openShifts, locale] = await Promise.all([
     getJob(id),
     loadJobFormOptions(),
     loadOpenShifts(),
+    getLocaleConfig(),
   ]);
   if (!job) notFound();
 
@@ -48,6 +50,8 @@ export default async function EditJobPage({
         openShifts={openShifts}
         jobId={job.id}
         inSeries={Boolean(job.seriesId)}
+        currency={locale.currency}
+        locale={locale.locale}
         values={{
           clientId: job.clientId ?? '',
           accountId: job.accountId ?? '',

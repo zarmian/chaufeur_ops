@@ -104,4 +104,38 @@
   .tabular {
     font-variant-numeric: tabular-nums;
   }
+
+  /* Removes the 300ms wait a browser spends deciding whether a tap was a
+     double-tap. On a dispatcher's phone that delay is on every status tap. */
+  button,
+  [role='button'],
+  a,
+  label,
+  select,
+  summary {
+    touch-action: manipulation;
+  }
+
+  /* Headings set their own line breaks rather than leaving a single word
+     stranded on the last line. */
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+}
+
+/* Somebody who has asked their operating system to reduce motion has usually
+   asked for a reason — vestibular disorders, migraine, or simply working on a
+   machine where animation costs more than it gives. Honoured globally rather
+   than per-component, so nothing added later has to remember. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

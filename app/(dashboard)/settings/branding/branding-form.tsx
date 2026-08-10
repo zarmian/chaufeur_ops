@@ -56,6 +56,7 @@ export function BrandingForm({
   faviconSrc,
   error,
   saved,
+  sampleAmount,
 }: {
   values: BrandingFormValues;
   storageConfigured: boolean;
@@ -67,6 +68,8 @@ export function BrandingForm({
   faviconSrc: string | null;
   error?: string | null;
   saved?: boolean;
+  /** A sample amount in the configured currency, for the colour preview. */
+  sampleAmount: string;
 }) {
   const [primary, setPrimary] = useState(values.primaryColour || SUGGESTED_PRIMARY);
   const [accent, setAccent] = useState(values.accentColour || SUGGESTED_ACCENT);
@@ -301,7 +304,12 @@ export function BrandingForm({
           </div>
         </div>
 
-        <Preview primary={primary} accent={accent} name={values.tradingName} />
+        <Preview
+          primary={primary}
+          accent={accent}
+          name={values.tradingName}
+          sampleAmount={sampleAmount}
+        />
       </div>
     </form>
   );
@@ -433,6 +441,8 @@ function AssetField({
             <img
               src={currentSrc}
               alt={`Current ${label.toLowerCase()}`}
+              height={32}
+              loading="lazy"
               className="h-8 w-auto max-w-[8rem] object-contain"
             />
             <label className="flex items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground">
@@ -502,10 +512,13 @@ function Preview({
   primary,
   accent,
   name,
+  sampleAmount,
 }: {
   primary: string;
   accent: string;
   name: string;
+  /** Formatted in the install's own currency, not a hardcoded pound sign. */
+  sampleAmount: string;
 }) {
   const primaryPalette = buildPalette(primary);
   const accentPalette = buildPalette(accent);
@@ -576,8 +589,8 @@ function Preview({
             className="mt-2 flex items-center justify-between rounded px-2 py-1.5 tabular"
             style={{ background: 'var(--preview-accent)' }}
           >
-            <span>JOB-000767</span>
-            <span>£125.50</span>
+            <span translate="no">JOB-000767</span>
+            <span>{sampleAmount}</span>
           </div>
         </div>
 
