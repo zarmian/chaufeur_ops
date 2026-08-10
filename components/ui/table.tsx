@@ -65,7 +65,17 @@ const TableCell = React.forwardRef<
   HTMLTableCellElement,
   React.ComponentProps<'td'>
 >(({ className, ...props }, ref) => (
-  <td ref={ref} className={cn('px-3 py-2.5 align-middle', className)} {...props} />
+  // `h-[--table-row-height]` rather than vertical padding: the row keeps a
+  // predictable height whether the cell holds one line or a badge, which is
+  // what stops a jobs list looking ragged.
+  <td
+    ref={ref}
+    className={cn(
+      'h-[--table-row-height] px-3 py-2 align-middle',
+      className,
+    )}
+    {...props}
+  />
 ));
 TableCell.displayName = 'TableCell';
 

@@ -23,3 +23,7 @@ blob-report/
 
 next-env.d.ts
 tsconfig.tsbuildinfo
+
+# Python bytecode, from the design-skill scripts
+__pycache__/
+*.pyc

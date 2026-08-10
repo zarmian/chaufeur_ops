@@ -1,4 +1,5 @@
 import tailwindcssAnimate from 'tailwindcss-animate';
+import defaultTheme from 'tailwindcss/defaultTheme';
 import type { Config } from 'tailwindcss';
 
 /**
@@ -21,6 +22,20 @@ const config: Config = {
       screens: { '2xl': '1400px' },
     },
     extend: {
+      /**
+       * The "Dashboard Data" pairing: Fira Sans for the interface, Fira Code
+       * for anything that is really a token — a job reference, a
+       * registration, a figure in a column. Loaded through `next/font` in
+       * the root layout, which self-hosts them, so neither the browser nor
+       * the operator waits on fonts.googleapis.com.
+       *
+       * Both fall back to the system stack, so a font that fails to load
+       * degrades to what was there before rather than to serif.
+       */
+      fontFamily: {
+        sans: ['var(--font-sans)', ...defaultTheme.fontFamily.sans],
+        mono: ['var(--font-mono)', ...defaultTheme.fontFamily.mono],
+      },
       colors: {
         border: 'hsl(var(--border))',
         input: 'hsl(var(--input))',

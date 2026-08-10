@@ -47,7 +47,7 @@ export const LIGHT_SURFACE = '#ffffff';
  * The page background in each scheme, as hex.
  *
  * `--background` in `globals.css` is authoritative and these mirror it:
- * `hsl(0 0% 100%)` and `hsl(222 47% 8%)`. Kept here because `<meta
+ * `hsl(210 40% 98%)` and `hsl(222 47% 8%)`. Kept here because `<meta
  * name="theme-color">` takes a colour, not a custom property, and component
  * code may not hold hex literals — that rule exists to keep *brand* colours
  * configurable, and these are the fixed neutral surfaces underneath them.
@@ -55,7 +55,7 @@ export const LIGHT_SURFACE = '#ffffff';
  * If `--background` ever changes, change these with it: their whole job is to
  * stop the phone's browser chrome being a different colour from the page.
  */
-export const SURFACE_LIGHT = '#ffffff';
+export const SURFACE_LIGHT = '#f8fafc';
 export const SURFACE_DARK = '#0b111e';
 
 export interface Rgb {

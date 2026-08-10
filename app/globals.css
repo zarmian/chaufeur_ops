@@ -15,7 +15,9 @@
  */
 @layer base {
   :root {
-    --background: 0 0% 100%;
+    /* Page sits a shade below the cards on it, so a table reads as a surface
+       rather than as the page itself. #F8FAFC. */
+    --background: 210 40% 98%;
     --foreground: 222 47% 11%;
 
     --card: 0 0% 100%;
@@ -24,16 +26,21 @@
     --popover: 0 0% 100%;
     --popover-foreground: 222 47% 11%;
 
-    --primary: 222 47% 20%;
+    /* #0F172A. */
+    --primary: 222 47% 11%;
     --primary-foreground: 210 40% 98%;
 
     --secondary: 210 40% 96%;
     --secondary-foreground: 222 47% 11%;
 
-    --muted: 210 40% 96%;
+    /* #E8ECF1. */
+    --muted: 212 25% 93%;
     --muted-foreground: 215 16% 47%;
 
-    --accent: 210 40% 96%;
+    /* A tint of the accent blue rather than plain grey: this is the surface
+       under a hovered row, and a hint of colour makes the row being pointed
+       at unambiguous on a dense table. */
+    --accent: 201 60% 94%;
     --accent-foreground: 222 47% 11%;
 
     /* Semantic states. These stay fixed across brands — a red that means
@@ -47,9 +54,15 @@
 
     --border: 214 32% 91%;
     --input: 214 32% 91%;
-    --ring: 222 47% 20%;
+    /* #0369A1. The focus ring is the one place the accent blue is worth
+       spending: navy-on-navy was a ring you had to look for. */
+    --ring: 201 96% 32%;
 
     --radius: 0.5rem;
+
+    /* Density, from the Data-Dense Dashboard profile. A row an operator
+       scans a hundred times a day is worth four pixels. */
+    --table-row-height: 2.25rem;
   }
 
   .dark {
@@ -71,7 +84,9 @@
     --muted: 217 33% 17%;
     --muted-foreground: 215 20% 65%;
 
-    --accent: 217 33% 17%;
+    /* The same idea as the light theme: a hovered row picks up a little of
+       the accent hue rather than going flat grey. */
+    --accent: 205 40% 20%;
     --accent-foreground: 210 40% 98%;
 
     --destructive: 0 63% 45%;
@@ -83,7 +98,11 @@
 
     --border: 217 33% 20%;
     --input: 217 33% 20%;
-    --ring: 213 27% 70%;
+    /* Lifted off #0369A1, which is too dark to read as a focus ring against
+       a dark page. */
+    --ring: 201 90% 55%;
+
+    --table-row-height: 2.25rem;
   }
 }
 

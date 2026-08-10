@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import { Fira_Code, Fira_Sans } from 'next/font/google';
 import { brandAssetSrc } from '@/lib/branding';
 import { SURFACE_DARK, SURFACE_LIGHT } from '@/lib/colour';
 import { getBranding } from '@/lib/branding-store';
@@ -31,6 +32,29 @@ export async function generateMetadata(): Promise<Metadata> {
       : {}),
   };
 }
+
+/**
+ * Self-hosted at build time by `next/font`, so there is no request to
+ * fonts.googleapis.com on any page load — one fewer third party between an
+ * operator and the dispatch board, and no flash of unstyled text.
+ *
+ * Only the weights actually used are fetched. `display: swap` means text is
+ * readable immediately in the fallback and reflows once, rather than being
+ * invisible while a font downloads.
+ */
+const firaSans = Fira_Sans({
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700'],
+  variable: '--font-sans',
+  display: 'swap',
+});
+
+const firaCode = Fira_Code({
+  subsets: ['latin'],
+  weight: ['400', '500'],
+  variable: '--font-mono',
+  display: 'swap',
+});
 
 export const viewport: Viewport = {
   width: 'device-width',
@@ -68,7 +92,11 @@ export default async function RootLayout({
   const themeCss = brandStyleSheet(branding);
 
   return (
-    <html lang={locale.locale} suppressHydrationWarning>
+    <html
+      lang={locale.locale}
+      className={`${firaSans.variable} ${firaCode.variable}`}
+      suppressHydrationWarning
+    >
       <head>
         {themeCss ? (
           <style
