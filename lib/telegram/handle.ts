@@ -35,21 +35,32 @@ import { answerCallback, logUpdate, notifyDriver, sendMessage } from './send';
 /** Only the fields any handler reads. Telegram sends a great deal more. */
 export interface Update {
   update_id?: number;
-  message?: {
-    message_id?: number;
-    chat?: { id?: number };
-    text?: string;
-    photo?: Array<{ file_id?: string; file_size?: number }>;
-    location?: { latitude?: number; longitude?: number; horizontal_accuracy?: number };
-    caption?: string;
-  };
-  edited_message?: { chat?: { id?: number } };
+  message?: TelegramMessage;
+  /**
+   * The same shape as `message`, because live location arrives this way.
+   *
+   * Sharing live location sends one `message` and then edits it, repeatedly,
+   * for as long as the driver chose — every movement after the first is an
+   * `edited_message`. Typed as only a chat id, this looked like an update
+   * nobody needed to read, and the position that reached the database was the
+   * one from when the driver set off and never moved again.
+   */
+  edited_message?: TelegramMessage;
   callback_query?: {
     id?: string;
     data?: string;
     message?: { message_id?: number; chat?: { id?: number } };
     from?: { id?: number };
   };
+}
+
+interface TelegramMessage {
+  message_id?: number;
+  chat?: { id?: number };
+  text?: string;
+  photo?: Array<{ file_id?: string; file_size?: number }>;
+  location?: { latitude?: number; longitude?: number; horizontal_accuracy?: number };
+  caption?: string;
 }
 
 export interface HandleResult {
@@ -83,6 +94,16 @@ export async function handleUpdate(
       const text = update.message.text ?? update.message.caption ?? '';
       payload = text.startsWith('/') ? text.split(/\s/)[0]! : null;
       result = await handleMessage(update.message, chatId);
+    } else if (update.edited_message?.location) {
+      // A live location moving. Only the location is taken from an edit: a
+      // driver correcting a typo in an expense amount is not a second
+      // expense, and re-running a command because its message was edited is
+      // how one tap becomes two.
+      chatId = toChatId(update.edited_message.chat?.id);
+      result = await handleMessage(
+        { chat: update.edited_message.chat, location: update.edited_message.location },
+        chatId,
+      );
     }
   } catch (error) {
     // Logged, then swallowed. A 500 here is a retry, and a retry is a second
