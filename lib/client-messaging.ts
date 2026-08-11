@@ -400,12 +400,26 @@ export async function driverAssigned(job: JobForMessage, company: string) {
   };
 }
 
-export async function driverEnRoute(job: JobForMessage, company: string) {
+/**
+ * `etaPhrase` is already worded — "about 15 minutes away" — and already
+ * banded, so this only has to place it. Absent whenever the honest answer is
+ * that we do not know: no position, one too old to mean anything, or a
+ * pickup that was typed by hand and never resolved to a coordinate. The
+ * message then reads exactly as it did before, which is the point: a client
+ * should never be able to tell that something failed.
+ */
+export async function driverEnRoute(
+  job: JobForMessage,
+  company: string,
+  etaPhrase?: string | null,
+) {
   const who = job.driverName ?? 'Your driver';
+  const eta = etaPhrase ? ` — ${etaPhrase}` : '';
+
   return {
     subject: `${company}: your driver is on the way`,
-    body: `${who} is on the way to ${job.pickupText}. Reference ${job.reference}.`,
-    sms: `${company}: ${who} is on the way to ${job.pickupText}.`,
+    body: `${who} is on the way to ${job.pickupText}${eta}. Reference ${job.reference}.`,
+    sms: `${company}: ${who} is on the way to ${job.pickupText}${eta}.`,
   };
 }
 

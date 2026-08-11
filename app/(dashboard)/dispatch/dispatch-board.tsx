@@ -1,6 +1,6 @@
 'use client';
 
-import { AlertTriangle, Send } from 'lucide-react';
+import { AlertTriangle, MapPin, Send } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
@@ -45,6 +45,9 @@ export interface Row {
   driverName: string;
   vehicleRegistration: string | null;
   telegramLinked: boolean;
+  /** Serialised over the RSC boundary, so a string rather than a Date. */
+  lastSeenAt: string | null;
+  etaPhrase: string | null;
   blocks: Block[];
 }
 
@@ -242,6 +245,22 @@ export function DispatchBoard({
                         <Send className="size-3" aria-label="Linked to Telegram" />
                       ) : null}
                     </p>
+                    {/* Only while a driver is actually sharing position and
+                        mid-job. The rest of the time the row says nothing
+                        rather than something reassuring and untrue. */}
+                    {row.etaPhrase ? (
+                      <p
+                        className="flex items-center gap-1 text-xs text-muted-foreground"
+                        title={
+                          row.lastSeenAt
+                            ? `Last position ${new Date(row.lastSeenAt).toLocaleTimeString()}`
+                            : undefined
+                        }
+                      >
+                        <MapPin className="size-3" aria-hidden="true" />
+                        <span>{row.etaPhrase}</span>
+                      </p>
+                    ) : null}
                   </div>
 
                   <div

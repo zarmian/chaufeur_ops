@@ -4,11 +4,18 @@ import { PageHeader } from '@/components/page-header';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { filterValue, type SearchParams } from '@/lib/list-params';
 import { pageRequireCapability } from '@/lib/page-guards';
+import { getEtaConfig } from '@/lib/eta/store';
 import { getPlacesConfig } from '@/lib/places/store';
 import { encryptionAvailable } from '@/lib/secret-store';
 
@@ -30,8 +37,10 @@ export default async function PlacesSettingsPage({
   const query = await searchParams;
   const error = filterValue(query, 'placesError');
   const notice = filterValue(query, 'placesNotice');
+  const etaError = filterValue(query, 'etaError');
+  const etaNotice = filterValue(query, 'etaNotice');
 
-  const config = await getPlacesConfig();
+  const [config, eta] = await Promise.all([getPlacesConfig(), getEtaConfig()]);
   const canStoreSecrets = encryptionAvailable();
 
   return (
@@ -176,6 +185,125 @@ export default async function PlacesSettingsPage({
           </form>
         </CardContent>
       </Card>
+
+      <EtaCard
+        config={eta}
+        canStoreSecrets={canStoreSecrets}
+        error={etaError}
+        notice={etaNotice}
+      />
     </>
+  );
+}
+
+/**
+ * Travel time, which is a different provider and a different bill.
+ *
+ * On the same screen because both answer questions about places, and an
+ * operator setting one up is usually setting up the other. Kept as separate
+ * settings because they are separate Google APIs: a key restricted to Places
+ * will not compute a route, and finding that out through a silent fallback
+ * would be worse than being told here.
+ */
+function EtaCard({
+  config,
+  canStoreSecrets,
+  error,
+  notice,
+}: {
+  config: { provider: string; keySet: boolean; assumedKmh: number };
+  canStoreSecrets: boolean;
+  error?: string | null;
+  notice?: string | null;
+}) {
+  return (
+    <Card className="mt-6">
+      <CardHeader>
+        <CardTitle>Travel time</CardTitle>
+        <CardDescription>
+          How long until the driver reaches the pickup, from their last shared
+          position. It reaches the client in the “driver on the way” message,
+          and the dispatch board, which always estimates locally rather than
+          spending a routing call every thirty seconds.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {error ? (
+          <Alert variant="destructive" className="mb-4" data-testid="eta-error">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        ) : null}
+        {notice ? (
+          <Alert className="mb-4" data-testid="eta-notice">
+            <AlertDescription>{notice}</AlertDescription>
+          </Alert>
+        ) : null}
+
+        <form
+          method="post"
+          action="/api/settings/eta"
+          className="space-y-4"
+          data-testid="eta-form"
+        >
+          <div>
+            <label htmlFor="etaProvider" className="mb-1 block text-sm font-medium">
+              Provider
+            </label>
+            <Select
+              id="etaProvider"
+              name="provider"
+              defaultValue={config.provider}
+              className="max-w-sm"
+            >
+              <option value="straight-line">
+                Estimate from distance — no key, no bill
+              </option>
+              <option value="google">Google Routes — real drive time with traffic</option>
+            </Select>
+          </div>
+
+          <div>
+            <label htmlFor="etaApiKey" className="mb-1 block text-sm font-medium">
+              Google Routes key
+            </label>
+            <Input
+              id="etaApiKey"
+              name="apiKey"
+              type="password"
+              autoComplete="off"
+              className="max-w-sm"
+              placeholder={config.keySet ? 'Stored — leave blank to keep it' : ''}
+              disabled={!canStoreSecrets}
+            />
+            <p className="mt-1 text-sm text-muted-foreground">
+              {canStoreSecrets
+                ? 'Encrypted before it is stored, and never sent to a browser. The key needs the Routes API enabled — a Places key alone will not do.'
+                : 'Set SETTINGS_ENCRYPTION_KEY before a key can be stored. Nothing is kept in plaintext.'}
+            </p>
+          </div>
+
+          <div>
+            <label htmlFor="assumedKmh" className="mb-1 block text-sm font-medium">
+              Assumed speed, km/h
+            </label>
+            <Input
+              id="assumedKmh"
+              name="assumedKmh"
+              inputMode="decimal"
+              defaultValue={config.assumedKmh}
+              className="max-w-[8rem]"
+            />
+            <p className="mt-1 text-sm text-muted-foreground">
+              Used when there is no routing provider, and whenever one is
+              unavailable. Deliberately pessimistic: a car that arrives early
+              is a client glancing at the door, one that arrives late is a
+              client who was told something untrue.
+            </p>
+          </div>
+
+          <Button type="submit">Save</Button>
+        </form>
+      </CardContent>
+    </Card>
   );
 }

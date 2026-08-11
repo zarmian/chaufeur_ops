@@ -1,5 +1,8 @@
 import { findConflicts, occupiedBy, type ConflictCandidate } from './conflicts';
 import { endOfZonedDay, formatInZone, startOfZonedDay } from './dates';
+import { straightLineProvider } from './eta/straight-line';
+import { getEtaConfig, POSITION_MAX_AGE_MINUTES } from './eta/store';
+import { describeMinutes, pointFrom } from './eta/types';
 import { hasPriceOrReason } from './job-status';
 import { getLocaleConfig } from './locale-store';
 import { prisma } from './prisma';
@@ -57,6 +60,18 @@ export interface DispatchRow {
   driverName: string;
   vehicleRegistration: string | null;
   telegramLinked: boolean;
+  /**
+   * When this driver's phone last reported a position, and how far that puts
+   * them from the pickup of whatever they are on. Both null unless location
+   * sharing is on and they are mid-job.
+   *
+   * Estimated locally, never through the routing provider. The board reloads
+   * every thirty seconds, so a paid call per driver per refresh would be a
+   * bill per driver per half-minute all day. The message a client actually
+   * receives is worth a routing call; a number an operator glances at is not.
+   */
+  lastSeenAt: Date | null;
+  etaPhrase: string | null;
   blocks: DispatchBlock[];
 }
 
@@ -87,6 +102,10 @@ const JOB_SELECT = {
   status: true,
   pickupText: true,
   dropoffText: true,
+  // For the distance from a driver's last position. Null on a pickup typed
+  // by hand, which is why the ETA is optional everywhere downstream.
+  pickupLat: true,
+  pickupLng: true,
   flightNumber: true,
   passengerName: true,
   clientPricePence: true,
@@ -138,6 +157,23 @@ export async function loadDispatchDay(
       take: 400,
     }),
   ]);
+
+  // One query for the whole board rather than one per driver. Only positions
+  // recent enough to mean anything are fetched at all.
+  const positions = await prisma.driverPosition.findMany({
+    where: {
+      driverId: { in: drivers.map((driver) => driver.id) },
+      recordedAt: { gte: new Date(now.getTime() - POSITION_MAX_AGE_MINUTES * 60_000) },
+    },
+    orderBy: { recordedAt: 'desc' },
+    select: { driverId: true, jobId: true, lat: true, lng: true, recordedAt: true },
+    take: 2000,
+  });
+
+  const latestPosition = new Map<string, (typeof positions)[number]>();
+  for (const row of positions) {
+    if (!latestPosition.has(row.driverId)) latestPosition.set(row.driverId, row);
+  }
 
   type JobRow = (typeof jobs)[number];
 
@@ -221,13 +257,34 @@ export async function loadDispatchDay(
     };
   };
 
-  const rows: DispatchRow[] = drivers.map((driver) => ({
-    driverId: driver.id,
-    driverName: driver.name,
-    vehicleRegistration: driver.assignedVehicle?.registration ?? null,
-    telegramLinked: driver.telegramChatId !== null,
-    blocks: (byDriver.get(driver.id) ?? []).map(toBlock),
-  }));
+  const jobsById = new Map(jobs.map((job) => [job.id, job]));
+  const localEta = straightLineProvider({ kmh: (await getEtaConfig()).assumedKmh });
+
+  const rows: DispatchRow[] = await Promise.all(
+    drivers.map(async (driver) => {
+      const seen = latestPosition.get(driver.id);
+      const pickup = seen?.jobId
+        ? pointFrom(
+            jobsById.get(seen.jobId)?.pickupLat,
+            jobsById.get(seen.jobId)?.pickupLng,
+          )
+        : null;
+      const origin = seen ? pointFrom(seen.lat, seen.lng) : null;
+
+      const estimate =
+        origin && pickup ? await localEta.estimate(origin, pickup) : null;
+
+      return {
+        driverId: driver.id,
+        driverName: driver.name,
+        vehicleRegistration: driver.assignedVehicle?.registration ?? null,
+        telegramLinked: driver.telegramChatId !== null,
+        lastSeenAt: seen?.recordedAt ?? null,
+        etaPhrase: estimate ? describeMinutes(estimate.minutes) : null,
+        blocks: (byDriver.get(driver.id) ?? []).map(toBlock),
+      };
+    }),
+  );
 
   const unassigned = jobs
     .filter((job) => !job.driverId && job.scheduledAt >= from)

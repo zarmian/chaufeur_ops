@@ -86,7 +86,12 @@ export default async function DispatchPage({
       </div>
 
       <DispatchBoard
-        rows={dispatch.rows}
+        // The board is a Client Component and takes no Prisma types; the
+        // instant crosses as an ISO string.
+        rows={dispatch.rows.map((row) => ({
+          ...row,
+          lastSeenAt: row.lastSeenAt?.toISOString() ?? null,
+        }))}
         unassigned={dispatch.unassigned}
         hours={dispatch.hours}
         nowPct={dispatch.nowPct}

@@ -6,6 +6,7 @@ import {
   messageClient,
 } from '../client-messaging';
 import { formatDateTime } from '../dates';
+import { etaForJob } from '../eta/store';
 import { getLocaleConfig } from '../locale-store';
 import { prisma } from '../prisma';
 import {
@@ -89,12 +90,23 @@ async function tellClient(
     vehicle: job.vehicle ? `${job.vehicle.make} ${job.vehicle.model}` : null,
   };
 
+  // Only the en-route message carries a time, because it is the only one
+  // sent while the driver is moving. Failing to compute one must not stop
+  // the message: `etaForJob` returns null rather than guessing, and the
+  // template drops the clause.
+  const etaPhrase =
+    template === 'driver_en_route'
+      ? await etaForJob(jobId)
+          .then((eta) => eta?.phrase ?? null)
+          .catch(() => null)
+      : null;
+
   const content =
     template === 'booking_confirmation'
       ? await bookingConfirmation(forMessage, branding.tradingName)
       : template === 'driver_assigned'
         ? await driverAssigned(forMessage, branding.tradingName)
-        : await driverEnRoute(forMessage, branding.tradingName);
+        : await driverEnRoute(forMessage, branding.tradingName, etaPhrase);
 
   await messageClient(job.clientId, template, content);
 }
