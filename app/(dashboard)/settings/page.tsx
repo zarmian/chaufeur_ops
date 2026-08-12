@@ -12,7 +12,10 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { PageHeader } from '@/components/page-header';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { getBranding } from '@/lib/branding-store';
 import { getEmailConfig } from '@/lib/email-store';
 import { getAllGatewayConfigs } from '@/lib/gateways/store';
@@ -20,14 +23,21 @@ import { getPlacesConfig } from '@/lib/places/store';
 import { getClientMessagingConfig } from '@/lib/client-messaging';
 import { getTelegramConfig } from '@/lib/telegram/config';
 import { getLocaleConfig } from '@/lib/locale-store';
+import { filterValue, type SearchParams } from '@/lib/list-params';
 import { pageRequireCapability } from '@/lib/page-guards';
 import { prisma } from '@/lib/prisma';
+import { previewReset } from '@/lib/reset';
 import { getSettings } from '@/lib/settings';
 
 export const metadata = { title: 'Settings' };
 
-export default async function SettingsPage() {
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams>;
+}) {
   await pageRequireCapability('manageSettings');
+  const query = await searchParams;
 
   const [branding, locale, settings, defaultCard] = await Promise.all([
     getBranding(),
@@ -38,6 +48,10 @@ export default async function SettingsPage() {
       select: { name: true, _count: { select: { rules: true } } },
     }),
   ]);
+
+  // What a reset would remove, so the number is on the screen before anybody
+  // types anything.
+  const resetPreview = await previewReset();
 
   const [email, gateways, places, telegram, messaging] = await Promise.all([
     getEmailConfig(),
@@ -184,6 +198,96 @@ export default async function SettingsPage() {
           </Link>
         ))}
       </div>
+
+      <DangerZone
+        tradingName={branding.tradingName}
+        rows={resetPreview.totalRows}
+        tables={resetPreview.wipe.filter((entry) => entry.rows > 0).length}
+        error={filterValue(query, 'resetError')}
+        notice={filterValue(query, 'resetNotice')}
+      />
     </>
+  );
+}
+
+/**
+ * Emptying the install, which is the one thing on this screen that cannot be
+ * undone.
+ *
+ * Last, in its own card, in the destructive colour, behind a field that has
+ * to be typed. The row count is read from the database rather than described
+ * in words: "everything" is abstract, and 6,171 is not.
+ */
+function DangerZone({
+  tradingName,
+  rows,
+  tables,
+  error,
+  notice,
+}: {
+  tradingName: string;
+  rows: number;
+  tables: number;
+  error?: string | null;
+  notice?: string | null;
+}) {
+  return (
+    <Card className="mt-8 border-destructive/50">
+      <CardContent className="p-5">
+        <h2 className="font-medium text-destructive">Start fresh</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Empties this install of every job, client, driver, vehicle, account,
+          invoice, payout and its history — {rows.toLocaleString()} rows across{' '}
+          {tables} tables. Your sign-in, branding, locale, tax settings, zones
+          and rate cards are kept. Deleting through the interface cannot do
+          this: records are only marked deleted, and the audit log is never
+          removed at all.
+        </p>
+        <p className="mt-2 text-sm font-medium">
+          There is no undo. Take a database backup first.
+        </p>
+
+        {error ? (
+          <Alert variant="destructive" className="mt-4" data-testid="reset-error">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        ) : null}
+        {notice ? (
+          <Alert className="mt-4" data-testid="reset-notice">
+            <AlertDescription>{notice}</AlertDescription>
+          </Alert>
+        ) : null}
+
+        {rows === 0 ? (
+          <p className="mt-4 text-sm text-muted-foreground">
+            Nothing to remove — this install is already empty.
+          </p>
+        ) : (
+          <form
+            method="post"
+            action="/api/settings/reset"
+            className="mt-4 flex flex-wrap items-end gap-3"
+            data-testid="reset-form"
+          >
+            <div>
+              <label htmlFor="confirm" className="mb-1 block text-sm font-medium">
+                Type <span translate="no">{tradingName}</span> to confirm
+              </label>
+              <Input
+                id="confirm"
+                name="confirm"
+                autoComplete="off"
+                spellCheck={false}
+                className="max-w-xs"
+                required
+              />
+            </div>
+            <Button type="submit" variant="destructive">
+              Empty this install
+            </Button>
+          </form>
+        )}
+      </CardContent>
+    </Card>
   );
 }
