@@ -1,4 +1,4 @@
-import { Car, Contact, Users } from 'lucide-react';
+import { Car, ClipboardList, Contact, Users } from 'lucide-react';
 import Link from 'next/link';
 import { PageHeader } from '@/components/page-header';
 import { Card, CardContent } from '@/components/ui/card';
@@ -7,7 +7,12 @@ import { pageRequireCapability } from '@/lib/page-guards';
 
 export const metadata = { title: 'Import' };
 
-const ICONS = { drivers: Users, vehicles: Car, clients: Contact } as const;
+const ICONS = {
+  drivers: Users,
+  vehicles: Car,
+  clients: Contact,
+  jobs: ClipboardList,
+} as const;
 
 export default async function ImportIndexPage() {
   await pageRequireCapability('manageSettings');
@@ -30,7 +35,7 @@ export default async function ImportIndexPage() {
         </p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {IMPORT_ENTITIES.map((entity) => {
           const def = ENTITY_DEFS[entity];
           const Icon = ICONS[entity];

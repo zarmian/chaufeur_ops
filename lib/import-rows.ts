@@ -365,6 +365,216 @@ export function validateClientRow(
   };
 }
 
+// --------------------------------------------------------------------- jobs
+
+export interface JobRow {
+  scheduledAt: Date;
+  /** True when the file gave a date but no time, so the hour is a guess. */
+  timeAssumed: boolean;
+  jobType: 'AS_DIRECTED' | 'TRANSFER' | 'AIRPORT_TRANSFER';
+  status: 'COMPLETED' | 'CANCELLED' | 'NO_SHOW';
+  pickupText: string;
+  dropoffText: string;
+  clientName: string | null;
+  accountName: string | null;
+  driverPhone: string | null;
+  normalisedDriverPhone: string | null;
+  driverName: string | null;
+  vehicleRegistration: string | null;
+  clientPricePence: number | null;
+  driverPricePence: number | null;
+  zeroValueReason: string | null;
+  passengerName: string | null;
+  passengerPhone: string | null;
+  legacyReference: string | null;
+  notes: string | null;
+  /** What makes two rows the same job — see `ENTITY_DEFS.jobs.naturalKey`. */
+  matchKey: string;
+}
+
+const JOB_TYPES = ['AS_DIRECTED', 'TRANSFER', 'AIRPORT_TRANSFER'] as const;
+/**
+ * Only the terminal states.
+ *
+ * A backfill describes work that finished. Importing a job as PENDING would
+ * put historical work into today's dispatch queue, which is the one outcome
+ * nobody wants from loading last year's spreadsheet.
+ */
+const JOB_STATUSES = ['COMPLETED', 'CANCELLED', 'NO_SHOW'] as const;
+
+/** "£165.50" and "165.5" both mean 16550. Never via a float multiply. */
+export function parseMoneyPence(
+  raw: string,
+): { ok: true; value: number | null } | { ok: false; message: string } {
+  const value = raw.trim().replace(/[£\s,]/g, '');
+  if (value === '') return { ok: true, value: null };
+
+  const match = /^(-?)(\d+)(?:\.(\d{1,2}))?$/.exec(value);
+  if (!match) {
+    return { ok: false, message: `"${raw}" is not an amount. Write it as 165.50.` };
+  }
+  if (match[1] === '-') {
+    return { ok: false, message: `"${raw}" is negative. A job price cannot be.` };
+  }
+  const minor = (match[3] ?? '').padEnd(2, '0');
+  return { ok: true, value: Number(match[2]) * 100 + Number(minor) };
+}
+
+/** `14:30` on the job's date, read as UK local time. */
+function applyTime(
+  date: Date,
+  raw: string,
+): { ok: true; value: Date; assumed: boolean } | { ok: false; message: string } {
+  const value = raw.trim();
+  if (value === '') {
+    // Midday rather than midnight: an unknown hour that lands at 00:00 reads
+    // as "the night before" once it is shown in local time, and a job dated
+    // the 3rd would appear on the 2nd for half the year.
+    return { ok: true, value: new Date(date.getTime() + 12 * 60 * 60 * 1000), assumed: true };
+  }
+
+  const match = /^(\d{1,2}):(\d{2})$/.exec(value);
+  if (!match) {
+    return { ok: false, message: `"${raw}" is not a time. Use 24-hour, like 14:30.` };
+  }
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours > 23 || minutes > 59) {
+    return { ok: false, message: `"${raw}" is not a time of day` };
+  }
+
+  // The offset for that instant, so British Summer Time is handled rather
+  // than assumed away — the rule this codebase exists to keep.
+  const naive = new Date(date.getTime() + (hours * 60 + minutes) * 60 * 1000);
+  const offset = ukOffsetMinutes(naive);
+  return { ok: true, value: new Date(naive.getTime() - offset * 60 * 1000), assumed: false };
+}
+
+/**
+ * Minutes Europe/London is ahead of UTC at `at`.
+ *
+ * Derived from the runtime's own zone data rather than a BST date table,
+ * because the table is the thing that goes stale.
+ */
+function ukOffsetMinutes(at: Date): number {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/London',
+    timeZoneName: 'longOffset',
+  }).formatToParts(at);
+  const name = parts.find((part) => part.type === 'timeZoneName')?.value ?? 'GMT';
+  const match = /GMT([+-])(\d{2}):(\d{2})/.exec(name);
+  if (!match) return 0;
+  const sign = match[1] === '-' ? -1 : 1;
+  return sign * (Number(match[2]) * 60 + Number(match[3]));
+}
+
+export function validateJobRow(
+  row: Record<string, string>,
+  line: number,
+): RowOutcome<JobRow> {
+  const errors: RowError[] = [];
+  const fail = (column: string | null, message: string) =>
+    errors.push({ line, column, message });
+
+  const parsedDate = parseImportDate(row.date ?? '');
+  if (!parsedDate.ok) fail('date', parsedDate.message);
+  else if (!parsedDate.value) fail('date', 'A job needs a date — it is when the work happened');
+
+  const jobType = enumValue(row.jobtype ?? '', JOB_TYPES, 'TRANSFER');
+  if (!jobType.ok) fail('job_type', jobType.message);
+
+  const status = enumValue(row.status ?? '', JOB_STATUSES, 'COMPLETED');
+  if (!status.ok) {
+    fail(
+      'status',
+      `${status.message}. This file loads finished work only, so a job cannot arrive as pending.`,
+    );
+  }
+
+  const pickupText = tidy(row.pickup ?? '');
+  if (pickupText === '') fail('pickup', 'A job needs a pickup');
+  const dropoffText = tidy(row.dropoff ?? '');
+  if (dropoffText === '') fail('dropoff', 'A job needs a drop-off');
+
+  const clientPrice = parseMoneyPence(row.clientprice ?? '');
+  if (!clientPrice.ok) fail('client_price', clientPrice.message);
+  const driverPrice = parseMoneyPence(row.driverprice ?? '');
+  if (!driverPrice.ok) fail('driver_price', driverPrice.message);
+
+  const zeroValueReason = tidy(row.zerovaluereason ?? '');
+  // The guard from `lib/job-status.ts`, applied at the file rather than at
+  // the transition. An import that quietly completed unpriced work would
+  // reintroduce the exact defect this system was built to remove.
+  if (
+    status.ok &&
+    status.value === 'COMPLETED' &&
+    clientPrice.ok &&
+    !clientPrice.value &&
+    zeroValueReason === ''
+  ) {
+    fail(
+      'client_price',
+      'A completed job needs a client price, or a zero_value_reason saying why it has none',
+    );
+  }
+
+  let scheduledAt: Date | null = null;
+  let timeAssumed = false;
+  if (parsedDate.ok && parsedDate.value) {
+    const at = applyTime(parsedDate.value, row.time ?? '');
+    if (!at.ok) fail('time', at.message);
+    else {
+      scheduledAt = at.value;
+      timeAssumed = at.assumed;
+    }
+  }
+
+  if (errors.length > 0 || !scheduledAt) {
+    return { line, value: null, errors };
+  }
+
+  const driverPhone = tidy(row.driverphone ?? '');
+  const registration = tidy(row.vehicleregistration ?? '');
+  const clientName = tidy(row.clientname ?? '');
+  const driverName = tidy(row.drivername ?? '');
+
+  return {
+    line,
+    errors: [],
+    value: {
+      scheduledAt,
+      timeAssumed,
+      jobType: jobType.ok ? jobType.value : 'TRANSFER',
+      status: status.ok ? status.value : 'COMPLETED',
+      pickupText,
+      dropoffText,
+      clientName: clientName || null,
+      accountName: tidy(row.accountname ?? '') || null,
+      driverPhone: driverPhone || null,
+      normalisedDriverPhone: driverPhone ? normalisePhone(driverPhone) : null,
+      driverName: driverName || null,
+      vehicleRegistration: registration ? normaliseRegistration(registration) : null,
+      clientPricePence: clientPrice.ok ? clientPrice.value : null,
+      driverPricePence: driverPrice.ok ? driverPrice.value : null,
+      zeroValueReason: zeroValueReason || null,
+      passengerName: tidy(row.passengername ?? '') || null,
+      passengerPhone: tidy(row.passengerphone ?? '') || null,
+      legacyReference: tidy(row.legacyreference ?? '') || null,
+      notes: tidy(row.notes ?? '') || null,
+      // The old references were reused across sheets, so they cannot identify
+      // a job. What distinguishes two runs is when they happened, where they
+      // went and who drove — and that is stable enough to re-import against.
+      matchKey: [
+        scheduledAt.toISOString().slice(0, 10),
+        normaliseName(pickupText),
+        normaliseName(dropoffText),
+        driverPhone ? normalisePhone(driverPhone) : normaliseName(driverName),
+        normaliseName(clientName),
+      ].join('|'),
+    },
+  };
+}
+
 /**
  * Rows that duplicate an earlier row in the same file.
  *

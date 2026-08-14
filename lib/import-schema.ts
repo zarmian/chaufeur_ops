@@ -10,7 +10,7 @@
  * Imports nothing, so a Client Component can render the column reference.
  */
 
-export type ImportEntity = 'drivers' | 'vehicles' | 'clients';
+export type ImportEntity = 'drivers' | 'vehicles' | 'clients' | 'jobs';
 
 export interface ColumnDef {
   /** Normalised header, per `normaliseHeader` in `lib/csv.ts`. */
@@ -169,6 +169,102 @@ export const CLIENT_COLUMNS: ColumnDef[] = [
   { key: 'notes', label: 'notes', example: 'Always books via the PA' },
 ];
 
+/**
+ * Work that already happened.
+ *
+ * This file is a backfill, not a booking channel, and the difference shows in
+ * two columns that exist nowhere else in the product. `status` is written
+ * directly rather than reached through the lifecycle, and `zero_value_reason`
+ * carries the explanation that a completed job with no price is required to
+ * have. Both are safe *because* it is history: nothing here dispatches a car.
+ */
+export const JOB_COLUMNS: ColumnDef[] = [
+  {
+    key: 'date',
+    label: 'date',
+    required: true,
+    example: '2026-03-14',
+    hint: 'YYYY-MM-DD, or DD/MM/YYYY. The day the job ran.',
+  },
+  {
+    key: 'time',
+    label: 'time',
+    example: '14:30',
+    hint: '24-hour, in local time. Blank means the day is known and the hour is not.',
+  },
+  {
+    key: 'jobtype',
+    label: 'job_type',
+    required: true,
+    example: 'TRANSFER',
+    hint: 'TRANSFER, AIRPORT_TRANSFER or AS_DIRECTED.',
+  },
+  {
+    key: 'status',
+    label: 'status',
+    example: 'COMPLETED',
+    hint: 'COMPLETED, CANCELLED or NO_SHOW. Defaults to COMPLETED.',
+  },
+  { key: 'pickup', label: 'pickup', required: true, example: 'The Savoy, Strand' },
+  { key: 'dropoff', label: 'dropoff', required: true, example: 'Heathrow T5' },
+  {
+    key: 'clientname',
+    label: 'client_name',
+    example: 'Mr Yinka',
+    hint: 'Who rode. Matched to an existing client by name; unmatched names are reported, not created.',
+  },
+  {
+    key: 'accountname',
+    label: 'account_name',
+    example: 'Montclares',
+    hint: 'Who is invoiced. Matched to an existing account by name.',
+  },
+  {
+    key: 'driverphone',
+    label: 'driver_phone',
+    example: '07700 900123',
+    hint: 'Matches the driver imported from the driver file. More reliable than the name.',
+  },
+  {
+    key: 'drivername',
+    label: 'driver_name',
+    example: 'Sam Okafor',
+    hint: 'Used only when the phone is blank or matches nothing.',
+  },
+  {
+    key: 'vehicleregistration',
+    label: 'vehicle_registration',
+    example: 'AB12 CDE',
+  },
+  {
+    key: 'clientprice',
+    label: 'client_price',
+    example: '165.50',
+    hint: 'In pounds, as written on the sheet. Stored in pence.',
+  },
+  {
+    key: 'driverprice',
+    label: 'driver_price',
+    example: '105.00',
+    hint: 'What the driver was paid, in pounds.',
+  },
+  {
+    key: 'zerovaluereason',
+    label: 'zero_value_reason',
+    example: 'Imported from legacy sheet, no client price recorded',
+    hint: 'Required to complete a job with no client price. The importer will not invent one.',
+  },
+  { key: 'passengername', label: 'passenger_name', example: 'Mr Yinka' },
+  { key: 'passengerphone', label: 'passenger_phone', example: '07700 900456' },
+  {
+    key: 'legacyreference',
+    label: 'legacy_reference',
+    example: 'WL 0562',
+    hint: 'The old system’s number. Kept in internal notes; the system allocates its own reference.',
+  },
+  { key: 'notes', label: 'notes', example: 'Client asked for bottled water' },
+];
+
 export const ENTITY_DEFS: Record<ImportEntity, EntityDef> = {
   drivers: {
     entity: 'drivers',
@@ -187,6 +283,14 @@ export const ENTITY_DEFS: Record<ImportEntity, EntityDef> = {
     label: 'Clients',
     naturalKey: 'name plus email or phone',
     columns: CLIENT_COLUMNS,
+  },
+  jobs: {
+    entity: 'jobs',
+    label: 'Jobs (historical)',
+    // No reference to key on: the old system reused its numbers, so identity
+    // has to come from what actually distinguishes one run from another.
+    naturalKey: 'date, pickup, dropoff and driver',
+    columns: JOB_COLUMNS,
   },
 };
 

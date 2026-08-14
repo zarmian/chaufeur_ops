@@ -10,15 +10,18 @@ import {
   findDuplicatesInFile,
   validateClientRow,
   validateDriverRow,
+  validateJobRow,
   validateVehicleRow,
   type ClientRow,
   type DriverRow,
+  type JobRow,
   type RowError,
   type RowOutcome,
   type VehicleRow,
 } from './import-rows';
 import { prisma } from './prisma';
-import { withDriverReference } from './references';
+import { withDriverReference, withJobReference } from './references';
+import { normaliseName } from './text';
 
 /**
  * Loading a fresh install's records from a spreadsheet.
@@ -51,6 +54,14 @@ export interface ImportSummary {
 }
 
 export const PREVIEW_ROWS = 20;
+
+/** Which audit entity an import run is recorded against. */
+const AUDIT_ENTITY = {
+  drivers: 'Driver',
+  vehicles: 'Vehicle',
+  clients: 'Client',
+  jobs: 'Job',
+} as const;
 
 /** The template a customer downloads: correct headers and one example row. */
 export function buildTemplate(entity: ImportEntity): string {
@@ -122,7 +133,11 @@ export function dryRun(entity: ImportEntity, text: string): ImportSummary {
 function validateForEntity(
   entity: ImportEntity,
   text: string,
-): Validated<DriverRow> | Validated<VehicleRow> | Validated<ClientRow> {
+):
+  | Validated<DriverRow>
+  | Validated<VehicleRow>
+  | Validated<ClientRow>
+  | Validated<JobRow> {
   switch (entity) {
     case 'drivers':
       return validateAll(text, validateDriverRow, (row) => row.normalisedPhone);
@@ -134,6 +149,8 @@ function validateForEntity(
       );
     case 'clients':
       return validateAll(text, validateClientRow, (row) => row.matchKey);
+    case 'jobs':
+      return validateAll(text, validateJobRow, (row) => row.matchKey);
   }
 }
 
@@ -155,14 +172,16 @@ export async function runImport(
       ? await importDrivers(text)
       : entity === 'vehicles'
         ? await importVehicles(text)
-        : await importClients(text);
+        : entity === 'clients'
+          ? await importClients(text)
+          : await importJobs(text);
 
   const summary: ImportSummary = { ...base, ...result };
 
   // Recorded whatever the outcome, including a run that imported nothing:
   // "who loaded this and when" is the question asked six months later.
   await withAudit(
-    entity === 'drivers' ? 'Driver' : entity === 'vehicles' ? 'Vehicle' : 'Client',
+    AUDIT_ENTITY[entity],
     'create',
     async () => ({
       entityId: `import:${entity}`,
@@ -404,6 +423,225 @@ async function importClients(text: string): Promise<Counts> {
         updated += 1;
       } else {
         await prisma.client.create({ data });
+        created += 1;
+      }
+    } catch (error) {
+      skipped += 1;
+      runtimeErrors.push({
+        line: outcome.line,
+        column: null,
+        message: describe(error),
+      });
+    }
+  }
+
+  return {
+    created,
+    updated,
+    skipped,
+    errors: [...errors, ...runtimeErrors],
+    preview: parsed.rows.slice(0, PREVIEW_ROWS),
+    totalRows: parsed.rows.length,
+  };
+}
+
+/**
+ * Historical jobs.
+ *
+ * This is the one place in the product that writes a job straight into a
+ * terminal status. Everywhere else a job walks the lifecycle in
+ * `lib/job-status.ts` and is refused if it tries to skip a step or complete
+ * without a price. Both of those guards protect *dispatch* — work that has
+ * yet to happen. This file describes work that already did, where the driver
+ * demonstrably drove and the money was or was not recorded years ago.
+ *
+ * So the lifecycle is bypassed, deliberately and only here, and the two
+ * things the guards were protecting are preserved by other means:
+ *
+ * - **Price.** A completed job still cannot arrive with no client price and
+ *   no explanation; `validateJobRow` refuses the row. The reason is stored on
+ *   the job, so the unpriced-work views show it exactly as they would show a
+ *   zero-value job booked today.
+ * - **Compliance.** The expiry checks are not run, because they would refuse
+ *   every historical row — an imported driver has no expiry dates yet, and
+ *   "unknown" counts as non-compliant. Refusing here would mean recording
+ *   that nobody drove, which is worse than recording who did.
+ *
+ * Nothing else in the system gains this power: the bypass lives in this
+ * function, not in a flag on the job.
+ */
+async function importJobs(text: string): Promise<Counts> {
+  const { parsed, outcomes, errors } = validateAll(
+    text,
+    validateJobRow,
+    (row) => row.matchKey,
+  );
+
+  let created = 0;
+  let updated = 0;
+  let skipped = 0;
+  const runtimeErrors: RowError[] = [];
+
+  // Resolved once for the whole file. A 900-row import would otherwise ask
+  // the database for the same driver hundreds of times.
+  const [clients, accounts, drivers, vehicles] = await Promise.all([
+    prisma.client.findMany({ select: { id: true, normalisedName: true } }),
+    prisma.account.findMany({ select: { id: true, name: true } }),
+    prisma.driver.findMany({ select: { id: true, name: true, normalisedPhone: true } }),
+    prisma.vehicle.findMany({ select: { id: true, normalisedRegistration: true } }),
+  ]);
+
+  const clientByName = new Map(clients.map((c) => [c.normalisedName, c.id]));
+  const accountByName = new Map(accounts.map((a) => [normaliseName(a.name), a.id]));
+  const driverByPhone = new Map(drivers.map((d) => [d.normalisedPhone, d.id]));
+  const driverByName = new Map(drivers.map((d) => [normaliseName(d.name), d.id]));
+  const vehicleByReg = new Map(vehicles.map((v) => [v.normalisedRegistration, v.id]));
+
+  for (const outcome of outcomes) {
+    if (!outcome.value) {
+      skipped += 1;
+      continue;
+    }
+    const row = outcome.value;
+
+    // A link that cannot be resolved is reported and the job still imports.
+    // A job with no client is a real thing in this data; a job that was
+    // dropped because its passenger's name was spelled differently is not.
+    const missing = (column: string, message: string) =>
+      runtimeErrors.push({ line: outcome.line, column, message });
+
+    let clientId: string | null = null;
+    if (row.clientName) {
+      clientId = clientByName.get(normaliseName(row.clientName)) ?? null;
+      if (!clientId) {
+        missing('client_name', `No client "${row.clientName}". Imported without one.`);
+      }
+    }
+
+    let accountId: string | null = null;
+    if (row.accountName) {
+      accountId = accountByName.get(normaliseName(row.accountName)) ?? null;
+      if (!accountId) {
+        missing('account_name', `No account "${row.accountName}". Imported without one.`);
+      }
+    }
+
+    let driverId: string | null = null;
+    if (row.normalisedDriverPhone) {
+      driverId = driverByPhone.get(row.normalisedDriverPhone) ?? null;
+    }
+    if (!driverId && row.driverName) {
+      driverId = driverByName.get(normaliseName(row.driverName)) ?? null;
+    }
+    if (!driverId && (row.driverPhone || row.driverName)) {
+      missing(
+        'driver_phone',
+        `No driver matching "${row.driverName ?? row.driverPhone}". Imported without one.`,
+      );
+    }
+
+    let vehicleId: string | null = null;
+    if (row.vehicleRegistration) {
+      vehicleId = vehicleByReg.get(row.vehicleRegistration) ?? null;
+      if (!vehicleId) {
+        missing(
+          'vehicle_registration',
+          `No vehicle "${row.vehicleRegistration}" on the fleet. Imported without one.`,
+        );
+      }
+    }
+
+    const internalNotes = [
+      row.legacyReference ? `Legacy reference ${row.legacyReference}` : '',
+      'Imported from a historical job file',
+      row.timeAssumed ? 'Time of day not recorded; set to midday' : '',
+    ]
+      .filter(Boolean)
+      .join('. ');
+
+    const data = {
+      clientId,
+      accountId,
+      jobType: row.jobType,
+      status: row.status,
+      scheduledAt: row.scheduledAt,
+      pickupText: row.pickupText,
+      dropoffText: row.dropoffText,
+      driverId,
+      vehicleId,
+      passengerName: row.passengerName,
+      passengerPhone: row.passengerPhone,
+      clientPricePence: row.clientPricePence,
+      driverPricePence: row.driverPricePence,
+      zeroValueReason: row.zeroValueReason,
+      notes: row.notes,
+      internalNotes,
+    };
+
+    try {
+      // Re-importing the same file must not double the history, and the old
+      // references cannot be used to tell — so the match is on what actually
+      // identifies a run. Held in a window rather than a unique index because
+      // the same client can legitimately make the same trip twice in a day.
+      const existing = await prisma.job.findFirst({
+        where: {
+          scheduledAt: {
+            gte: new Date(row.scheduledAt.getTime() - 12 * 60 * 60 * 1000),
+            lte: new Date(row.scheduledAt.getTime() + 12 * 60 * 60 * 1000),
+          },
+          pickupText: row.pickupText,
+          dropoffText: row.dropoffText,
+          driverId,
+          clientId,
+        },
+        select: { id: true },
+      });
+
+      if (existing) {
+        await withAudit(
+          'Job',
+          'update',
+          async (tx) => {
+            const before = await tx.job.findUnique({ where: { id: existing.id } });
+            const after = await tx.job.update({ where: { id: existing.id }, data });
+            return { entityId: existing.id, before, after, result: null };
+          },
+        );
+        updated += 1;
+      } else {
+        await withJobReference((reference) =>
+          withAudit(
+            'Job',
+            'create',
+            async (tx) => {
+              const job = await tx.job.create({ data: { ...data, reference } });
+              // The events a job would have emitted on its way through the
+              // lifecycle, written at the time it actually ran — otherwise
+              // the history has jobs that completed without ever starting.
+              if (row.status === 'COMPLETED') {
+                await tx.jobEvent.createMany({
+                  // SYSTEM, not USER: nobody pressed a button for these. The
+                  // actor is the import, and the timeline should say so.
+                  data: [
+                    {
+                      jobId: job.id,
+                      type: 'ASSIGNED',
+                      actorType: 'SYSTEM',
+                      occurredAt: row.scheduledAt,
+                    },
+                    {
+                      jobId: job.id,
+                      type: 'COMPLETED',
+                      actorType: 'SYSTEM',
+                      occurredAt: row.scheduledAt,
+                    },
+                  ],
+                });
+              }
+              return { entityId: job.id, before: null, after: job, result: null };
+            },
+          ),
+        );
         created += 1;
       }
     } catch (error) {
