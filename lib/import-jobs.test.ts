@@ -170,3 +170,20 @@ describe('dryRun over a jobs file', () => {
     expect(summary.errors.some((e) => /same record/i.test(e.message))).toBe(true);
   });
 });
+
+describe('two jobs in one day', () => {
+  it('keeps a morning and an afternoon run apart', () => {
+    // An as-directed client taking the same car from the same address twice
+    // in a day is two jobs. A key that stopped at the date would file the
+    // second as a repeat of the first and lose it.
+    const morning = validateJobRow(row({ time: '07:00' }), 2);
+    const afternoon = validateJobRow(row({ time: '15:00' }), 3);
+    expect(morning.value?.matchKey).not.toBe(afternoon.value?.matchKey);
+  });
+
+  it('still treats the same run written twice as one job', () => {
+    const a = validateJobRow(row({ legacyreference: 'WL 0597' }), 2);
+    const b = validateJobRow(row({ legacyreference: 'WL 0001' }), 3);
+    expect(a.value?.matchKey).toBe(b.value?.matchKey);
+  });
+});

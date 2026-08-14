@@ -581,13 +581,17 @@ async function importJobs(text: string): Promise<Counts> {
     try {
       // Re-importing the same file must not double the history, and the old
       // references cannot be used to tell — so the match is on what actually
-      // identifies a run. Held in a window rather than a unique index because
-      // the same client can legitimately make the same trip twice in a day.
+      // identifies a run.
+      //
+      // A window rather than an exact time, because a corrected spreadsheet
+      // may nudge a pickup by a few minutes and that is the same job. Narrow
+      // enough that a morning run and an afternoon one stay two jobs; wide
+      // enough that a small correction updates rather than duplicates.
       const existing = await prisma.job.findFirst({
         where: {
           scheduledAt: {
-            gte: new Date(row.scheduledAt.getTime() - 12 * 60 * 60 * 1000),
-            lte: new Date(row.scheduledAt.getTime() + 12 * 60 * 60 * 1000),
+            gte: new Date(row.scheduledAt.getTime() - 90 * 60 * 1000),
+            lte: new Date(row.scheduledAt.getTime() + 90 * 60 * 1000),
           },
           pickupText: row.pickupText,
           dropoffText: row.dropoffText,

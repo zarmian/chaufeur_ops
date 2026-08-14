@@ -564,8 +564,12 @@ export function validateJobRow(
       // The old references were reused across sheets, so they cannot identify
       // a job. What distinguishes two runs is when they happened, where they
       // went and who drove — and that is stable enough to re-import against.
+      //
+      // To the minute, not to the day: an as-directed client can take the same
+      // car from the same address at 07:00 and again at 15:00, and a key that
+      // stopped at the date would file the second one as a repeat of the first.
       matchKey: [
-        scheduledAt.toISOString().slice(0, 10),
+        scheduledAt.toISOString().slice(0, 16),
         normaliseName(pickupText),
         normaliseName(dropoffText),
         driverPhone ? normalisePhone(driverPhone) : normaliseName(driverName),
