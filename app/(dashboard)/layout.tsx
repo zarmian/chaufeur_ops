@@ -1,3 +1,4 @@
+import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { AppShell } from '@/components/layout/app-shell';
 import { UserMenu } from '@/components/layout/user-menu';
@@ -22,6 +23,15 @@ export default async function DashboardLayout({
 }) {
   const user = await getCurrentUser();
   if (!user) redirect('/login');
+
+  // A temporary password is one somebody else has read. Until it is replaced,
+  // the only page this install will render is the one that replaces it —
+  // enforced here rather than in middleware, because middleware runs on the
+  // edge and cannot see the flag without reaching Postgres.
+  if (user.mustChangePassword) {
+    const path = (await headers()).get('x-pathname') ?? '';
+    if (!path.startsWith('/change-password')) redirect('/change-password');
+  }
 
   const branding = await getBranding();
 

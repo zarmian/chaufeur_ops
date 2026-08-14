@@ -81,6 +81,7 @@ export async function signInWithCredentials(
       name: true,
       role: true,
       active: true,
+      mustChangePassword: true,
       passwordHash: true,
     },
   });
@@ -112,6 +113,7 @@ export async function signInWithCredentials(
       name: user.name,
       role: user.role,
       active: user.active,
+      mustChangePassword: user.mustChangePassword,
     },
   };
 }

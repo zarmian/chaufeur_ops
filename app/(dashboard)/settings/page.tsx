@@ -9,6 +9,7 @@ import {
   ShieldCheck,
   Table2,
   Upload,
+  Users,
 } from 'lucide-react';
 import Link from 'next/link';
 import { PageHeader } from '@/components/page-header';
@@ -39,7 +40,7 @@ export default async function SettingsPage({
   await pageRequireCapability('manageSettings');
   const query = await searchParams;
 
-  const [branding, locale, settings, defaultCard] = await Promise.all([
+  const [branding, locale, settings, defaultCard, userCount] = await Promise.all([
     getBranding(),
     getLocaleConfig(),
     getSettings(),
@@ -47,6 +48,7 @@ export default async function SettingsPage({
       where: { isDefault: true },
       select: { name: true, _count: { select: { rules: true } } },
     }),
+    prisma.user.count({ where: { active: true } }),
   ]);
 
   // What a reset would remove, so the number is on the screen before anybody
@@ -81,6 +83,13 @@ export default async function SettingsPage({
   // Each card shows what is configured now, so the landing page answers
   // "what is this install set to" without opening four screens.
   const sections = [
+    {
+      href: '/settings/users',
+      icon: Users,
+      title: 'Users',
+      description: 'Who can sign in, and what each of them may do.',
+      current: `${userCount} ${userCount === 1 ? 'person' : 'people'}`,
+    },
     {
       href: '/settings/branding',
       icon: Palette,

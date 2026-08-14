@@ -14,6 +14,8 @@ export interface SessionUser {
   email: string;
   role: UserRole;
   active: boolean;
+  /** True while they are still on a temporary password somebody else issued. */
+  mustChangePassword: boolean;
 }
 
 export class UnauthenticatedError extends Error {

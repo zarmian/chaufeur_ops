@@ -35,7 +35,11 @@ export function middleware(request: NextRequest) {
   const hasSession = SESSION_COOKIES.some(
     (name) => request.cookies.get(name)?.value,
   );
-  if (hasSession) return NextResponse.next();
+  // The path, forwarded so the dashboard layout can tell which page it is
+  // rendering. A Server Component cannot ask, and the layout needs to know
+  // in order to let /change-password through while redirecting everything
+  // else to it.
+  if (hasSession) return NextResponse.next({ request: { headers: withPath(request, pathname) } });
 
   // Cloned from `nextUrl` rather than built with `new URL(path, request.url)`.
   // The latter resolves against a host Next reconstructs, which is not
@@ -50,6 +54,13 @@ export function middleware(request: NextRequest) {
     loginUrl.searchParams.set('next', `${pathname}${search}`);
   }
   return NextResponse.redirect(loginUrl);
+}
+
+/** The incoming headers plus the path being requested. */
+function withPath(request: NextRequest, pathname: string): Headers {
+  const headers = new Headers(request.headers);
+  headers.set('x-pathname', pathname);
+  return headers;
 }
 
 export const config = {

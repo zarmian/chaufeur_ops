@@ -84,3 +84,19 @@ export const PAY_METHODS = [
   { value: 'CARD', label: 'Card' },
   { value: 'INVOICE', label: 'Invoice' },
 ] as const;
+
+/**
+ * The staff roles, and what each is for in the words the screen shows.
+ *
+ * Here rather than in `lib/users.ts` because the role picker is a Client
+ * Component, and `lib/users.ts` reaches Prisma, argon2 and the session store.
+ * Importing it from the browser would pull all three into the bundle.
+ */
+export const ROLES = ['ADMIN', 'OPS', 'ACCOUNTS', 'VIEWER'] as const;
+
+export const ROLE_DESCRIPTIONS: Record<(typeof ROLES)[number], string> = {
+  ADMIN: 'Everything, including users, settings and deleting records',
+  OPS: 'Jobs, drivers, vehicles, dispatch and documents. Cannot see or change money',
+  ACCOUNTS: 'Prices, invoices, payouts and reports. Cannot change operational job details',
+  VIEWER: 'Read-only throughout',
+};

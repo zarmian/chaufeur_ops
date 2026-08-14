@@ -225,27 +225,31 @@ enum ExpenseKind {
 // ------------------------------------------------------- people and access
 
 model User {
-  id           String    @id @default(cuid())
-  email        String    @unique
-  passwordHash String
-  name         String
-  role         UserRole  @default(VIEWER)
-  active       Boolean   @default(true)
-  lastLoginAt  DateTime?
+  id                 String    @id @default(cuid())
+  email              String    @unique
+  passwordHash       String
+  name               String
+  role               UserRole  @default(VIEWER)
+  active             Boolean   @default(true)
+  /// Set when an administrator issues a temporary password. The dashboard
+  /// refuses to render anything else until the user has chosen their own, so
+  /// a password that passed through a third party is never the standing one.
+  mustChangePassword Boolean   @default(false)
+  lastLoginAt        DateTime?
   /// Staff link their own Telegram for the admin bot — spec 5.9.1. Read-only
   /// there: somebody with a phone in a pub should be able to see whether
   /// tomorrow is covered, and should not be able to reassign a job.
-  telegramChatId   BigInt?   @unique
-  telegramLinkedAt DateTime?
-  createdAt    DateTime  @default(now())
-  deletedAt    DateTime?
+  telegramChatId     BigInt?   @unique
+  telegramLinkedAt   DateTime?
+  createdAt          DateTime  @default(now())
+  deletedAt          DateTime?
 
-  auditEntries AuditLog[]
-  createdJobs  Job[]      @relation("JobCreatedBy")
-  createdJobSeries JobSeries[] @relation("JobSeriesCreatedBy")
+  auditEntries     AuditLog[]
+  createdJobs      Job[]           @relation("JobCreatedBy")
+  createdJobSeries JobSeries[]     @relation("JobSeriesCreatedBy")
   bulkOperations   BulkOperation[] @relation("BulkOperationCreatedBy")
-  createdRentals VehicleRental[] @relation("RentalCreatedBy")
-  sessions     Session[]
+  createdRentals   VehicleRental[] @relation("RentalCreatedBy")
+  sessions         Session[]
 
   @@index([deletedAt])
 }
@@ -277,13 +281,13 @@ model Session {
 /// The failures are kept per job, by reference. "Twelve refused" tells
 /// somebody there is a problem without telling them where it is.
 model BulkOperation {
-  id   String            @id @default(cuid())
-  kind String
+  id     String              @id @default(cuid())
+  kind   String
   status BulkOperationStatus @default(RUNNING)
 
   total     Int
-  succeeded Int @default(0)
-  failed    Int @default(0)
+  succeeded Int      @default(0)
+  failed    Int      @default(0)
   /// One line per refusal: `WLX-000123: reason`.
   failures  String[]
 
@@ -319,7 +323,7 @@ model LoginAttempt {
 /// Vercel runs many short-lived instances, and an in-process counter resets
 /// on almost every request and therefore limits nothing.
 model RateLimitEvent {
-  id String @id @default(cuid())
+  id      String   @id @default(cuid())
   /// What is being limited, e.g. `export`. Separate buckets so a burst of
   /// spreadsheet downloads cannot lock somebody out of anything else.
   bucket  String
@@ -334,7 +338,7 @@ model RateLimitEvent {
 // ------------------------------------------------ commercial relationships
 
 model Client {
-  id               String    @id @default(cuid())
+  id               String         @id @default(cuid())
   name             String
   /// lowercase, punctuation stripped, honorifics removed — for dedupe
   normalisedName   String
@@ -343,7 +347,7 @@ model Client {
   billingEmail     String?
   billingAddress   String?
   vatNumber        String?
-  paymentTermsDays Int       @default(14)
+  paymentTermsDays Int            @default(14)
   /// How this client is kept informed — spec 5.10.4. `NONE` is a real
   /// choice: a corporate booker whose PA handles everything does not want
   /// four texts a day, and defaulting everybody to "both" is how a system
@@ -351,16 +355,16 @@ model Client {
   contactChannel   ContactChannel @default(EMAIL)
   defaultAccountId String?
   notes            String?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
   deletedAt        DateTime?
 
-  defaultAccount Account?            @relation(fields: [defaultAccountId], references: [id])
-  jobs           Job[]
-  invoices       Invoice[]
-  bankTxns       BankTransaction[]
-  credits        UnallocatedCredit[]
-  messages       ClientMessage[]
+  defaultAccount     Account?                  @relation(fields: [defaultAccountId], references: [id])
+  jobs               Job[]
+  invoices           Invoice[]
+  bankTxns           BankTransaction[]
+  credits            UnallocatedCredit[]
+  messages           ClientMessage[]
   favouriteLocations ClientFavouriteLocation[]
 
   @@index([normalisedName])
@@ -400,11 +404,11 @@ model Account {
 // ---------------------------------------------------- fleet and drivers
 
 model Driver {
-  id        String  @id @default(cuid())
+  id              String  @id @default(cuid())
   /// human-facing, e.g. DRV-0147
-  reference String  @unique
-  name      String
-  phone     String
+  reference       String  @unique
+  name            String
+  phone           String
   /// phone with spacing and international prefix folded away — the natural
   /// key a CSV re-import matches on, so the same file twice updates rather
   /// than duplicating.
@@ -428,7 +432,7 @@ model Driver {
   updatedAt DateTime     @updatedAt
   deletedAt DateTime?
 
-  assignedVehicle Vehicle?       @relation(fields: [assignedVehicleId], references: [id])
+  assignedVehicle Vehicle?           @relation(fields: [assignedVehicleId], references: [id])
   documents       Document[]
   jobs            Job[]
   payouts         DriverPayout[]
@@ -476,9 +480,9 @@ model Vehicle {
   purchasePricePence Int?
 
   /// Latest known reading, updated whenever a cost records one.
-  currentOdometer  Int?
-  lastServicedOn   DateTime? @db.Date
-  lastServiceMiles Int?
+  currentOdometer    Int?
+  lastServicedOn     DateTime? @db.Date
+  lastServiceMiles   Int?
   /// Nulls fall back to the configured fleet defaults.
   serviceEveryMonths Int?
   serviceEveryMiles  Int?
@@ -553,9 +557,9 @@ model Location {
 
   zone Zone? @relation(fields: [zoneId], references: [id])
 
-  pickupForJobs  Job[]     @relation("JobPickupLocation")
-  dropoffForJobs Job[]     @relation("JobDropoffLocation")
-  stops          JobStop[] @relation("JobStopLocation")
+  pickupForJobs  Job[]                     @relation("JobPickupLocation")
+  dropoffForJobs Job[]                     @relation("JobDropoffLocation")
+  stops          JobStop[]                 @relation("JobStopLocation")
   favouriteOf    ClientFavouriteLocation[]
 
   @@index([useCount])
@@ -707,11 +711,11 @@ model Job {
   /// The series this job was generated from — spec 6.3.4. Nullable, and the
   /// job is a complete booking without it: generation creates independent
   /// jobs, so a series that is later deleted leaves its jobs standing.
-  seriesId    String?
+  seriesId      String?
   /// Position in the series, from 1. For display only — "this and future"
   /// filters on the date, because an individually-edited job may no longer
   /// sit where its index says.
-  seriesIndex Int?
+  seriesIndex   Int?
   /// The outbound leg this job returns from — spec 6.3.2. Unique because one
   /// outbound has at most one return; booking a second is a new job, not a
   /// second link.
@@ -734,7 +738,7 @@ model Job {
   dropoffLocation Location?     @relation("JobDropoffLocation", fields: [dropoffLocationId], references: [id])
   rateCardRule    RateCardRule? @relation(fields: [rateCardRuleId], references: [id])
 
-  shift        DriverShift?  @relation(fields: [shiftId], references: [id])
+  shift DriverShift? @relation(fields: [shiftId], references: [id])
 
   finance      JobFinance?
   events       JobEvent[]
@@ -774,7 +778,7 @@ model JobSeries {
   /// The first occurrence. Its wall clock in the configured timezone fixes
   /// the time of day for the whole series — stored UTC instants drift by an
   /// hour across a DST transition, and the local time is what was agreed.
-  startsAt DateTime
+  startsAt    DateTime
   /// Exactly one of these two. A recurrence with neither is not a long
   /// series, it is an unanswered question.
   occurrences Int?
@@ -806,9 +810,9 @@ model JobFinance {
   jobId String @unique
 
   // Revenue
-  baseFarePence     Int      @default(0)
-  waitTimePence     Int      @default(0)
-  waitMinutesBilled Int      @default(0)
+  baseFarePence        Int       @default(0)
+  waitTimePence        Int       @default(0)
+  waitMinutesBilled    Int       @default(0)
   /// Set when the driver's Arrived and POB taps produced the figure — spec
   /// 5.5.4. Its presence is what makes the field read-only on the panel: a
   /// number nobody typed should not be quietly retyped.
@@ -818,11 +822,11 @@ model JobFinance {
   waitOverriddenById   String?
   waitOverriddenAt     DateTime?
   waitOverrideReason   String?
-  extraChargesPence Int      @default(0)
-  extraChargesNotes String?
-  customerHours     Decimal? @db.Decimal(5, 2)
-  customerRatePence Int      @default(0)
-  totalClientPence  Int      @default(0)
+  extraChargesPence    Int       @default(0)
+  extraChargesNotes    String?
+  customerHours        Decimal?  @db.Decimal(5, 2)
+  customerRatePence    Int       @default(0)
+  totalClientPence     Int       @default(0)
 
   // Costs
   driverPaymentPence Int      @default(0)
@@ -872,7 +876,7 @@ model JobEvent {
 }
 
 model JobExpense {
-  id                  String      @id @default(cuid())
+  id                  String        @id @default(cuid())
   jobId               String
   kind                ExpenseKind
   amountPence         Int
@@ -883,12 +887,12 @@ model JobExpense {
   approvedAt          DateTime?
   rejectedAt          DateTime?
   rejectionReason     String?
-  rechargeToClient    Boolean     @default(true)
+  rechargeToClient    Boolean       @default(true)
   /// Who is out of pocket. CLIENT means recharged; COMPANY is a cost to us;
   /// DRIVER is neither. Defaults follow the engagement — the company bears
   /// fuel for a hired driver, the driver bears it when they own the car.
   borneBy             ExpenseBearer @default(COMPANY)
-  createdAt           DateTime    @default(now())
+  createdAt           DateTime      @default(now())
   deletedAt           DateTime?
 
   job Job @relation(fields: [jobId], references: [id])
@@ -941,11 +945,11 @@ model DriverShift {
   driverId  String
   vehicleId String?
 
-  startedAt DateTime
+  startedAt    DateTime
   /// null = still open
-  endedAt   DateTime?
+  endedAt      DateTime?
   /// Unpaid break, subtracted from the paid total.
-  breakMinutes Int @default(0)
+  breakMinutes Int       @default(0)
 
   hourlyRatePence Int
 
@@ -1038,10 +1042,10 @@ model VehicleStandingCost {
   vehicleId String
   kind      VehicleCostKind
 
-  label       String
+  label        String
   /// The amount charged once per `periodMonths`.
-  amountPence Int
-  periodMonths Int @default(1)
+  amountPence  Int
+  periodMonths Int    @default(1)
 
   startsOn DateTime  @db.Date
   /// null = still running
@@ -1067,13 +1071,13 @@ model VehicleRental {
   /// The renter. Company cars go out to drivers.
   driverId  String
 
-  startAt DateTime
+  startAt    DateTime
   /// Planned return.
-  endAt   DateTime
+  endAt      DateTime
   /// Actual return. Charged to this when it is later than planned.
   returnedAt DateTime?
 
-  rateType RentalRateType @default(DAILY)
+  rateType  RentalRateType @default(DAILY)
   ratePence Int
 
   depositPence         Int       @default(0)
@@ -1087,7 +1091,7 @@ model VehicleRental {
   fuelInPct  Int?
 
   damageNotes       String?
-  damageChargePence Int @default(0)
+  damageChargePence Int     @default(0)
 
   status RentalStatus @default(BOOKED)
   notes  String?
@@ -1097,9 +1101,9 @@ model VehicleRental {
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
 
-  vehicle   Vehicle                @relation(fields: [vehicleId], references: [id])
-  driver    Driver                 @relation(fields: [driverId], references: [id])
-  createdBy User?                  @relation("RentalCreatedBy", fields: [createdById], references: [id])
+  vehicle      Vehicle               @relation(fields: [vehicleId], references: [id])
+  driver       Driver                @relation(fields: [driverId], references: [id])
+  createdBy    User?                 @relation("RentalCreatedBy", fields: [createdById], references: [id])
   payments     RentalPayment[]
   checks       RentalChecklistItem[]
   invoiceLines InvoiceLine[]
@@ -1183,8 +1187,8 @@ model Invoice {
   /// The column existed without a relation, so nothing could ask "what has
   /// been credited against this invoice?" — which is why a credited invoice
   /// kept its full balance and went on being chased.
-  credits     Invoice?         @relation("InvoiceCredit", fields: [creditsInvoiceId], references: [id])
-  creditNotes Invoice[]        @relation("InvoiceCredit")
+  credits     Invoice?  @relation("InvoiceCredit", fields: [creditsInvoiceId], references: [id])
+  creditNotes Invoice[] @relation("InvoiceCredit")
 
   @@index([status, dueDate])
   @@index([creditsInvoiceId])
@@ -1192,10 +1196,10 @@ model Invoice {
 }
 
 model InvoiceLine {
-  id        String  @id @default(cuid())
+  id        String @id @default(cuid())
   invoiceId String
 
-  jobId String?
+  jobId    String?
   /// Hire of one of the company's own cars. Rental income is revenue like any
   /// other, and without this it could be invoiced only as untraceable free
   /// text — nothing would tie the line back to the agreement it came from.
@@ -1203,7 +1207,7 @@ model InvoiceLine {
 
   description String
   amountPence Int
-  sortOrder   Int     @default(0)
+  sortOrder   Int    @default(0)
 
   invoice Invoice        @relation(fields: [invoiceId], references: [id])
   job     Job?           @relation(fields: [jobId], references: [id])
@@ -1343,8 +1347,8 @@ model BankStatement {
   periodStart DateTime? @db.Date
   periodEnd   DateTime? @db.Date
 
-  rowCount      Int @default(0)
-  importedCount Int @default(0)
+  rowCount       Int @default(0)
+  importedCount  Int @default(0)
   /// Rows skipped because they had already been imported.
   duplicateCount Int @default(0)
 
@@ -1361,15 +1365,15 @@ model BankTransaction {
   id          String @id @default(cuid())
   statementId String
 
-  occurredOn  DateTime @db.Date
-  description String
+  occurredOn   DateTime @db.Date
+  description  String
   /// Signed: negative is money out. Integer pence like everything else.
-  amountPence Int
+  amountPence  Int
   /// The bank's own reference where the export carries one.
-  bankRef     String?
+  bankRef      String?
   balancePence Int?
 
-  kind BankTxnKind @default(UNCLASSIFIED)
+  kind          BankTxnKind @default(UNCLASSIFIED)
   /// Set when a rule classified it, so a wrong rule can be traced back.
   matchedRuleId String?
 
@@ -1380,14 +1384,13 @@ model BankTransaction {
   vehicleId String?
 
   /// What was created from it, so an allocation can be undone.
-  allocatedAt DateTime?
+  allocatedAt    DateTime?
   /// Sum of the allocations made from this transaction, in pence. Less than
   /// the amount when a credit exceeded what was owed.
-  allocatedPence Int @default(0)
+  allocatedPence Int       @default(0)
 
   /**
    * Stable across re-imports of the same statement.
-   *
    * The bank's reference when there is one; otherwise a hash of the date,
    * amount and description. Uniqueness is what stops a second upload of an
    * overlapping period crediting every invoice twice.
@@ -1398,11 +1401,11 @@ model BankTransaction {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  statement   BankStatement       @relation(fields: [statementId], references: [id])
-  client      Client?             @relation(fields: [clientId], references: [id])
-  account     Account?            @relation(fields: [accountId], references: [id])
-  driver      Driver?             @relation(fields: [driverId], references: [id])
-  vehicle     Vehicle?            @relation(fields: [vehicleId], references: [id])
+  statement   BankStatement    @relation(fields: [statementId], references: [id])
+  client      Client?          @relation(fields: [clientId], references: [id])
+  account     Account?         @relation(fields: [accountId], references: [id])
+  driver      Driver?          @relation(fields: [driverId], references: [id])
+  vehicle     Vehicle?         @relation(fields: [vehicleId], references: [id])
   allocations BankAllocation[]
 
   @@index([statementId])
@@ -1455,10 +1458,10 @@ model BankRule {
   vehicleId String?
 
   /// Higher wins when two rules match the same description.
-  priority  Int      @default(0)
-  active    Boolean  @default(true)
+  priority Int     @default(0)
+  active   Boolean @default(true)
   /// How many transactions this rule has classified, for pruning dead rules.
-  hitCount  Int      @default(0)
+  hitCount Int     @default(0)
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -1479,7 +1482,7 @@ model UnallocatedCredit {
   accountId     String?
   transactionId String?
 
-  amountPence Int
+  amountPence    Int
   /// Reduced as later invoices draw on it.
   remainingPence Int
 
@@ -1510,18 +1513,18 @@ model TelegramUpdate {
   id String @id @default(cuid())
 
   /// `ops` or `admin` — which bot received it.
-  bot        String
-  chatId     BigInt?
+  bot       String
+  chatId    BigInt?
   /// message | callback_query | photo | location | …
-  kind       String
+  kind      String
   /// The command or callback data, trimmed. Never the full message text.
-  payload    String?
-  driverId   String?
-  userId     String?
+  payload   String?
+  driverId  String?
+  userId    String?
   /// What the handler did, or the refusal.
-  outcome    String
-  handledMs  Int?
-  createdAt  DateTime @default(now())
+  outcome   String
+  handledMs Int?
+  createdAt DateTime @default(now())
 
   @@index([chatId, createdAt])
   @@index([createdAt])
@@ -1533,7 +1536,7 @@ model TelegramUpdate {
 /// where somebody was three months ago serves no operational purpose and is
 /// the kind of data that only creates obligations.
 model DriverPosition {
-  id       String @id @default(cuid())
+  id       String  @id @default(cuid())
   driverId String
   jobId    String?
 
@@ -1598,7 +1601,7 @@ enum MessageStatus {
 /// Mirrors what `TelegramUpdate` does for drivers: without it, "did the
 /// client get the confirmation" has no answer but the client's word.
 model ClientMessage {
-  id       String @id @default(cuid())
+  id       String  @id @default(cuid())
   clientId String?
 
   channel   MessageChannel

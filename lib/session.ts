@@ -55,6 +55,8 @@ export interface SessionUser {
   email: string;
   role: UserRole;
   active: boolean;
+  /** True while they are still on a temporary password somebody else issued. */
+  mustChangePassword: boolean;
 }
 
 /**
@@ -109,6 +111,7 @@ export async function getSessionUser(): Promise<SessionUser | null> {
           email: true,
           role: true,
           active: true,
+          mustChangePassword: true,
           deletedAt: true,
         },
       },
@@ -143,6 +146,7 @@ export async function getSessionUser(): Promise<SessionUser | null> {
     email: session.user.email,
     role: session.user.role,
     active: session.user.active,
+    mustChangePassword: session.user.mustChangePassword,
   };
 }
 
