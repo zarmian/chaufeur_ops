@@ -199,6 +199,13 @@ enum RentalRateType {
   WEEKLY
 }
 
+/// Who a vehicle went out to.
+enum RenterType {
+  DRIVER
+  ACCOUNT
+  EXTERNAL
+}
+
 enum RentalStatus {
   BOOKED
   ACTIVE
@@ -397,6 +404,7 @@ model Account {
   invoices Invoice[]
   bankTxns BankTransaction[]
   credits  UnallocatedCredit[]
+  rentals  VehicleRental[]
 
   @@index([deletedAt])
 }
@@ -468,6 +476,15 @@ model Vehicle {
   motExpiry         DateTime? @db.Date
   insuranceExpiry   DateTime? @db.Date
   insurancePolicyNo String?
+
+  /// Printed on a hire contract, which has to identify the car precisely
+  /// enough to be enforceable. Entered once per car rather than retyped onto
+  /// every contract, where two versions of the same VIN would disagree.
+  chassisNumber     String?
+  firstRegisteredOn DateTime? @db.Date
+  /// Agreed value, in pence. Stated on the acceptance of liability.
+  valuePence        Int?
+  insurerName       String?
 
   /// Most of the fleet belongs to its driver. Company cars are the exception,
   /// and the only ones whose running costs are the company's.
@@ -1067,9 +1084,16 @@ model VehicleRental {
   /// human-facing, e.g. RNT-000042
   reference String @unique
 
-  vehicleId String
-  /// The renter. Company cars go out to drivers.
-  driverId  String
+  vehicleId  String
+  /**
+   * The renter, who is one of three things: a driver on the fleet, a company
+   * with an account, or somebody with neither. All three sign the same
+   * contract, so the hirer's details are resolved from whichever is set and
+   * printed identically.
+   */
+  renterType RenterType @default(DRIVER)
+  driverId   String?
+  accountId  String?
 
   startAt    DateTime
   /// Planned return.
@@ -1093,6 +1117,40 @@ model VehicleRental {
   damageNotes       String?
   damageChargePence Int     @default(0)
 
+  /**
+   * The hirer, when they are neither a driver nor an account. A one-off hire
+   * is still a contract, and a contract needs a name and an address.
+   */
+  hirerName          String?
+  hirerAddress       String?
+  hirerPhone         String?
+  hirerLicenceNumber String?
+
+  /**
+   * What this particular contract says.
+   * Held on the rental rather than in settings because they are negotiated
+   * per hire — a long booking gets a bigger mileage allowance, a new customer
+   * a larger deposit. Settings supply the defaults the form starts from; what
+   * is stored here is what the signed contract said, so reprinting an old
+   * contract cannot silently restate it at today's rates.
+   */
+  mileageAllowancePerDay Int?
+  excessMileagePence     Int?
+  advancePaymentPence    Int     @default(0)
+  minimumTermDays        Int?
+  insuranceExcessPence   Int?
+  congestionChargePence  Int?
+  smokingChargePence     Int?
+  panelRepairPence       Int?
+  wheelScratchPence      Int?
+  depositReturnDays      Int?
+  /// Who signs for the owner, and in what capacity.
+  ownerSignatory         String?
+
+  /// Set the first time a contract PDF is produced, so it is visible on the
+  /// rental that one exists and when it was raised.
+  contractGeneratedAt DateTime?
+
   status RentalStatus @default(BOOKED)
   notes  String?
 
@@ -1102,7 +1160,8 @@ model VehicleRental {
   deletedAt   DateTime?
 
   vehicle      Vehicle               @relation(fields: [vehicleId], references: [id])
-  driver       Driver                @relation(fields: [driverId], references: [id])
+  driver       Driver?               @relation(fields: [driverId], references: [id])
+  account      Account?              @relation(fields: [accountId], references: [id])
   createdBy    User?                 @relation("RentalCreatedBy", fields: [createdById], references: [id])
   payments     RentalPayment[]
   checks       RentalChecklistItem[]

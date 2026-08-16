@@ -8,7 +8,7 @@ import {
 } from './billable';
 import { financeAmountsFrom, jobEconomics } from './job-finance';
 import { prisma } from './prisma';
-import { rentalBalance, rentalCharge } from './rentals';
+import { rentalBalance, rentalCharge, renterName } from './rentals';
 
 /**
  * Gathering what the company earned, from both sources.
@@ -80,7 +80,10 @@ export async function billableFor(
             depositReturnedPence: true,
             damageChargePence: true,
             driverId: true,
+            renterType: true,
             driver: { select: { name: true } },
+            account: { select: { name: true } },
+            hirerName: true,
             vehicle: { select: { registration: true } },
             payments: { select: { amountPence: true } },
             invoiceLines: { select: { id: true }, take: 1 },
@@ -119,7 +122,7 @@ export async function billableFor(
       totalPence: balance.totalPence,
       paidPence: balance.paidPence,
       driverId: rental.driverId,
-      driverName: rental.driver.name,
+      renterName: renterName(rental),
       vehicleRegistration: rental.vehicle.registration,
       invoicedLineId: rental.invoiceLines[0]?.id ?? null,
     };

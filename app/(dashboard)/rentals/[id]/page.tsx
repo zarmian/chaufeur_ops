@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { renterName } from '@/lib/rentals';
 import { PageHeader } from '@/components/page-header';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -50,7 +51,7 @@ export default async function RentalDetailPage({
     <>
       <PageHeader
         title={rental.reference}
-        description={`${rental.vehicle.registration} · ${rental.driver.name}`}
+        description={`${rental.vehicle.registration} · ${renterName(rental)}`}
       />
 
       {balance.inArrears ? (
@@ -91,9 +92,19 @@ export default async function RentalDetailPage({
                   </Link>
                 </Field>
                 <Field label="Renting to">
-                  <Link href={`/drivers/${rental.driver.id}`} className="hover:underline">
-                    {rental.driver.name}
-                  </Link>
+                  {/* Only a driver has a page to link to; a company or a
+                      one-off hirer is named and nothing more. */}
+                  {rental.driver ? (
+                    <Link href={`/drivers/${rental.driver.id}`} className="hover:underline">
+                      {rental.driver.name}
+                    </Link>
+                  ) : rental.account ? (
+                    <Link href={`/accounts/${rental.account.id}`} className="hover:underline">
+                      {rental.account.name}
+                    </Link>
+                  ) : (
+                    renterName(rental)
+                  )}
                 </Field>
                 <Field label="Went out">{formatDateTime(rental.startAt)}</Field>
                 <Field label="Due back">{formatDateTime(rental.endAt)}</Field>

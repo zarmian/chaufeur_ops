@@ -38,7 +38,7 @@ function rental(overrides: Partial<BillableRental> = {}): BillableRental {
     totalPence: 56000,
     paidPence: 0,
     driverId: 'driver-1',
-    driverName: 'Sam Okafor',
+    renterName: 'Sam Okafor',
     vehicleRegistration: 'AB12 CDE',
     ...overrides,
   };

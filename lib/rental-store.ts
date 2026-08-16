@@ -287,6 +287,10 @@ export async function recordRentalPayment(
 const RENTAL_INCLUDE = {
   vehicle: { select: { id: true, registration: true, make: true, model: true } },
   driver: { select: { id: true, name: true, reference: true, phone: true } },
+  // A hire may have gone to a company instead of a driver.
+  account: {
+    select: { id: true, name: true, contactPhone: true, billingAddress: true },
+  },
   payments: { orderBy: { paidAt: 'desc' } },
   checks: { orderBy: { label: 'asc' } },
 } as const;
@@ -329,6 +333,7 @@ export async function listRentals(
       include: {
         vehicle: { select: { id: true, registration: true } },
         driver: { select: { id: true, name: true } },
+        account: { select: { id: true, name: true } },
         payments: { select: { amountPence: true } },
       },
     }),

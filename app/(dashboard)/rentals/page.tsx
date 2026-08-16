@@ -2,6 +2,7 @@ import { Plus } from 'lucide-react';
 import Link from 'next/link';
 import { EmptyState } from '@/components/empty-state';
 import { ListToolbar } from '@/components/list-toolbar';
+import { renterName } from '@/lib/rentals';
 import { PageHeader } from '@/components/page-header';
 import { Pagination } from '@/components/pagination';
 import { Badge } from '@/components/ui/badge';
@@ -146,7 +147,7 @@ export default async function RentalsPage({
                     {rental.vehicle.registration}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
-                    {rental.driver.name}
+                    {renterName(rental)}
                   </TableCell>
                   <TableCell className="tabular whitespace-nowrap text-muted-foreground">
                     {formatDateTime(rental.startAt)}

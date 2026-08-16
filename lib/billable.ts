@@ -38,8 +38,13 @@ export interface BillableRental {
   totalPence: number;
   /** Already settled in cash; only the remainder is worth invoicing. */
   paidPence: number;
-  driverId: string;
-  driverName: string;
+  /**
+   * The renter. Null when the hire went to a company or to somebody with no
+   * record on the fleet — both are still billable, and `renterName` is what
+   * an invoice line shows either way.
+   */
+  driverId: string | null;
+  renterName: string;
   vehicleRegistration: string;
   invoicedLineId?: string | null;
 }
@@ -99,7 +104,7 @@ export function billableItems(input: {
       kind: 'RENTAL',
       id: rental.id,
       reference: rental.reference,
-      description: `Vehicle hire ${rental.reference} — ${rental.vehicleRegistration}, ${rental.driverName}`,
+      description: `Vehicle hire ${rental.reference} — ${rental.vehicleRegistration}, ${rental.renterName}`,
       occurredAt: rental.occurredAt,
       amountPence: outstanding,
       alreadyInvoiced: Boolean(rental.invoicedLineId),

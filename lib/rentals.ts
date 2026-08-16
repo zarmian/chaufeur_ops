@@ -275,3 +275,61 @@ export function mileageDriven(
   // A reading that went backwards is a typo, not negative mileage.
   return Math.max(0, mileageIn - mileageOut);
 }
+
+/**
+ * Who a vehicle went out to.
+ *
+ * A rental has three possible renters — a driver on the fleet, a company with
+ * an account, or somebody with neither — and almost every screen wants the
+ * same thing from all three: a name to show. Resolved once here so a list, an
+ * invoice line and a hire contract cannot disagree about who had the car.
+ */
+export interface RenterSource {
+  renterType: 'DRIVER' | 'ACCOUNT' | 'EXTERNAL';
+  driver?: { name: string; phone?: string | null } | null;
+  account?: { name: string; contactPhone?: string | null; billingAddress?: string | null } | null;
+  hirerName?: string | null;
+  hirerPhone?: string | null;
+  hirerAddress?: string | null;
+  hirerLicenceNumber?: string | null;
+}
+
+export function renterName(rental: RenterSource): string {
+  if (rental.renterType === 'ACCOUNT') return rental.account?.name ?? 'Unknown account';
+  if (rental.renterType === 'EXTERNAL') return rental.hirerName?.trim() || 'Unnamed hirer';
+  return rental.driver?.name ?? 'Unknown driver';
+}
+
+/** Name, address, phone and licence, as the contract prints them. */
+export function renterDetails(rental: RenterSource): {
+  name: string;
+  address: string | null;
+  phone: string | null;
+  licenceNumber: string | null;
+} {
+  switch (rental.renterType) {
+    case 'ACCOUNT':
+      return {
+        name: rental.account?.name ?? 'Unknown account',
+        // A company hire is signed by someone, but the licence belongs to
+        // whoever drives it — recorded per hire, not on the account.
+        address: rental.account?.billingAddress ?? rental.hirerAddress ?? null,
+        phone: rental.account?.contactPhone ?? rental.hirerPhone ?? null,
+        licenceNumber: rental.hirerLicenceNumber ?? null,
+      };
+    case 'EXTERNAL':
+      return {
+        name: rental.hirerName?.trim() || 'Unnamed hirer',
+        address: rental.hirerAddress ?? null,
+        phone: rental.hirerPhone ?? null,
+        licenceNumber: rental.hirerLicenceNumber ?? null,
+      };
+    default:
+      return {
+        name: rental.driver?.name ?? 'Unknown driver',
+        address: rental.hirerAddress ?? null,
+        phone: rental.driver?.phone ?? rental.hirerPhone ?? null,
+        licenceNumber: rental.hirerLicenceNumber ?? null,
+      };
+  }
+}
