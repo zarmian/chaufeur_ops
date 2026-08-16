@@ -170,10 +170,17 @@ export async function renderPdf(
              <span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
            </div>`
         : '<span></span>',
-      // Margins belong to the document's own `@page` rule unless a footer
-      // needs room reserved for it, which Chromium only honours from here.
+      /*
+       * With a footer, every margin is set here and the document must not
+       * declare `@page { margin }` at all.
+       *
+       * A CSS page margin wins over this one, silently. Setting a bottom
+       * margin of zero in the stylesheet while asking for a footer band here
+       * produced exactly that: the footer painted at the foot of the page and
+       * body text ran through it, because no band was ever reserved.
+       */
       margin: options.footerText
-        ? { top: '0', right: '0', bottom: '16mm', left: '0' }
+        ? { top: '16mm', right: '15mm', bottom: '16mm', left: '15mm' }
         : { top: '0', right: '0', bottom: '0', left: '0' },
     });
 

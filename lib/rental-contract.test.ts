@@ -142,6 +142,18 @@ describe('renderRentalContract', () => {
     expect(html).not.toContain('position: fixed');
   });
 
+  it('declares no page margin, so the footer band survives', () => {
+    // The bug this exists for, twice over. `@page { margin }` silently wins
+    // over the margin `page.pdf()` is given, so a margin here — even a
+    // partial one like `16mm 15mm 0` — removes the band Chromium reserves
+    // for the running footer, and clause text prints straight through it.
+    // Margins for this document belong to lib/pdf.ts alone.
+    const html = render(contract());
+    const pageRule = /@page\s*\{([^}]*)\}/.exec(html)?.[1] ?? '';
+    expect(pageRule).toContain('size');
+    expect(pageRule).not.toContain('margin');
+  });
+
   it('escapes a hirer name that contains markup', () => {
     const html = render(
       contract({

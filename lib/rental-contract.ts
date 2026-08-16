@@ -143,8 +143,13 @@ export function renderRentalContract(
 <meta charset="utf-8">
 <title>Vehicle hire agreement ${escapeHtml(data.reference)}</title>
 <style>
-  /* Bottom margin is Chromium's, reserved for the running footer. */
-  @page { size: A4; margin: 16mm 15mm 0; }
+  /*
+   * No page margin here on purpose. A CSS page margin overrides the one
+   * page.pdf() is given, and the running footer needs that margin to reserve
+   * its band -- declaring one here put body text through the footer.
+   * Margins for this document live in lib/pdf.ts.
+   */
+  @page { size: A4; }
   * { box-sizing: border-box; }
   body {
     font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
