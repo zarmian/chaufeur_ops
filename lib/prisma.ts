@@ -28,6 +28,13 @@ const SOFT_DELETE_MODELS = new Set([
   'Job',
   'JobExpense',
   'Invoice',
+  // The column existed and nothing read it, so `delete` on a hire was a hard
+  // delete — it took the handover checklist's parent row out from under it and
+  // left nothing to audit against. Filtered now, which also keeps a deleted
+  // hire out of the arrears total and out of the double-booking check, where
+  // it would otherwise go on blocking the car it no longer occupies.
+  'VehicleRental',
+  'RentalPayment',
   'DriverPayout',
   'BankStatement',
   'BankTransaction',

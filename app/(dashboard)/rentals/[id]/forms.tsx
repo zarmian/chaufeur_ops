@@ -83,6 +83,92 @@ export function ReturnForm({ rentalId, error }: { rentalId: string; error?: stri
 }
 
 /**
+ * Calling a hire off.
+ *
+ * The record stays and the car is freed for the period. Confirmed because it
+ * is one click away from a booking somebody is relying on, and the button sits
+ * beside ones that are not destructive.
+ */
+export function CancelRentalForm({ rentalId }: { rentalId: string }) {
+  return (
+    <form
+      method="post"
+      action={`/api/rentals/${rentalId}/actions`}
+      onSubmit={(event) => {
+        if (
+          !confirm(
+            'Cancel this hire? The record stays and the car is freed for that period.',
+          )
+        ) {
+          event.preventDefault();
+        }
+      }}
+    >
+      <input type="hidden" name="intent" value="cancel" />
+      <Button type="submit" variant="outline" className="w-full">
+        Cancel this hire
+      </Button>
+    </form>
+  );
+}
+
+/**
+ * Removing a hire booked by mistake.
+ *
+ * Confirmation names the reference, because "are you sure" on a page full of
+ * hires is not a question anybody can answer — the point of typing the name
+ * back is that the wrong tab is the wrong reference.
+ *
+ * The button is shown disabled rather than hidden when money has been taken.
+ * A missing button reads as a system that cannot do it; a disabled one with
+ * the reason beside it says why not, and what to do instead.
+ */
+export function DeleteRentalForm({
+  rentalId,
+  reference,
+  hasPayments,
+}: {
+  rentalId: string;
+  reference: string;
+  hasPayments: boolean;
+}) {
+  if (hasPayments) {
+    return (
+      <div>
+        <Button variant="destructive" className="w-full" disabled>
+          Delete this hire
+        </Button>
+        <p className="mt-2 text-xs text-muted-foreground">
+          Money has been received against it, so deleting would leave the
+          payment with nothing to reconcile against. Cancel it instead.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <form
+      method="post"
+      action={`/api/rentals/${rentalId}/actions`}
+      onSubmit={(event) => {
+        if (!confirm(`Delete ${reference}? It comes off every list.`)) {
+          event.preventDefault();
+        }
+      }}
+    >
+      <input type="hidden" name="intent" value="delete" />
+      <Button type="submit" variant="destructive" className="w-full">
+        Delete this hire
+      </Button>
+      <p className="mt-2 text-xs text-muted-foreground">
+        For a booking entered in error. The record is archived rather than
+        destroyed, so the car&rsquo;s history still reconstructs.
+      </p>
+    </form>
+  );
+}
+
+/**
  * Money received against the hire.
  *
  * A plain post. A payment that appears not to have been recorded is the worst

@@ -33,11 +33,62 @@ export interface ContractDefaults {
 }
 
 /**
- * Booking a car out.
+ * A hire as the form holds it.
+ *
+ * Every field is a string, because that is what an input carries and what the
+ * schema parses back. Money arrives formatted for typing ("80.00"), not as
+ * pence.
+ */
+export interface RentalFormValues {
+  vehicleId: string;
+  renterType: 'DRIVER' | 'ACCOUNT' | 'EXTERNAL';
+  driverId: string;
+  accountId: string;
+  hirerName: string;
+  hirerAddress: string;
+  hirerPhone: string;
+  hirerLicenceNumber: string;
+  startAt: string;
+  endAt: string;
+  rateType: string;
+  rate: string;
+  deposit: string;
+  mileageOut: string;
+  fuelOutPct: string;
+  advancePayment: string;
+  notes: string;
+}
+
+const BLANK: RentalFormValues = {
+  vehicleId: '',
+  renterType: 'DRIVER',
+  driverId: '',
+  accountId: '',
+  hirerName: '',
+  hirerAddress: '',
+  hirerPhone: '',
+  hirerLicenceNumber: '',
+  startAt: '',
+  endAt: '',
+  rateType: 'DAILY',
+  rate: '',
+  deposit: '',
+  mileageOut: '',
+  fuelOutPct: '',
+  advancePayment: '',
+  notes: '',
+};
+
+/**
+ * Booking a car out, and correcting one already booked.
  *
  * The mileage and fuel readings are on the booking form rather than a
  * separate handover screen, because they are taken at the moment the keys
  * change hands — asking for them later means they get guessed.
+ *
+ * The same form edits an existing hire. What it does not touch is the return:
+ * the mileage and damage recorded when the car came back belong to the
+ * book-it-back-in form, where somebody stood at the car and wrote them down.
  */
 export function RentalForm({
   action,
@@ -45,6 +96,14 @@ export function RentalForm({
   drivers,
   accounts,
   defaults,
+  values = BLANK,
+  submitLabel = 'Book the car out',
+  /**
+   * Offer to save a one-off hirer as an account. Booking only: an edit does
+   * not create accounts, so showing the tick there would be a control that
+   * does nothing.
+   */
+  offerToSaveHirer = true,
   cancelHref,
 }: {
   action: (state: FormState, formData: FormData) => Promise<FormState>;
@@ -53,11 +112,17 @@ export function RentalForm({
   accounts: Array<{ id: string; label: string }>;
   /** Contract terms the form starts from; every one is editable per hire. */
   defaults: ContractDefaults;
+  /** An existing hire, when editing. Blank for a new one. */
+  values?: RentalFormValues;
+  submitLabel?: string;
+  offerToSaveHirer?: boolean;
   cancelHref: string;
 }) {
   const [state, formAction] = useActionState(action, INITIAL_FORM_STATE);
   const errors = state.fields ?? {};
-  const [renterType, setRenterType] = useState<'DRIVER' | 'ACCOUNT' | 'EXTERNAL'>('DRIVER');
+  const [renterType, setRenterType] = useState<'DRIVER' | 'ACCOUNT' | 'EXTERNAL'>(
+    values.renterType,
+  );
 
   return (
     <form action={formAction} className="max-w-3xl space-y-8">
@@ -74,7 +139,11 @@ export function RentalForm({
         </h2>
         <div className="grid gap-4 sm:grid-cols-2">
           <FormField name="vehicleId" label="Vehicle" required errors={errors.vehicleId}>
-            <Select {...fieldProps('vehicleId', errors.vehicleId)} required>
+            <Select
+              {...fieldProps('vehicleId', errors.vehicleId)}
+              defaultValue={values.vehicleId}
+              required
+            >
               <option value="">Choose a vehicle</option>
               {vehicles.map((vehicle) => (
                 <option key={vehicle.id} value={vehicle.id}>
@@ -100,7 +169,11 @@ export function RentalForm({
 
           {renterType === 'DRIVER' ? (
             <FormField name="driverId" label="Driver" required errors={errors.driverId}>
-              <Select {...fieldProps('driverId', errors.driverId)} required>
+              <Select
+                {...fieldProps('driverId', errors.driverId)}
+                defaultValue={values.driverId}
+                required
+              >
                 <option value="">Choose a driver</option>
                 {drivers.map((driver) => (
                   <option key={driver.id} value={driver.id}>
@@ -113,7 +186,11 @@ export function RentalForm({
 
           {renterType === 'ACCOUNT' ? (
             <FormField name="accountId" label="Company" required errors={errors.accountId}>
-              <Select {...fieldProps('accountId', errors.accountId)} required>
+              <Select
+                {...fieldProps('accountId', errors.accountId)}
+                defaultValue={values.accountId}
+                required
+              >
                 <option value="">Choose an account</option>
                 {accounts.map((account) => (
                   <option key={account.id} value={account.id}>
@@ -128,16 +205,25 @@ export function RentalForm({
             <Input
               {...fieldProps('startAt', errors.startAt)}
               type="datetime-local"
+              defaultValue={values.startAt}
               required
             />
           </FormField>
 
           <FormField name="endAt" label="Due back" required errors={errors.endAt}>
-            <Input {...fieldProps('endAt', errors.endAt)} type="datetime-local" required />
+            <Input
+              {...fieldProps('endAt', errors.endAt)}
+              type="datetime-local"
+              defaultValue={values.endAt}
+              required
+            />
           </FormField>
 
           <FormField name="rateType" label="Charged" errors={errors.rateType}>
-            <Select {...fieldProps('rateType', errors.rateType)} defaultValue="DAILY">
+            <Select
+              {...fieldProps('rateType', errors.rateType)}
+              defaultValue={values.rateType}
+            >
               {Object.entries(RATE_TYPE_LABELS).map(([value, label]) => (
                 <option key={value} value={value}>
                   {label}
@@ -157,6 +243,7 @@ export function RentalForm({
               {...fieldProps('rate', errors.ratePence)}
               inputMode="decimal"
               placeholder="80.00"
+              defaultValue={values.rate}
               required
             />
           </FormField>
@@ -171,6 +258,7 @@ export function RentalForm({
               {...fieldProps('deposit', errors.depositPence)}
               inputMode="decimal"
               placeholder="300.00"
+              defaultValue={values.deposit}
             />
           </FormField>
         </div>
@@ -186,24 +274,39 @@ export function RentalForm({
           <div className="grid gap-4 sm:grid-cols-2">
             {renterType === 'EXTERNAL' ? (
               <FormField name="hirerName" label="Hirer name" required errors={errors.hirerName}>
-                <Input {...fieldProps('hirerName', errors.hirerName)} required />
+                <Input
+                  {...fieldProps('hirerName', errors.hirerName)}
+                  defaultValue={values.hirerName}
+                  required
+                />
               </FormField>
             ) : null}
             <FormField name="hirerPhone" label="Contact number" errors={errors.hirerPhone}>
-              <Input {...fieldProps('hirerPhone', errors.hirerPhone)} type="tel" />
+              <Input
+                {...fieldProps('hirerPhone', errors.hirerPhone)}
+                type="tel"
+                defaultValue={values.hirerPhone}
+              />
             </FormField>
             <FormField name="hirerAddress" label="Address" errors={errors.hirerAddress}>
-              <Textarea {...fieldProps('hirerAddress', errors.hirerAddress)} rows={2} />
+              <Textarea
+                {...fieldProps('hirerAddress', errors.hirerAddress)}
+                rows={2}
+                defaultValue={values.hirerAddress}
+              />
             </FormField>
             <FormField
               name="hirerLicenceNumber"
               label="Driving licence number"
               errors={errors.hirerLicenceNumber}
             >
-              <Input {...fieldProps('hirerLicenceNumber', errors.hirerLicenceNumber)} />
+              <Input
+                {...fieldProps('hirerLicenceNumber', errors.hirerLicenceNumber)}
+                defaultValue={values.hirerLicenceNumber}
+              />
             </FormField>
           </div>
-          {renterType === 'EXTERNAL' ? (
+          {renterType === 'EXTERNAL' && offerToSaveHirer ? (
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" name="saveHirerAsAccount" value="true" defaultChecked />
               Save them as an account, so a repeat hire is picked from the list
@@ -232,7 +335,7 @@ export function RentalForm({
           </FormField>
           <FormField name="advancePaymentPence" label="Total advance payment" errors={errors.advancePaymentPence}>
             <Input {...fieldProps('advancePaymentPence', errors.advancePaymentPence)}
-              inputMode="decimal" placeholder="400.00" />
+              inputMode="decimal" defaultValue={values.advancePayment} placeholder="400.00" />
           </FormField>
           <FormField name="minimumTermDays" label="Minimum term (days)" errors={errors.minimumTermDays}>
             <Input {...fieldProps('minimumTermDays', errors.minimumTermDays)}
@@ -280,6 +383,7 @@ export function RentalForm({
               type="number"
               min={0}
               placeholder="41200"
+              defaultValue={values.mileageOut}
             />
           </FormField>
           <FormField
@@ -293,6 +397,7 @@ export function RentalForm({
               min={0}
               max={100}
               placeholder="100"
+              defaultValue={values.fuelOutPct}
             />
           </FormField>
         </div>
@@ -303,11 +408,15 @@ export function RentalForm({
       </section>
 
       <FormField name="notes" label="Notes" errors={errors.notes}>
-        <Textarea {...fieldProps('notes', errors.notes)} rows={3} />
+        <Textarea
+          {...fieldProps('notes', errors.notes)}
+          rows={3}
+          defaultValue={values.notes}
+        />
       </FormField>
 
       <div className="flex items-center gap-3 border-t pt-6">
-        <SubmitButton />
+        <SubmitButton label={submitLabel} />
         <Button asChild variant="ghost">
           <Link href={cancelHref}>Cancel</Link>
         </Button>
@@ -316,11 +425,11 @@ export function RentalForm({
   );
 }
 
-function SubmitButton() {
+function SubmitButton({ label }: { label: string }) {
   const { pending } = useFormStatus();
   return (
     <Button type="submit" disabled={pending}>
-      {pending ? 'Saving…' : 'Book the car out'}
+      {pending ? 'Saving…' : label}
     </Button>
   );
 }

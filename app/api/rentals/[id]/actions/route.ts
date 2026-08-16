@@ -5,7 +5,14 @@ import { requireCapability } from '@/lib/authz';
 import { parseMoney } from '@/lib/money';
 import { ForbiddenError, UnauthenticatedError } from '@/lib/permissions';
 import { clientIpFrom } from '@/lib/rate-limit';
-import { recordRentalPayment, returnRental, returnSchema } from '@/lib/rental-store';
+import { prisma } from '@/lib/prisma';
+import {
+  cancelRental,
+  deleteRental,
+  recordRentalPayment,
+  returnRental,
+  returnSchema,
+} from '@/lib/rental-store';
 
 /**
  * `POST /api/rentals/:id/actions` — booking a car back in, and taking money.
@@ -33,12 +40,44 @@ export async function POST(
   try {
     const form = await request.formData();
     const intent = String(form.get('intent') ?? '');
+    // Deleting a hire is an administrator's call: it takes a booking off
+    // every list at once, and the operator who made the mistake is rarely the
+    // one who should decide it never happened.
     const user = await requireCapability(
-      intent === 'payment' ? 'editJobFinances' : 'editVehicles',
+      intent === 'payment'
+        ? 'editJobFinances'
+        : intent === 'delete'
+          ? 'deleteRecords'
+          : 'editVehicles',
     );
     const audit = { userId: user.id, ip: clientIpFrom(await headers()) };
 
-    if (intent === 'payment') {
+    if (intent === 'cancel') {
+      const result = await cancelRental(id, audit);
+      if (!result.ok) query.set('rentalError', result.message);
+    } else if (intent === 'delete') {
+      // Read before the delete, because afterwards the row is filtered out of
+      // every read and there is nothing left to name in the message.
+      const rental = await prisma.vehicleRental.findUnique({
+        where: { id },
+        select: { reference: true },
+      });
+      const result = await deleteRental(id, audit);
+      if (!result.ok) {
+        query.set('rentalError', result.message);
+      } else {
+        // Nothing left on this page to come back to. Back to the list saying
+        // what happened — landing on an unchanged page reads as the button
+        // not having worked.
+        const done = new URLSearchParams({
+          rentalNotice: `${rental?.reference ?? 'That hire'} was deleted.`,
+        });
+        return new NextResponse(null, {
+          status: 303,
+          headers: { Location: `/rentals?${done.toString()}` },
+        });
+      }
+    } else if (intent === 'payment') {
       const amount = String(form.get('amount') ?? '').trim();
       if (amount === '') {
         query.set('rentalError', 'Enter the amount received');

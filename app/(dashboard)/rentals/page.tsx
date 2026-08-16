@@ -1,6 +1,7 @@
 import { Plus } from 'lucide-react';
 import Link from 'next/link';
 import { EmptyState } from '@/components/empty-state';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ListToolbar } from '@/components/list-toolbar';
 import { renterName } from '@/lib/rentals';
 import { PageHeader } from '@/components/page-header';
@@ -42,6 +43,7 @@ export default async function RentalsPage({
 }) {
   const user = await pageRequireCapability('viewJobs');
   const params = await searchParams;
+  const notice = filterValue(params, 'rentalNotice');
   const listParams = parseListParams(params);
 
   const filters = {
@@ -71,6 +73,14 @@ export default async function RentalsPage({
           ) : null
         }
       />
+
+      {/* The outcome of a delete, which happens on the detail page and lands
+          here — there is nothing left to return to. */}
+      {notice ? (
+        <Alert className="mb-6" data-testid="rental-notice">
+          <AlertDescription>{notice}</AlertDescription>
+        </Alert>
+      ) : null}
 
       <ListToolbar
         action="/rentals"

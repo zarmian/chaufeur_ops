@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { withAudit, type AuditContext } from './audit';
+import { toUTC } from './dates';
 import { parseMoney } from './money';
 import { prisma } from './prisma';
 import { formatReference } from './references';
@@ -170,8 +171,8 @@ export async function createRental(
   input: RentalInput,
   context: AuditContext,
 ): Promise<{ ok: true; id: string; reference: string } | (RentalRefusal & { ok: false })> {
-  const startAt = new Date(input.startAt);
-  const endAt = new Date(input.endAt);
+  const startAt = toUTC(input.startAt);
+  const endAt = toUTC(input.endAt);
 
   const existing = await prisma.vehicleRental.findMany({
     where: { vehicleId: input.vehicleId, status: { not: 'CANCELLED' } },
@@ -280,6 +281,259 @@ export async function createRental(
   );
 }
 
+/**
+ * Whether a hire may still be changed, and why not.
+ *
+ * One rule, checked in the same place for editing, cancelling and deleting: a
+ * hire that has been billed is a figure on a document somebody else is
+ * holding. Changing the rate underneath it leaves the invoice and the hire
+ * disagreeing with nothing to say which is right — the same reason a sent
+ * invoice is corrected with a credit note rather than an edit.
+ *
+ * Deliberately *not* a status check. A returned hire is finished, not
+ * immutable: correcting a mistyped mileage or rate afterwards is ordinary
+ * work, and refusing it would push somebody back to the database.
+ */
+export async function rentalEditability(
+  rentalId: string,
+): Promise<RentalRefusal> {
+  const billed = await prisma.invoiceLine.findFirst({
+    where: { rentalId, invoice: { status: { not: 'CANCELLED' } } },
+    select: { invoice: { select: { number: true, status: true } } },
+  });
+
+  if (billed) {
+    return {
+      ok: false,
+      message: `This hire is on invoice ${billed.invoice.number}. Credit that invoice first — changing the hire underneath it would leave the two disagreeing.`,
+    };
+  }
+
+  return { ok: true };
+}
+
+/**
+ * Change a hire that has already been booked.
+ *
+ * The overlap check runs again, excluding this hire from its own comparison —
+ * otherwise every edit would report the car as clashing with itself, perfectly.
+ * Moving a hire onto a car or a period somebody else has is still refused:
+ * there is only one car, and that is not a warning.
+ *
+ * The return readings are not touched. They belong to `returnRental`, which is
+ * where somebody stood at the car and wrote them down.
+ */
+export async function updateRental(
+  rentalId: string,
+  input: RentalInput,
+  context: AuditContext,
+): Promise<{ ok: true; id: string } | (RentalRefusal & { ok: false })> {
+  const rental = await prisma.vehicleRental.findUnique({
+    where: { id: rentalId },
+    select: { id: true, vehicleId: true, status: true, accountId: true },
+  });
+  if (!rental) return { ok: false, message: 'That hire no longer exists' };
+
+  const editable = await rentalEditability(rentalId);
+  if (!editable.ok) return editable;
+
+  const startAt = toUTC(input.startAt);
+  const endAt = toUTC(input.endAt);
+
+  const existing = await prisma.vehicleRental.findMany({
+    where: {
+      vehicleId: input.vehicleId,
+      status: { not: 'CANCELLED' },
+      id: { not: rentalId },
+    },
+    select: {
+      id: true,
+      reference: true,
+      startAt: true,
+      endAt: true,
+      returnedAt: true,
+      status: true,
+    },
+  });
+
+  const clash = findRentalOverlap({ startAt, endAt }, existing);
+  if (clash) {
+    return {
+      ok: false,
+      message: `That vehicle is already on rental ${clash.reference} for part of this period`,
+      rentalReference: clash.reference,
+    };
+  }
+
+  await withAudit(
+    'Vehicle',
+    'update',
+    async (tx) => {
+      const before = await tx.vehicleRental.findUniqueOrThrow({
+        where: { id: rentalId },
+      });
+      const after = await tx.vehicleRental.update({
+        where: { id: rentalId },
+        data: {
+          vehicleId: input.vehicleId,
+          renterType: input.renterType,
+          driverId: input.renterType === 'DRIVER' ? input.driverId || null : null,
+          // A one-off hirer saved as an account at booking keeps that link.
+          // Clearing it on every edit would strand the customer record the
+          // "save them as an account" tick was there to create.
+          accountId:
+            input.renterType === 'ACCOUNT'
+              ? input.accountId || null
+              : input.renterType === 'EXTERNAL'
+                ? rental.accountId
+                : null,
+          hirerName: input.hirerName || null,
+          hirerAddress: input.hirerAddress || null,
+          hirerPhone: input.hirerPhone || null,
+          hirerLicenceNumber: input.hirerLicenceNumber || null,
+          startAt,
+          endAt,
+          rateType: input.rateType,
+          ratePence: input.ratePence,
+          depositPence: input.depositPence,
+          mileageOut: input.mileageOut,
+          fuelOutPct: input.fuelOutPct,
+          mileageAllowancePerDay: input.mileageAllowancePerDay,
+          excessMileagePence: input.excessMileagePence,
+          advancePaymentPence: input.advancePaymentPence,
+          minimumTermDays: input.minimumTermDays,
+          insuranceExcessPence: input.insuranceExcessPence,
+          congestionChargePence: input.congestionChargePence,
+          smokingChargePence: input.smokingChargePence,
+          panelRepairPence: input.panelRepairPence,
+          wheelScratchPence: input.wheelScratchPence,
+          depositReturnDays: input.depositReturnDays,
+          ownerSignatory: input.ownerSignatory || null,
+          notes: emptyToNull(input.notes),
+        },
+      });
+
+      return { entityId: after.vehicleId, before, after, result: null };
+    },
+    context,
+  );
+
+  return { ok: true, id: rentalId };
+}
+
+/**
+ * Call a hire off.
+ *
+ * The record stays and the car is freed. This is what a hire that was agreed
+ * and then did not happen actually is — and unlike deleting it, the money
+ * already taken against it is still on the books to be refunded rather than
+ * quietly gone.
+ */
+export async function cancelRental(
+  rentalId: string,
+  context: AuditContext,
+): Promise<RentalRefusal> {
+  const rental = await prisma.vehicleRental.findUnique({
+    where: { id: rentalId },
+    select: { id: true, vehicleId: true, status: true },
+  });
+  if (!rental) return { ok: false, message: 'That hire no longer exists' };
+  if (rental.status === 'CANCELLED') {
+    return { ok: false, message: 'That hire is already cancelled' };
+  }
+  if (rental.status === 'RETURNED') {
+    return {
+      ok: false,
+      // The car went out and came back. Cancelling it would claim it never
+      // happened while the mileage on the car says otherwise.
+      message:
+        'That car has already been booked back in, so the hire happened. Correct its details instead of cancelling it.',
+    };
+  }
+
+  await withAudit(
+    'Vehicle',
+    'update',
+    async (tx) => {
+      const before = await tx.vehicleRental.findUniqueOrThrow({
+        where: { id: rentalId },
+      });
+      const after = await tx.vehicleRental.update({
+        where: { id: rentalId },
+        data: { status: 'CANCELLED' },
+      });
+      return { entityId: rental.vehicleId, before, after, result: null };
+    },
+    context,
+  );
+
+  return { ok: true };
+}
+
+/**
+ * Remove a hire booked by mistake.
+ *
+ * A soft delete: the row stays, filtered out of every read — see
+ * `SOFT_DELETE_MODELS` in `lib/prisma.ts`. There is no hard delete in this
+ * application, and a hire is exactly the case that shows why. The car's
+ * history is the thing somebody reconstructs later ("where was it in March,
+ * and who had it"), and a row that is genuinely gone cannot answer.
+ *
+ * Refused once money has changed hands. A payment recorded against a hire
+ * happened: it is on a bank statement, and making the hire disappear would
+ * leave the receipt with nothing to reconcile against. Cancelling is the
+ * honest version of that, so the refusal says so.
+ */
+export async function deleteRental(
+  rentalId: string,
+  context: AuditContext,
+): Promise<RentalRefusal> {
+  const rental = await prisma.vehicleRental.findUnique({
+    where: { id: rentalId },
+    select: {
+      id: true,
+      vehicleId: true,
+      reference: true,
+      status: true,
+      payments: { select: { id: true }, take: 1 },
+    },
+  });
+  if (!rental) return { ok: false, message: 'That hire no longer exists' };
+
+  const editable = await rentalEditability(rentalId);
+  if (!editable.ok) return editable;
+
+  if (rental.payments.length > 0) {
+    return {
+      ok: false,
+      message:
+        'Money has been received against this hire, so deleting it would leave the payment with nothing to reconcile against. Cancel it instead — the record stays and the car is freed.',
+    };
+  }
+
+  await withAudit(
+    'Vehicle',
+    'delete',
+    async (tx) => {
+      const before = await tx.vehicleRental.findUniqueOrThrow({
+        where: { id: rentalId },
+      });
+      // `deletedAt` written directly, as every other archive in this codebase
+      // does. The extension's `delete` rewrite runs against the base client,
+      // so calling `tx.delete` here would land the write outside this
+      // transaction and survive a rollback.
+      const after = await tx.vehicleRental.update({
+        where: { id: rentalId },
+        data: { deletedAt: new Date() },
+      });
+      return { entityId: rental.vehicleId, before, after, result: null };
+    },
+    context,
+  );
+
+  return { ok: true };
+}
+
 export const returnSchema = z.object({
   returnedAt: z.string().trim().min(1, 'Enter when it came back'),
   mileageIn: optionalInt,
@@ -316,7 +570,7 @@ export async function returnRental(
     return { ok: false, message: 'That rental was cancelled' };
   }
 
-  const returnedAt = new Date(input.returnedAt);
+  const returnedAt = toUTC(input.returnedAt);
   if (returnedAt.getTime() < rental.startAt.getTime()) {
     return { ok: false, message: 'A car cannot come back before it went out' };
   }

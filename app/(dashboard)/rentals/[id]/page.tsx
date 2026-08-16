@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { FileText } from 'lucide-react';
+import { FileText, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { renterName } from '@/lib/rentals';
 import { PageHeader } from '@/components/page-header';
@@ -18,6 +18,7 @@ import { formatDate, formatDateTime } from '@/lib/dates';
 import { formatGBP } from '@/lib/money';
 import { pageRequireCapability } from '@/lib/page-guards';
 import { getRental } from '@/lib/rental-store';
+import { prisma } from '@/lib/prisma';
 import {
   fuelDifferencePct,
   mileageDriven,
@@ -25,7 +26,12 @@ import {
   RENTAL_STATUS_LABELS,
 } from '@/lib/rentals';
 import { filterValue, type SearchParams } from '@/lib/list-params';
-import { PaymentForm, ReturnForm } from './forms';
+import {
+  CancelRentalForm,
+  DeleteRentalForm,
+  PaymentForm,
+  ReturnForm,
+} from './forms';
 
 export const metadata = { title: 'Rental' };
 
@@ -44,7 +50,19 @@ export default async function RentalDetailPage({
   if (!rental) notFound();
 
   const mayEdit = can(user, 'editVehicles');
+  const mayDelete = can(user, 'deleteRecords');
   const mayTakeMoney = can(user, 'editJobFinances');
+
+  // Whether this hire has been billed. Once it has, the invoice is a figure
+  // somebody else is holding, and the remedy is a credit note rather than an
+  // edit here — the same rule `rentalEditability` enforces on the server.
+  const billedLine = await prisma.invoiceLine.findFirst({
+    where: { rentalId: rental.id, invoice: { status: { not: 'CANCELLED' } } },
+    select: { invoiceId: true, invoice: { select: { number: true } } },
+  });
+  const billed = billedLine
+    ? { invoiceId: billedLine.invoiceId, number: billedLine.invoice.number }
+    : null;
   const { balance } = rental;
   const miles = mileageDriven(rental.mileageOut, rental.mileageIn);
   const fuel = fuelDifferencePct(rental.fuelOutPct, rental.fuelInPct);
@@ -71,6 +89,14 @@ export default async function RentalDetailPage({
                 Preview
               </a>
             </Button>
+            {mayEdit ? (
+              <Button asChild variant="outline">
+                <Link href={`/rentals/${rental.id}/edit`}>
+                  <Pencil className="mr-1 size-4" aria-hidden />
+                  Edit
+                </Link>
+              </Button>
+            ) : null}
           </div>
         }
       />
@@ -276,6 +302,49 @@ export default async function RentalDetailPage({
               </CardHeader>
               <CardContent>
                 <PaymentForm rentalId={rental.id} />
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {mayEdit ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>This hire</CardTitle>
+                <CardDescription>
+                  {billed
+                    ? 'On an invoice, so it can no longer be changed here.'
+                    : 'Calling it off keeps the record and frees the car. Deleting is for one booked by mistake.'}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {billed ? (
+                  <p className="text-sm text-muted-foreground">
+                    Credit invoice{' '}
+                    <Link
+                      href={`/invoices/${billed.invoiceId}`}
+                      className="font-medium underline"
+                    >
+                      {billed.number}
+                    </Link>{' '}
+                    first — changing the hire underneath it would leave the two
+                    disagreeing.
+                  </p>
+                ) : (
+                  <>
+                    {rental.status !== 'CANCELLED' && rental.status !== 'RETURNED' ? (
+                      <CancelRentalForm rentalId={rental.id} />
+                    ) : null}
+                    {/* Administrators only — see the capability check in
+                        `app/api/rentals/[id]/actions`. */}
+                    {mayDelete ? (
+                      <DeleteRentalForm
+                        rentalId={rental.id}
+                        reference={rental.reference}
+                        hasPayments={rental.payments.length > 0}
+                      />
+                    ) : null}
+                  </>
+                )}
               </CardContent>
             </Card>
           ) : null}
