@@ -4,20 +4,26 @@ import type { LocaleConfig } from './locale';
 import { formatMoney } from './money';
 
 /**
- * The hire contract, as one document.
+ * The hire agreement.
  *
- * The operator's paperwork is three separate files — a contract of hire, an
- * acceptance of vehicle liability, and terms and conditions — signed together
- * and sent together. They are one PDF here because that is what actually goes
- * to a renter: three attachments is three chances to sign two of them.
+ * It replaces three separate files the operator used to send — a contract of
+ * hire, an acceptance of vehicle liability, and terms and conditions — and it
+ * is deliberately not those three stapled together. One title, one run of
+ * numbered clauses, and **one place to sign at the end**. A renter asked to
+ * sign three times signs twice and posts back a document that is missing a
+ * page; a single execution block covering the whole agreement cannot be
+ * half-completed.
  *
  * A pure HTML builder, like the invoice and the driver statement, so the
  * wording and the arithmetic can be tested without starting a browser.
  *
- * Everything customer-specific arrives in `ContractData`. There is no WeLux
- * in this file: the charges are what the operator typed on the rental, and
- * the company details come from branding. A second customer with different
- * excess fees gets their own contract from the same template.
+ * Everything customer-specific arrives in `ContractData`. No operator is
+ * named here: the charges are what was typed on the rental and the company
+ * comes from branding, so the next install does not send out this one's terms.
+ *
+ * The page footer is Chromium's, set in `lib/pdf.ts`, not an element in this
+ * document. A `position: fixed` footer reserves no space and body text runs
+ * underneath it.
  */
 
 export interface ContractParty {
@@ -69,6 +75,15 @@ export interface ContractData {
   ownerSignatory: string | null;
 }
 
+/**
+ * A blank to be filled by hand.
+ *
+ * The paperwork this replaces left several values as "__" for somebody to
+ * complete with a pen. Anything the system knows is printed; anything it does
+ * not still gets a line, rather than a gap that reads as "none".
+ */
+const RULE = '<span class="rule"></span>';
+
 const money = (pence: number | null | undefined, locale: LocaleConfig): string =>
   pence == null ? '—' : formatMoney(pence, locale);
 
@@ -86,19 +101,13 @@ const agreed = (pence: number | null | undefined, locale: LocaleConfig): string 
 const orDash = (value: string | number | null | undefined): string =>
   value === null || value === undefined || value === '' ? '—' : escapeHtml(String(value));
 
-/**
- * A blank to be filled by hand.
- *
- * The samples this replaces left several values as "__" in the printed terms
- * — the term length, the minimum period — and an operator filled them in with
- * a pen. Anything the system knows is printed; anything it does not still
- * gets a rule to write on, rather than a silent gap that reads as "none".
- */
-const RULE = '<span class="rule"></span>';
+const field = (label: string, value: string) =>
+  `<div class="field"><dt>${escapeHtml(label)}</dt><dd>${value}</dd></div>`;
 
-function periodRow(label: string, value: string): string {
-  return `<tr><th scope="row">${escapeHtml(label)}</th><td>${value}</td></tr>`;
-}
+const row = (label: string, value: string) =>
+  `<tr><th scope="row">${escapeHtml(label)}</th><td>${value}</td></tr>`;
+
+const clause = (text: string) => `<li>${text}</li>`;
 
 export function renderRentalContract(
   data: ContractData,
@@ -109,275 +118,269 @@ export function renderRentalContract(
 
   const company = escapeHtml(branding.tradingName);
   const days = (n: number | null) => (n == null ? RULE : `${n}`);
+  const address = escapeHtml((branding.addressLines ?? '').replace(/\n+/g, ', '));
 
-  // Section 1 — the contract of hire.
-  const hireRows = [
-    periodRow('A. Fixed period of hire beginning on the commencement date', `${terms.termDays} days`),
-    periodRow('B. Total number of rentals', `${terms.termDays}`),
-    periodRow(
-      `C. Amount of each ${terms.rateUnit} rental (inc. tax)`,
-      money(terms.ratePence, locale),
-    ),
-    periodRow(
-      'D. Number of rentals in advance',
+  const charges = [
+    row('Fixed period of hire, from the commencement date', `${terms.termDays} days`),
+    row('Total number of rentals', `${terms.termDays}`),
+    row(`Amount of each ${terms.rateUnit} rental, including tax`, money(terms.ratePence, locale)),
+    row(
+      'Number of rentals payable in advance',
       terms.advanceRentals == null ? RULE : `${terms.advanceRentals}`,
     ),
-    periodRow('E. Total advance payment', money(terms.advancePaymentPence, locale)),
-    periodRow(
-      'F. Daily mileage allowance',
-      terms.mileageAllowancePerDay == null
-        ? RULE
-        : `${terms.mileageAllowancePerDay} miles`,
+    row('Total advance payment', money(terms.advancePaymentPence, locale)),
+    row('Deposit', money(terms.depositPence, locale)),
+    row(
+      'Daily mileage allowance',
+      terms.mileageAllowancePerDay == null ? RULE : `${terms.mileageAllowancePerDay} miles`,
     ),
-    periodRow(
-      'G. Excess mileage charge per mile',
-      agreed(terms.excessMileagePence, locale),
-    ),
-    periodRow('Deposit', money(terms.depositPence, locale)),
+    row('Excess mileage charge, per mile', agreed(terms.excessMileagePence, locale)),
   ].join('');
 
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Hire agreement ${escapeHtml(data.reference)}</title>
+<title>Vehicle hire agreement ${escapeHtml(data.reference)}</title>
 <style>
-  @page { size: A4; margin: 18mm 16mm 20mm; }
+  /* Bottom margin is Chromium's, reserved for the running footer. */
+  @page { size: A4; margin: 16mm 15mm 0; }
   * { box-sizing: border-box; }
   body {
     font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    font-size: 10.5pt; line-height: 1.45; color: #111; margin: 0;
+    font-size: 10pt; line-height: 1.5; color: #1a1a1a; margin: 0;
+    counter-reset: section;
   }
-  header { display: flex; justify-content: space-between; align-items: flex-start;
-    gap: 16mm; border-bottom: 2px solid #111; padding-bottom: 6mm; margin-bottom: 8mm; }
-  .brand { font-size: 13pt; font-weight: 700; letter-spacing: .02em; }
-  .company { font-size: 8.5pt; color: #555; line-height: 1.4; }
-  img.logo { max-height: 18mm; max-width: 55mm; object-fit: contain; }
-  h1 { font-size: 15pt; margin: 0 0 1mm; letter-spacing: .04em; text-transform: uppercase; }
-  h2 { font-size: 11pt; margin: 8mm 0 3mm; text-transform: uppercase; letter-spacing: .06em;
-    border-bottom: 1px solid #bbb; padding-bottom: 1.5mm; }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; vertical-align: top; padding: 1.6mm 2mm; }
-  th[scope="row"] { font-weight: 500; width: 62%; color: #333; }
-  tbody tr:nth-child(odd) { background: #f6f6f6; }
-  td { font-variant-numeric: tabular-nums; }
-  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 0 8mm; }
-  .field { padding: 1.6mm 0; border-bottom: 1px solid #e2e2e2; }
-  .field .label { font-size: 8pt; text-transform: uppercase; letter-spacing: .05em; color: #666; }
-  .field .value { font-weight: 500; }
-  .rule { display: inline-block; min-width: 22mm; border-bottom: 1px solid #666; }
-  ol, ul { margin: 0 0 0 5mm; padding: 0; }
-  li { margin: 0 0 1.8mm; }
-  .page-break { break-before: page; }
-  .sign { display: grid; grid-template-columns: 1fr 1fr; gap: 10mm; margin-top: 10mm; }
-  .sign .box { border-top: 1px solid #111; padding-top: 2mm; }
-  .sign .who { font-size: 8pt; text-transform: uppercase; letter-spacing: .05em; color: #666; }
-  .sign .line { margin-top: 9mm; border-bottom: 1px solid #666; }
-  .sign .cap { font-size: 8pt; color: #666; margin-top: 1.5mm; }
-  footer { position: fixed; bottom: 0; left: 0; right: 0; font-size: 7.5pt;
-    color: #777; border-top: 1px solid #ddd; padding-top: 2mm; }
+
+  .masthead {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    gap: 12mm; padding-bottom: 4mm; border-bottom: 2.5pt solid #1a1a1a;
+  }
+  .masthead .who { font-size: 12pt; font-weight: 700; letter-spacing: .01em; }
+  .masthead .meta { font-size: 8pt; color: #666; line-height: 1.5; text-align: right; }
+  img.logo { max-height: 16mm; max-width: 50mm; object-fit: contain; }
+
+  .title { margin: 7mm 0 1mm; font-size: 16pt; font-weight: 700;
+    letter-spacing: .06em; text-transform: uppercase; }
+  .between { color: #555; margin: 0 0 6mm; font-size: 9.5pt; }
+
+  h2 {
+    font-size: 10pt; margin: 7mm 0 2.5mm; text-transform: uppercase;
+    letter-spacing: .08em; color: #1a1a1a;
+    /* Numbered by the stylesheet, so inserting a section never renumbers by
+       hand — and the run is continuous, which is what makes it read as one
+       agreement rather than three documents stapled together. */
+    counter-increment: section; counter-reset: clause;
+    border-bottom: .75pt solid #d4d4d4; padding-bottom: 1.5mm;
+    break-after: avoid; page-break-after: avoid;
+  }
+  h2::before { content: counter(section) ". "; color: #666; }
+
+  dl.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 8mm; margin: 0; }
+  .field { padding: 1.8mm 0; border-bottom: .5pt solid #e6e6e6; break-inside: avoid; }
+  .field dt { font-size: 7.5pt; text-transform: uppercase; letter-spacing: .06em; color: #777; }
+  .field dd { margin: .6mm 0 0; font-weight: 500; }
+
+  table { width: 100%; border-collapse: collapse; margin-top: 1mm; }
+  th, td { text-align: left; vertical-align: top; padding: 1.7mm 2.5mm; }
+  th[scope="row"] { font-weight: 400; width: 64%; color: #333; }
+  td { font-variant-numeric: tabular-nums; font-weight: 500; white-space: nowrap; }
+  tbody tr { border-bottom: .5pt solid #ececec; break-inside: avoid; }
+
+  ol.clauses { list-style: none; margin: 0; padding: 0; }
+  /* The number is a flex item, not an absolutely-positioned marker: an
+     out-of-flow marker can be left behind at the foot of a page while its
+     clause moves to the next, which printed "7.1" alone above the footer. */
+  ol.clauses > li {
+    counter-increment: clause; margin: 0 0 2.2mm;
+    display: flex; gap: 4mm; break-inside: avoid; page-break-inside: avoid;
+  }
+  ol.clauses > li::before {
+    content: counter(section) "." counter(clause);
+    flex: 0 0 9mm; color: #666; font-variant-numeric: tabular-nums;
+  }
+
+  .rule { display: inline-block; min-width: 24mm; border-bottom: .75pt solid #555;
+    vertical-align: baseline; }
+
+  /* One execution block, for the whole agreement. */
+  .execution { break-inside: avoid; margin-top: 8mm; padding-top: 4mm;
+    border-top: 2.5pt solid #1a1a1a; }
+  .declaration { font-size: 9.5pt; margin: 0 0 6mm; }
+  .signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 12mm; }
+  .party { break-inside: avoid; }
+  .party .role { font-size: 7.5pt; text-transform: uppercase; letter-spacing: .06em;
+    color: #777; margin-bottom: 1mm; }
+  .party .name { font-weight: 600; min-height: 5mm; }
+  .slot { margin-top: 7mm; }
+  .slot .line { border-bottom: .75pt solid #555; height: 8mm; }
+  .slot .cap { font-size: 7.5pt; color: #777; margin-top: 1mm; }
 </style>
 </head>
 <body>
 
-<header>
+<div class="masthead">
   <div>
-    <h1>Contract hire agreement</h1>
-    <div class="company">Agreement ${escapeHtml(data.reference)} · ${escapeHtml(data.issuedOn)}</div>
+    ${options.logoSrc
+      ? `<img class="logo" src="${escapeHtml(options.logoSrc)}" alt="${company}">`
+      : `<div class="who">${company}</div>`}
+    ${address ? `<div class="meta" style="text-align:left">${address}</div>` : ''}
   </div>
-  <div style="text-align:right">
-    ${options.logoSrc ? `<img class="logo" src="${escapeHtml(options.logoSrc)}" alt="">` : `<div class="brand">${company}</div>`}
-    <div class="company">${escapeHtml((branding.addressLines ?? '').replace(/\n+/g, ', '))}</div>
-  </div>
-</header>
-
-<h2>Hirer</h2>
-<div class="pair">
-  <div class="field"><div class="label">Hirer</div><div class="value">${orDash(hirer.name)}</div></div>
-  <div class="field"><div class="label">Contact number</div><div class="value">${orDash(hirer.phone)}</div></div>
-  <div class="field"><div class="label">Address</div><div class="value">${orDash(hirer.address)}</div></div>
-  <div class="field"><div class="label">Driving licence number</div><div class="value">${orDash(hirer.licenceNumber)}</div></div>
-</div>
-
-<h2>Vehicle</h2>
-<div class="pair">
-  <div class="field"><div class="label">Make and model</div><div class="value">${orDash(vehicle.makeModel)}</div></div>
-  <div class="field"><div class="label">Registration number</div><div class="value">${orDash(vehicle.registration)}</div></div>
-  <div class="field"><div class="label">Registration date</div><div class="value">${orDash(vehicle.firstRegisteredOn)}</div></div>
-  <div class="field"><div class="label">Chassis number</div><div class="value">${orDash(vehicle.chassisNumber)}</div></div>
-  <div class="field"><div class="label">Mileage at handover</div><div class="value">${vehicle.mileageOut == null ? '—' : `${vehicle.mileageOut.toLocaleString('en-GB')} miles`}</div></div>
-  <div class="field"><div class="label">Vehicle value</div><div class="value">${money(vehicle.valuePence, locale)}</div></div>
-</div>
-
-<h2>Contract details</h2>
-<div class="pair">
-  <div class="field"><div class="label">Start date and time</div><div class="value">${orDash(data.startAt)}</div></div>
-  <div class="field"><div class="label">Expiry date and time</div><div class="value">${orDash(data.endAt)}</div></div>
-</div>
-<table><tbody>${hireRows}</tbody></table>
-
-<div class="sign">
-  <div class="box">
-    <div class="who">The owner</div>
-    <div>${orDash(data.ownerSignatory ?? company)}</div>
-    <div class="line"></div><div class="cap">Signature</div>
-    <div class="line"></div><div class="cap">Date</div>
-  </div>
-  <div class="box">
-    <div class="who">The hirer</div>
-    <div>${orDash(hirer.name)}</div>
-    <div class="line"></div><div class="cap">Signature</div>
-    <div class="line"></div><div class="cap">Date</div>
+  <div class="meta">
+    Agreement ${escapeHtml(data.reference)}<br>
+    ${escapeHtml(data.issuedOn)}
+    ${branding.companyNumber ? `<br>Company registration ${escapeHtml(branding.companyNumber)}` : ''}
   </div>
 </div>
 
-<section class="page-break">
-  <h1>Confirmation and acceptance of vehicle liability</h1>
-  <div class="pair" style="margin-top:5mm">
-    <div class="field"><div class="label">Name</div><div class="value">${orDash(hirer.name)}</div></div>
-    <div class="field"><div class="label">Date</div><div class="value">${orDash(data.issuedOn)}</div></div>
-    <div class="field"><div class="label">Address</div><div class="value">${orDash(hirer.address)}</div></div>
-    <div class="field"><div class="label">Vehicle registration</div><div class="value">${orDash(vehicle.registration)}</div></div>
-    <div class="field"><div class="label">Make and model</div><div class="value">${orDash(vehicle.makeModel)}</div></div>
-    <div class="field"><div class="label">Vehicle value</div><div class="value">${money(vehicle.valuePence, locale)}</div></div>
-    <div class="field"><div class="label">Insurance company</div><div class="value">${orDash(vehicle.insurerName)}</div></div>
-    <div class="field"><div class="label">Policy number</div><div class="value">${orDash(vehicle.policyNumber)}</div></div>
-  </div>
+<div class="title">Vehicle hire agreement</div>
+<p class="between">
+  Made between <strong>${company}</strong> (the Owner) and
+  <strong>${orDash(hirer.name)}</strong> (the Hirer), on the terms set out below.
+</p>
 
-  <ol style="margin-top:5mm">
-    <li>I confirm that I hold a valid driving licence, have no more than six penalty
-      points, have never been refused insurance, have never been convicted of fraud or
-      any other criminal offence, and have never been convicted of drink or drug driving.</li>
-    <li>In the event of any insurance claim — accident, damage, fire, theft or any other
-      damage to the vehicle — which results in a refusal of liability or payment by the
-      insurer for a reason that holds the driver responsible, such as false or incomplete
-      information, I accept full responsibility for the full cost of the vehicle.</li>
-    <li>In the event of a fault accident, an excess fee of
-      ${agreed(terms.insuranceExcessPence, locale)} is payable by the hirer in full.</li>
-    <li>In the event of any fault or non-fault claim that takes the vehicle off the road,
-      I agree to pay the full ${escapeHtml(terms.rateUnit)} rent until the case is resolved
-      and the vehicle has been returned in roadworthy condition.</li>
-    <li>I confirm that I will keep the vehicle and its keys safe and will not leave it
-      unattended. If the vehicle is stolen while switched on and unattended, and the
-      insurer refuses liability as a result, the hirer is liable for the cost.</li>
-  </ol>
+<h2>The Hirer</h2>
+<dl class="grid">
+  ${field('Name', orDash(hirer.name))}
+  ${field('Contact number', orDash(hirer.phone))}
+  ${field('Address', orDash(hirer.address))}
+  ${field('Driving licence number', orDash(hirer.licenceNumber))}
+</dl>
 
-  <div class="sign">
-    <div class="box">
-      <div class="who">Hirer</div>
-      <div>${orDash(hirer.name)}</div>
-      <div class="line"></div><div class="cap">Signature</div>
-      <div class="line"></div><div class="cap">Date</div>
+<h2>The vehicle</h2>
+<dl class="grid">
+  ${field('Make and model', orDash(vehicle.makeModel))}
+  ${field('Registration number', orDash(vehicle.registration))}
+  ${field('Date first registered', orDash(vehicle.firstRegisteredOn))}
+  ${field('Chassis number', orDash(vehicle.chassisNumber))}
+  ${field('Mileage at handover', vehicle.mileageOut == null
+    ? '—'
+    : `${vehicle.mileageOut.toLocaleString('en-GB')} miles`)}
+  ${field('Agreed value', money(vehicle.valuePence, locale))}
+  ${field('Insurer', orDash(vehicle.insurerName))}
+  ${field('Policy number', orDash(vehicle.policyNumber))}
+</dl>
+
+<h2>Period and charges</h2>
+<dl class="grid">
+  ${field('Hire begins', orDash(data.startAt))}
+  ${field('Hire ends', orDash(data.endAt))}
+</dl>
+<table><tbody>${charges}</tbody></table>
+
+<h2>Insurance and liability</h2>
+<ol class="clauses">
+  ${clause(`The Hirer confirms that they hold a valid driving licence, have no more than
+    six penalty points, have never been refused insurance, have never been convicted of
+    fraud or any other criminal offence, and have never been convicted of drink or drug
+    driving.`)}
+  ${clause(`Where any claim — accident, damage, fire, theft or otherwise — results in the
+    insurer refusing liability or payment for a reason that holds the driver responsible,
+    including false or incomplete information, the Hirer accepts full responsibility for
+    the full cost of the vehicle.`)}
+  ${clause(`In the event of a fault accident, an excess fee of
+    ${agreed(terms.insuranceExcessPence, locale)} is payable by the Hirer in full, within
+    seven days of the claim or accident.`)}
+  ${clause(`Where any fault or non-fault claim takes the vehicle off the road, the Hirer
+    agrees to pay the full ${escapeHtml(terms.rateUnit)} rent until the case is resolved
+    and the vehicle has been returned in roadworthy condition.`)}
+  ${clause(`The Hirer will keep the vehicle and its keys safe and will not leave either
+    unattended. Where the vehicle is stolen while switched on or unattended and the
+    insurer refuses liability as a result, the Hirer is liable for the cost.`)}
+</ol>
+
+<h2>Use of the vehicle</h2>
+<ol class="clauses">
+  ${clause(`Only the Hirer is authorised to drive this vehicle. No one else may drive it,
+    and no one else is covered by the insurance.`)}
+  ${clause(`The Owner may terminate this agreement at any time.`)}
+  ${clause(`The Owner advises against leaving the vehicle running while loading or
+    unloading luggage and passengers.`)}
+  ${clause(`In a hijack situation the Hirer should turn the vehicle off; the immobiliser
+    prevents it from restarting without the code.`)}
+  ${clause(`Where the Hirer intends to take the vehicle outside the agreed area, they must
+    inform the Owner in advance. Otherwise the vehicle may be immobilised automatically
+    and a call-out charge will be required to release it.`)}
+</ol>
+
+<h2>Rent and deposit</h2>
+<ol class="clauses">
+  ${clause(`The contract term is ${days(terms.termDays)} days, with a minimum of
+    ${days(terms.minimumTermDays)} days. The Hirer may cancel at any time, but where the
+    vehicle is returned before the end of the minimum period the full rent for that
+    period remains payable.`)}
+  ${clause(`Rent is payable in full on the agreed day. Failure to pay any outstanding
+    amount within 48 hours of the due date will result in repossession of the vehicle and
+    instruction of a debt recovery agent, with interest of 10% per week and an agency
+    fee.`)}
+  ${clause(`One day's notice must be given before return, and the vehicle must be
+    presented to the Owner for inspection.`)}
+  ${clause(`Any outstanding balance must be cleared before the vehicle is returned;
+    otherwise it will not be accepted back from the Hirer's possession.`)}
+  ${clause(`The deposit of ${agreed(terms.depositPence, locale)} is returned
+    ${days(terms.depositReturnDays)} days after the vehicle is received.`)}
+</ol>
+
+<h2>Charges and penalties</h2>
+<ol class="clauses">
+  ${clause(`The Hirer is responsible for any penalties or tickets issued during the
+    contract, and may not appeal a fine or ticket unless authorised to do so.`)}
+  ${clause(`The Owner may disclose the Hirer's details to third parties such as private
+    parking operators and law enforcement agencies.`)}
+  ${clause(`The vehicle is registered for automatic congestion charge payment at
+    ${agreed(terms.congestionChargePence, locale)} per day. Charges are notified weekly.
+    Where the charging authority applies a charge late, it will appear on a subsequent
+    invoice and the Hirer will be informed.`)}
+</ol>
+
+<h2>Maintenance, damage and breakdown</h2>
+<ol class="clauses">
+  ${clause(`Neither the Hirer nor passengers may smoke or vape in the vehicle. Any smoke
+    or vape smell will incur a detailing charge of
+    ${agreed(terms.smokingChargePence, locale)}.`)}
+  ${clause(`A minor wheel scratch will be charged at
+    ${agreed(terms.wheelScratchPence, locale)}. Multiple scratches will be charged at the
+    full wheel refurbishment cost.`)}
+  ${clause(`A minor scratch will be charged at ${agreed(terms.panelRepairPence, locale)}
+    per panel. Larger damage, and any other damage to the exterior or interior, will be
+    charged at the full cost of repair or replacement. A punctured tyre that cannot be
+    repaired will be charged at the cost of a replacement of the same brand.`)}
+  ${clause(`The Hirer must report any claim within 24 hours. Failure to do so may cause
+    the insurer to refuse the claim, and any warning light must be reported immediately —
+    continuing to drive with one showing makes the Hirer liable for any resulting
+    mechanical or electrical damage.`)}
+  ${clause(`The vehicle is maintained by the Owner, but it is the Hirer's duty to look
+    after it and to check engine oil, brake fluid, coolant, tyre pressures and bulbs
+    regularly.`)}
+  ${clause(`The Hirer must bring the vehicle to the Owner's designated garage for repairs,
+    licensing appointments, testing or any other appointment at the agreed time. Failure
+    to attend may incur a cost payable by the Hirer in full.`)}
+</ol>
+
+<!-- One block, covering everything above, so the agreement cannot come back
+     signed in two places out of three. -->
+<div class="execution">
+  <p class="declaration">
+    The Hirer confirms that they have read and understood this agreement in full,
+    including the insurance and liability terms, that it was completed before signature,
+    and that they have received a copy.
+  </p>
+  <div class="signatures">
+    <div class="party">
+      <div class="role">Signed by the Hirer</div>
+      <div class="name">${orDash(hirer.name)}</div>
+      <div class="slot"><div class="line"></div><div class="cap">Signature</div></div>
+      <div class="slot"><div class="line"></div><div class="cap">Date</div></div>
     </div>
-    <div class="box">
-      <div class="who">For ${company}</div>
-      <div>${orDash(data.ownerSignatory ?? company)}</div>
-      <div class="line"></div><div class="cap">Signature</div>
-      <div class="line"></div><div class="cap">Date</div>
+    <div class="party">
+      <div class="role">For and on behalf of ${company}</div>
+      <div class="name">${data.ownerSignatory ? escapeHtml(data.ownerSignatory) : '&nbsp;'}</div>
+      <div class="slot"><div class="line"></div><div class="cap">Signature</div></div>
+      <div class="slot"><div class="line"></div><div class="cap">Date</div></div>
     </div>
   </div>
-</section>
+</div>
 
-<section class="page-break">
-  <h1>Terms and conditions</h1>
-  <div class="company" style="margin-bottom:4mm">
-    ${escapeHtml(vehicle.makeModel)} · ${escapeHtml(vehicle.registration)} · ${escapeHtml(data.issuedOn)}
-  </div>
-
-  <h2>Acceptance</h2>
-  <ul>
-    <li>I have read and understood these terms and conditions and agree to follow them.</li>
-    <li>I acknowledge having received a copy of this agreement.</li>
-    <li>I confirm that this agreement was completed before my signature.</li>
-    <li>${company} reserves the right to terminate the contract at any time.</li>
-    <li>Only the hirer is authorised to drive this vehicle. No one else may drive it, and
-      no one else is covered by the insurance.</li>
-    <li>The insurance claim excess fee is ${agreed(terms.insuranceExcessPence, locale)}.</li>
-    <li>In the event of a fault claim, ${agreed(terms.insuranceExcessPence, locale)} must be
-      paid within seven days of the claim or accident.</li>
-    <li>It is your responsibility to keep the vehicle keys safe and in your possession.
-      Keys left unattended may cause the insurer to refuse a theft claim.</li>
-    <li>We strongly advise against leaving the vehicle running while loading or unloading
-      luggage and passengers.</li>
-    <li>In a hijack situation, turn the vehicle off: the immobiliser prevents it from
-      restarting without the code.</li>
-    <li>If the hirer intends to take the vehicle outside the agreed area, they must inform
-      us immediately. Otherwise the vehicle may be immobilised automatically and a call-out
-      charge will be required to release it.</li>
-  </ul>
-
-  <h2>Rent and deposit</h2>
-  <ul>
-    <li>The contract term is ${days(terms.termDays)} days.</li>
-    <li>Rent must be paid in full on the agreed day. Failure to pay any outstanding amount
-      within 48 hours of the due date will result in repossession of the vehicle and
-      instruction of a debt recovery agent, with interest of 10% per week and an agency fee.</li>
-    <li>You may cancel at any time; however the minimum contract is
-      ${days(terms.minimumTermDays)} days. If the vehicle is returned before the end of that
-      period, the full rent for ${days(terms.minimumTermDays)} days remains payable.</li>
-    <li>One day's notice must be given, and the vehicle must be presented to ${company}
-      for inspection before it is returned.</li>
-    <li>Any outstanding balance must be cleared before the vehicle is returned; otherwise
-      it will not be accepted back from the hirer's possession.</li>
-    <li>The deposit of ${agreed(terms.depositPence, locale)} is returned
-      ${terms.depositReturnDays == null ? RULE : terms.depositReturnDays} days after the
-      vehicle is received.</li>
-  </ul>
-
-  <h2>Congestion charges and penalties</h2>
-  <ul>
-    <li>The hirer is responsible for any penalties or tickets issued during the contract.</li>
-    <li>The hirer may not appeal a fine or ticket unless authorised to do so.</li>
-    <li>${company} reserves the right to disclose the hirer's details to third parties such
-      as private parking operators and law enforcement agencies.</li>
-    <li>Our vehicles are registered for automatic congestion charge payment at
-      ${agreed(terms.congestionChargePence, locale)} per day. Charges are notified weekly.
-      Where the charging system applies a charge late, it will appear on a subsequent
-      invoice and you will be informed.</li>
-  </ul>
-
-  <h2>Maintenance, breakdowns and damage</h2>
-  <ul>
-    <li>Neither the driver nor passengers may smoke or vape in the vehicle. Any smoke or
-      vape smell will incur a detailing charge of ${agreed(terms.smokingChargePence, locale)}.</li>
-    <li>A minor wheel scratch will be charged at
-      ${agreed(terms.wheelScratchPence, locale)}. Multiple scratches will be charged at the
-      full wheel refurbishment cost.</li>
-    <li>A punctured tyre that cannot be repaired will be charged at the cost of a
-      replacement of the same brand.</li>
-    <li>Any minor scratch will be charged at ${agreed(terms.panelRepairPence, locale)} per
-      panel. Larger damage will be charged at the full panel repair cost.</li>
-    <li>Any other damage to the exterior or interior will be charged at the cost of repair
-      or replacement.</li>
-    <li>You must inform us of any claim within 24 hours. Failure to do so may cause our
-      insurer to refuse the claim.</li>
-    <li>The vehicle is maintained by ${company}, but it is the hirer's duty to look after
-      it and to check engine oil, brake fluid, coolant, tyre pressures and bulbs regularly.</li>
-    <li>The hirer must bring the vehicle to our designated garage for repairs, licensing
-      appointments, MOT or any other appointment at the agreed time. Failure to attend may
-      incur a cost payable by the hirer in full.</li>
-    <li>Any warning light must be reported to ${company} immediately. Continuing to drive
-      with a warning light showing will make the hirer liable for any resulting mechanical
-      or electrical damage.</li>
-  </ul>
-
-  <div class="sign">
-    <div class="box">
-      <div class="who">Hirer</div>
-      <div>${orDash(hirer.name)}</div>
-      <div class="line"></div><div class="cap">Signature</div>
-      <div class="line"></div><div class="cap">Date</div>
-    </div>
-    <div class="box">
-      <div class="who">For ${company}</div>
-      <div>${orDash(data.ownerSignatory ?? company)}</div>
-      <div class="line"></div><div class="cap">Signature</div>
-      <div class="line"></div><div class="cap">Date</div>
-    </div>
-  </div>
-</section>
-
-<footer>${company}${branding.companyNumber ? ` · Company registration ${escapeHtml(branding.companyNumber)}` : ''} · Agreement ${escapeHtml(data.reference)}</footer>
 </body>
 </html>`;
 }

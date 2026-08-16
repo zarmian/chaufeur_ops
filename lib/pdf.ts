@@ -23,6 +23,15 @@ export interface PdfOptions {
   /** Waits for images — the letterhead logo is fetched over the network. */
   timeoutMs?: number;
   landscape?: boolean;
+  /**
+   * A footer repeated on every page, with a page number.
+   *
+   * Chromium's own, rather than a `position: fixed` element in the document.
+   * A fixed footer is out of flow: it paints at the foot of every page and
+   * reserves no space, so body text runs underneath it. The only way to keep
+   * a band of the page clear is a real page margin, which is what this sets.
+   */
+  footerText?: string;
 }
 
 /**
@@ -117,6 +126,14 @@ function loadChromium(): Promise<typeof ChromiumType> {
   return chromiumPromise;
 }
 
+/** The footer template is HTML; a trading name with an ampersand must not break it. */
+function escapeForTemplate(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 export async function renderPdf(
   html: string,
   options: PdfOptions = {},
@@ -143,7 +160,21 @@ export async function renderPdf(
       format: 'a4',
       printBackground: true,
       landscape: options.landscape ?? false,
-      margin: { top: '0', right: '0', bottom: '0', left: '0' },
+      displayHeaderFooter: Boolean(options.footerText),
+      headerTemplate: '<span></span>',
+      footerTemplate: options.footerText
+        ? `<div style="width:100%;padding:0 16mm;font-size:7.5pt;color:#777;
+             font-family:ui-sans-serif,system-ui,sans-serif;display:flex;
+             justify-content:space-between;">
+             <span>${escapeForTemplate(options.footerText)}</span>
+             <span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
+           </div>`
+        : '<span></span>',
+      // Margins belong to the document's own `@page` rule unless a footer
+      // needs room reserved for it, which Chromium only honours from here.
+      margin: options.footerText
+        ? { top: '0', right: '0', bottom: '16mm', left: '0' }
+        : { top: '0', right: '0', bottom: '0', left: '0' },
     });
 
     return Buffer.from(pdf);

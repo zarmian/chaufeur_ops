@@ -1,4 +1,5 @@
 import { withErrorHandling } from '@/lib/api';
+import { getBranding } from '@/lib/branding-store';
 import { requireCapability } from '@/lib/authz';
 import { absoluteLogoSrc } from '@/lib/invoice-pdf';
 import { markContractGenerated, rentalContractHtml } from '@/lib/rental-contract-pdf';
@@ -36,7 +37,11 @@ export const GET = withErrorHandling(
       });
     }
 
-    const pdf = await tryRenderPdf(html);
+    // Chromium's own footer, which reserves a margin — a footer inside the
+    // document would have body text running underneath it.
+    const pdf = await tryRenderPdf(html, {
+      footerText: `Vehicle hire agreement · ${(await getBranding()).tradingName}`,
+    });
     if (!pdf.ok) {
       // The markup is the same either way, so a browser that cannot render a
       // PDF here can still print one.

@@ -62,14 +62,27 @@ const render = (data: ContractData) =>
   renderRentalContract(data, { branding: DEFAULT_BRANDING, locale: DEFAULT_LOCALE_CONFIG });
 
 describe('renderRentalContract', () => {
-  it('contains all three documents in one file', () => {
+  it('reads as one agreement, not three stapled together', () => {
     const html = render(contract());
-    expect(html).toContain('Contract hire agreement');
-    expect(html).toContain('Confirmation and acceptance of vehicle liability');
-    expect(html).toContain('Terms and conditions');
-    // Two breaks, so each part begins on its own sheet when printed. Counted
-    // by the attribute, not the class name — the stylesheet mentions it too.
-    expect(html.match(/class="page-break"/g)?.length).toBe(2);
+
+    // One title, and one only.
+    expect(html.match(/class="title"/g)?.length).toBe(1);
+
+    // The three old documents survive as sections of a continuous run, so
+    // nothing announces itself as a separate document part-way through.
+    expect(html).toContain('Insurance and liability');
+    expect(html).toContain('Rent and deposit');
+    expect(html).toContain('Maintenance, damage and breakdown');
+    // No forced break anywhere: a break before a section is what would make
+    // it read as a separate document. `break-*: avoid` is the opposite and is
+    // expected — it keeps headings with their clauses.
+    expect(html).not.toMatch(/break-before:\s*page/);
+    expect(html).not.toMatch(/page-break-before:\s*always/);
+
+    // Sections and clauses are numbered by the stylesheet, so the run stays
+    // continuous and inserting one never renumbers the rest by hand.
+    expect(html).toContain('counter-increment: section');
+    expect(html).toContain('counter(section) "." counter(clause)');
   });
 
   it('prints the money the operator set, in pounds', () => {
@@ -107,10 +120,26 @@ describe('renderRentalContract', () => {
     expect(html).toContain(DEFAULT_BRANDING.tradingName);
   });
 
-  it('gives both parties somewhere to sign, on every part', () => {
+  it('is signed once, at the end, by both parties', () => {
     const html = render(contract());
-    // Three documents, two signatures each.
-    expect(html.match(/class="cap">Signature/g)?.length).toBe(6);
+
+    // One execution block. A renter asked to sign three times signs twice,
+    // and the agreement comes back incomplete.
+    expect(html.match(/class="execution"/g)?.length).toBe(1);
+    expect(html.match(/class="cap">Signature/g)?.length).toBe(2);
+    expect(html).toContain('Signed by the Hirer');
+    expect(html).toContain('For and on behalf of');
+
+    // And the block says what the signature covers.
+    expect(html).toContain('read and understood this agreement in full');
+  });
+
+  it('carries no footer of its own', () => {
+    // A `position: fixed` footer reserves no space, so body text runs
+    // underneath it. The page footer is Chromium's, set in lib/pdf.ts.
+    const html = render(contract());
+    expect(html).not.toContain('<footer');
+    expect(html).not.toContain('position: fixed');
   });
 
   it('escapes a hirer name that contains markup', () => {

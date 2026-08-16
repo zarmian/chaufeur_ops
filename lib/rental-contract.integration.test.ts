@@ -198,8 +198,12 @@ describe.skipIf(!DATABASE_AVAILABLE)('hire agreement', () => {
     expect(excessClause).toContain('class="rule"');
     expect(excessClause).not.toContain('£0.00');
 
-    // Same for the mileage allowance and the per-mile charge.
-    expect(html).toMatch(/Daily mileage allowance<\/th><td><span class="rule">/);
-    expect(html).toMatch(/Excess mileage charge per mile<\/th><td><span class="rule">/);
+    // Same for the mileage allowance and the per-mile charge. Matched on the
+    // cell that follows each label rather than the label's exact punctuation,
+    // which is wording and free to change.
+    for (const label of ['Daily mileage allowance', 'Excess mileage charge']) {
+      const row = new RegExp(`${label}[^<]*</th><td>([^<]*<span class="rule")`);
+      expect(html, `${label} should print a line to write on`).toMatch(row);
+    }
   });
 });
