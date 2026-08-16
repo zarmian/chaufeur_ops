@@ -15,7 +15,14 @@ export async function createRentalAction(
     const { audit } = await actingUser('editVehicles');
     const parsed = rentalSchema.parse({
       vehicleId: formData.get('vehicleId') ?? '',
+      renterType: formData.get('renterType') ?? 'DRIVER',
       driverId: formData.get('driverId') ?? '',
+      accountId: formData.get('accountId') ?? '',
+      hirerName: formData.get('hirerName') ?? '',
+      hirerAddress: formData.get('hirerAddress') ?? '',
+      hirerPhone: formData.get('hirerPhone') ?? '',
+      hirerLicenceNumber: formData.get('hirerLicenceNumber') ?? '',
+      saveHirerAsAccount: formData.get('saveHirerAsAccount') === 'true',
       startAt: formData.get('startAt') ?? '',
       endAt: formData.get('endAt') ?? '',
       rateType: formData.get('rateType') ?? 'DAILY',
@@ -24,6 +31,17 @@ export async function createRentalAction(
       mileageOut: formData.get('mileageOut') ?? '',
       fuelOutPct: formData.get('fuelOutPct') ?? '',
       notes: formData.get('notes') ?? '',
+      mileageAllowancePerDay: formData.get('mileageAllowancePerDay') ?? '',
+      excessMileagePence: formData.get('excessMileagePence') ?? '',
+      advancePaymentPence: formData.get('advancePaymentPence') ?? '',
+      minimumTermDays: formData.get('minimumTermDays') ?? '',
+      insuranceExcessPence: formData.get('insuranceExcessPence') ?? '',
+      congestionChargePence: formData.get('congestionChargePence') ?? '',
+      smokingChargePence: formData.get('smokingChargePence') ?? '',
+      panelRepairPence: formData.get('panelRepairPence') ?? '',
+      wheelScratchPence: formData.get('wheelScratchPence') ?? '',
+      depositReturnDays: formData.get('depositReturnDays') ?? '',
+      ownerSignatory: formData.get('ownerSignatory') ?? '',
     });
 
     const result = await createRental(parsed, audit);

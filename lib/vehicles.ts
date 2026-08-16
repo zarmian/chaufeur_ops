@@ -59,6 +59,12 @@ export const vehicleSchema = z.object({
   motExpiry: optionalDate,
   insuranceExpiry: optionalDate,
   insurancePolicyNo: z.string().trim().max(60).optional().or(z.literal('')),
+  // Printed on a hire agreement, which has to identify the car precisely
+  // enough to be enforceable.
+  insurerName: z.string().trim().max(120).optional().or(z.literal('')),
+  chassisNumber: z.string().trim().max(40).optional().or(z.literal('')),
+  firstRegisteredOn: z.string().trim().optional().or(z.literal('')),
+  valuePence: z.string().trim().optional().or(z.literal('')),
   status: z.enum(['ACTIVE', 'OFF_ROAD', 'RETIRED']),
 
   // Phase 2.6. Defaulted so an existing record saved through an older form
@@ -111,6 +117,10 @@ function toData(input: VehicleInput) {
     motExpiry: toDate(input.motExpiry),
     insuranceExpiry: toDate(input.insuranceExpiry),
     insurancePolicyNo: emptyToNull(input.insurancePolicyNo),
+    insurerName: emptyToNull(input.insurerName),
+    chassisNumber: emptyToNull(input.chassisNumber),
+    firstRegisteredOn: fromDateOnlyString(input.firstRegisteredOn ?? ''),
+    valuePence: input.valuePence ? parseMoney(input.valuePence) : null,
     status: input.status,
 
     ownership: input.ownership,

@@ -72,6 +72,17 @@ export interface ContractData {
 const money = (pence: number | null | undefined, locale: LocaleConfig): string =>
   pence == null ? '—' : formatMoney(pence, locale);
 
+/**
+ * Money inside a clause the parties are agreeing to.
+ *
+ * A dash is fine in a table of facts about the car — "Vehicle value: —" reads
+ * as "not recorded". Inside a sentence it does not: "an excess fee of — is
+ * payable by the hirer" is a term nobody can enforce or dispute. An amount
+ * that was never agreed gets a line to write on instead.
+ */
+const agreed = (pence: number | null | undefined, locale: LocaleConfig): string =>
+  pence == null ? RULE : formatMoney(pence, locale);
+
 const orDash = (value: string | number | null | undefined): string =>
   value === null || value === undefined || value === '' ? '—' : escapeHtml(String(value));
 
@@ -120,7 +131,7 @@ export function renderRentalContract(
     ),
     periodRow(
       'G. Excess mileage charge per mile',
-      money(terms.excessMileagePence, locale),
+      agreed(terms.excessMileagePence, locale),
     ),
     periodRow('Deposit', money(terms.depositPence, locale)),
   ].join('');
@@ -242,7 +253,7 @@ export function renderRentalContract(
       insurer for a reason that holds the driver responsible, such as false or incomplete
       information, I accept full responsibility for the full cost of the vehicle.</li>
     <li>In the event of a fault accident, an excess fee of
-      ${money(terms.insuranceExcessPence, locale)} is payable by the hirer in full.</li>
+      ${agreed(terms.insuranceExcessPence, locale)} is payable by the hirer in full.</li>
     <li>In the event of any fault or non-fault claim that takes the vehicle off the road,
       I agree to pay the full ${escapeHtml(terms.rateUnit)} rent until the case is resolved
       and the vehicle has been returned in roadworthy condition.</li>
@@ -281,8 +292,8 @@ export function renderRentalContract(
     <li>${company} reserves the right to terminate the contract at any time.</li>
     <li>Only the hirer is authorised to drive this vehicle. No one else may drive it, and
       no one else is covered by the insurance.</li>
-    <li>The insurance claim excess fee is ${money(terms.insuranceExcessPence, locale)}.</li>
-    <li>In the event of a fault claim, ${money(terms.insuranceExcessPence, locale)} must be
+    <li>The insurance claim excess fee is ${agreed(terms.insuranceExcessPence, locale)}.</li>
+    <li>In the event of a fault claim, ${agreed(terms.insuranceExcessPence, locale)} must be
       paid within seven days of the claim or accident.</li>
     <li>It is your responsibility to keep the vehicle keys safe and in your possession.
       Keys left unattended may cause the insurer to refuse a theft claim.</li>
@@ -308,7 +319,7 @@ export function renderRentalContract(
       for inspection before it is returned.</li>
     <li>Any outstanding balance must be cleared before the vehicle is returned; otherwise
       it will not be accepted back from the hirer's possession.</li>
-    <li>The deposit of ${money(terms.depositPence, locale)} is returned
+    <li>The deposit of ${agreed(terms.depositPence, locale)} is returned
       ${terms.depositReturnDays == null ? RULE : terms.depositReturnDays} days after the
       vehicle is received.</li>
   </ul>
@@ -320,7 +331,7 @@ export function renderRentalContract(
     <li>${company} reserves the right to disclose the hirer's details to third parties such
       as private parking operators and law enforcement agencies.</li>
     <li>Our vehicles are registered for automatic congestion charge payment at
-      ${money(terms.congestionChargePence, locale)} per day. Charges are notified weekly.
+      ${agreed(terms.congestionChargePence, locale)} per day. Charges are notified weekly.
       Where the charging system applies a charge late, it will appear on a subsequent
       invoice and you will be informed.</li>
   </ul>
@@ -328,13 +339,13 @@ export function renderRentalContract(
   <h2>Maintenance, breakdowns and damage</h2>
   <ul>
     <li>Neither the driver nor passengers may smoke or vape in the vehicle. Any smoke or
-      vape smell will incur a detailing charge of ${money(terms.smokingChargePence, locale)}.</li>
+      vape smell will incur a detailing charge of ${agreed(terms.smokingChargePence, locale)}.</li>
     <li>A minor wheel scratch will be charged at
-      ${money(terms.wheelScratchPence, locale)}. Multiple scratches will be charged at the
+      ${agreed(terms.wheelScratchPence, locale)}. Multiple scratches will be charged at the
       full wheel refurbishment cost.</li>
     <li>A punctured tyre that cannot be repaired will be charged at the cost of a
       replacement of the same brand.</li>
-    <li>Any minor scratch will be charged at ${money(terms.panelRepairPence, locale)} per
+    <li>Any minor scratch will be charged at ${agreed(terms.panelRepairPence, locale)} per
       panel. Larger damage will be charged at the full panel repair cost.</li>
     <li>Any other damage to the exterior or interior will be charged at the cost of repair
       or replacement.</li>

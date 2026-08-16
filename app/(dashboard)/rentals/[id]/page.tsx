@@ -1,5 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { FileText } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { renterName } from '@/lib/rentals';
 import { PageHeader } from '@/components/page-header';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -52,7 +54,32 @@ export default async function RentalDetailPage({
       <PageHeader
         title={rental.reference}
         description={`${rental.vehicle.registration} · ${renterName(rental)}`}
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            {/* The agreement, as one file: contract of hire, acceptance of
+                liability and terms, which is what actually gets sent. */}
+            <Button asChild>
+              <a href={`/api/rentals/${rental.id}/contract`}>
+                <FileText className="mr-1 size-4" aria-hidden />
+                Hire agreement
+              </a>
+            </Button>
+            {/* Checked before sending, and printable where the PDF renderer
+                is unavailable. */}
+            <Button asChild variant="secondary">
+              <a href={`/api/rentals/${rental.id}/contract?format=html`} target="_blank" rel="noreferrer">
+                Preview
+              </a>
+            </Button>
+          </div>
+        }
       />
+
+      {rental.contractGeneratedAt ? (
+        <p className="mb-6 text-sm text-muted-foreground">
+          Hire agreement last produced {formatDateTime(rental.contractGeneratedAt)}.
+        </p>
+      ) : null}
 
       {balance.inArrears ? (
         <Alert variant="destructive" className="mb-6" data-testid="arrears-alert">

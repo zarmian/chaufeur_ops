@@ -35,6 +35,10 @@ export interface VehicleFormValues {
   motExpiry: string;
   insuranceExpiry: string;
   insurancePolicyNo: string;
+  insurerName: string;
+  chassisNumber: string;
+  firstRegisteredOn: string;
+  valuePence: string;
   status: string;
   ownership: string;
   ownerDriverId: string;
@@ -61,6 +65,10 @@ const BLANK: VehicleFormValues = {
   motExpiry: '',
   insuranceExpiry: '',
   insurancePolicyNo: '',
+  insurerName: '',
+  chassisNumber: '',
+  firstRegisteredOn: '',
+  valuePence: '',
   status: 'ACTIVE',
   ownership: 'DRIVER_OWNED',
   ownerDriverId: '',
@@ -482,6 +490,44 @@ export function VehicleForm({
             <Input
               {...fieldProps('insurancePolicyNo', errors.insurancePolicyNo)}
               defaultValue={values.insurancePolicyNo}
+            />
+          </FormField>
+
+          <FormField name="insurerName" label="Insurer" errors={errors.insurerName}>
+            <Input
+              {...fieldProps('insurerName', errors.insurerName)}
+              defaultValue={values.insurerName}
+            />
+          </FormField>
+
+          {/* The three below appear on a hire agreement and nowhere else, so
+              they are optional — a car that never goes out on rent needs none
+              of them. */}
+          <FormField name="chassisNumber" label="Chassis number (VIN)" errors={errors.chassisNumber}>
+            <Input
+              {...fieldProps('chassisNumber', errors.chassisNumber)}
+              defaultValue={values.chassisNumber}
+            />
+          </FormField>
+
+          <FormField
+            name="firstRegisteredOn"
+            label="First registered"
+            errors={errors.firstRegisteredOn}
+          >
+            <Input
+              {...fieldProps('firstRegisteredOn', errors.firstRegisteredOn)}
+              type="date"
+              defaultValue={values.firstRegisteredOn}
+            />
+          </FormField>
+
+          <FormField name="valuePence" label="Vehicle value" errors={errors.valuePence}>
+            <Input
+              {...fieldProps('valuePence', errors.valuePence)}
+              inputMode="decimal"
+              defaultValue={values.valuePence}
+              placeholder="143000.00"
             />
           </FormField>
 

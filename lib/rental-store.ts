@@ -37,6 +37,31 @@ const money = z
   })
   .transform((value) => parseMoney(value));
 
+/**
+ * Money that may simply not have been agreed.
+ *
+ * Distinct from `money`, which treats a blank as zero. On a contract the two
+ * are opposites: an unset excess fee must print as a line to write on, and
+ * "£0.00" would state that the hirer owes nothing in the event of a claim.
+ */
+const optionalMoney = z.preprocess(
+  (value) => (value === '' || value === null || value === undefined ? null : value),
+  z
+    .string()
+    .trim()
+    .superRefine((value, ctx) => {
+      try {
+        if (parseMoney(value) < 0) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'That cannot be negative' });
+        }
+      } catch {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Enter an amount like 80.00' });
+      }
+    })
+    .transform((value) => parseMoney(value))
+    .nullable(),
+);
+
 const optionalInt = z.preprocess(
   (value) => (value === '' || value === null || value === undefined ? null : value),
   z.coerce.number().int().min(0).nullable(),
@@ -45,7 +70,15 @@ const optionalInt = z.preprocess(
 export const rentalSchema = z
   .object({
     vehicleId: z.string().trim().min(1, 'Choose a vehicle'),
-    driverId: z.string().trim().min(1, 'Choose who is renting it'),
+    renterType: z.enum(['DRIVER', 'ACCOUNT', 'EXTERNAL']).default('DRIVER'),
+    driverId: z.string().trim().optional().or(z.literal('')),
+    accountId: z.string().trim().optional().or(z.literal('')),
+    hirerName: z.string().trim().max(200).optional().or(z.literal('')),
+    hirerAddress: z.string().trim().max(500).optional().or(z.literal('')),
+    hirerPhone: z.string().trim().max(40).optional().or(z.literal('')),
+    hirerLicenceNumber: z.string().trim().max(40).optional().or(z.literal('')),
+    /** Saves a one-off hirer as an account, so a repeat customer is picked next time. */
+    saveHirerAsAccount: z.coerce.boolean().default(false),
     startAt: z.string().trim().min(1, 'Enter when it goes out'),
     endAt: z.string().trim().min(1, 'Enter when it is due back'),
     rateType: z.enum(['HOURLY', 'DAILY', 'WEEKLY']),
@@ -57,8 +90,45 @@ export const rentalSchema = z
       z.coerce.number().int().min(0).max(100).nullable(),
     ),
     notes: z.string().trim().max(2000).optional().or(z.literal('')),
+
+    // What this contract says. Defaults come from the form; what is stored is
+    // what was agreed, so reprinting it later cannot restate today's rates.
+    mileageAllowancePerDay: optionalInt,
+    excessMileagePence: optionalMoney,
+    advancePaymentPence: money,
+    minimumTermDays: optionalInt,
+    insuranceExcessPence: optionalMoney,
+    congestionChargePence: optionalMoney,
+    smokingChargePence: optionalMoney,
+    panelRepairPence: optionalMoney,
+    wheelScratchPence: optionalMoney,
+    depositReturnDays: optionalInt,
+    ownerSignatory: z.string().trim().max(200).optional().or(z.literal('')),
   })
   .superRefine((input, ctx) => {
+    // Whichever kind of renter was chosen has to actually be identified.
+    if (input.renterType === 'DRIVER' && !input.driverId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['driverId'],
+        message: 'Choose the driver renting it',
+      });
+    }
+    if (input.renterType === 'ACCOUNT' && !input.accountId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['accountId'],
+        message: 'Choose the company renting it',
+      });
+    }
+    if (input.renterType === 'EXTERNAL' && !input.hirerName) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['hirerName'],
+        // A hire agreement with no named hirer is not a contract.
+        message: 'A hirer who is not on the system still needs a name for the contract',
+      });
+    }
     if (new Date(input.endAt).getTime() <= new Date(input.startAt).getTime()) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -126,6 +196,30 @@ export async function createRental(
 
   const reference = await nextRentalReference();
 
+  // A one-off hirer becomes an account, so the second time they hire the car
+  // they are picked from a list rather than retyped — and a repeat customer
+  // spelled two ways is two customers.
+  let accountId = input.accountId || null;
+  if (input.renterType === 'EXTERNAL' && input.saveHirerAsAccount && input.hirerName) {
+    const existingAccount = await prisma.account.findFirst({
+      where: { name: input.hirerName },
+      select: { id: true },
+    });
+    accountId =
+      existingAccount?.id ??
+      (
+        await prisma.account.create({
+          data: {
+            name: input.hirerName,
+            kind: 'INDIVIDUAL',
+            contactPhone: input.hirerPhone || null,
+            billingAddress: input.hirerAddress || null,
+          },
+          select: { id: true },
+        })
+      ).id;
+  }
+
   return withAudit(
     'Vehicle',
     'update',
@@ -134,7 +228,15 @@ export async function createRental(
         data: {
           reference,
           vehicleId: input.vehicleId,
-          driverId: input.driverId,
+          renterType: input.renterType,
+          // Only the driver named for a driver hire; a company or one-off
+          // hire leaves it null rather than pointing at somebody unrelated.
+          driverId: input.renterType === 'DRIVER' ? input.driverId || null : null,
+          accountId,
+          hirerName: input.hirerName || null,
+          hirerAddress: input.hirerAddress || null,
+          hirerPhone: input.hirerPhone || null,
+          hirerLicenceNumber: input.hirerLicenceNumber || null,
           startAt,
           endAt,
           rateType: input.rateType,
@@ -142,6 +244,17 @@ export async function createRental(
           depositPence: input.depositPence,
           mileageOut: input.mileageOut,
           fuelOutPct: input.fuelOutPct,
+          mileageAllowancePerDay: input.mileageAllowancePerDay,
+          excessMileagePence: input.excessMileagePence,
+          advancePaymentPence: input.advancePaymentPence,
+          minimumTermDays: input.minimumTermDays,
+          insuranceExcessPence: input.insuranceExcessPence,
+          congestionChargePence: input.congestionChargePence,
+          smokingChargePence: input.smokingChargePence,
+          panelRepairPence: input.panelRepairPence,
+          wheelScratchPence: input.wheelScratchPence,
+          depositReturnDays: input.depositReturnDays,
+          ownerSignatory: input.ownerSignatory || null,
           notes: emptyToNull(input.notes),
           createdById: context.userId ?? null,
         },
@@ -371,5 +484,51 @@ export async function totalRentalArrears(): Promise<{
   return {
     count: owing.length,
     pence: owing.reduce((total, balance) => total + balance.balancePence, 0),
+  };
+}
+
+/**
+ * Contract terms to start the next hire from.
+ *
+ * Taken from the most recent rental that had any, rather than from settings.
+ * The operator asked for these to be editable when entering the hire, and in
+ * practice they change rarely — so carrying the last agreement forward means
+ * they are typed once and adjusted when a particular deal differs, instead of
+ * being retyped in full every time.
+ */
+export async function lastContractTerms() {
+  const previous = await prisma.vehicleRental.findFirst({
+    where: { insuranceExcessPence: { not: null } },
+    orderBy: { createdAt: 'desc' },
+    select: {
+      mileageAllowancePerDay: true,
+      minimumTermDays: true,
+      depositReturnDays: true,
+      excessMileagePence: true,
+      insuranceExcessPence: true,
+      congestionChargePence: true,
+      smokingChargePence: true,
+      panelRepairPence: true,
+      wheelScratchPence: true,
+      ownerSignatory: true,
+    },
+  });
+
+  // Formatted for a text input, because that is what the person edits and
+  // what the schema parses back into pence.
+  const pounds = (pence: number | null | undefined) =>
+    pence == null ? null : (pence / 100).toFixed(2);
+
+  return {
+    mileageAllowancePerDay: previous?.mileageAllowancePerDay ?? null,
+    minimumTermDays: previous?.minimumTermDays ?? null,
+    depositReturnDays: previous?.depositReturnDays ?? null,
+    excessMileage: pounds(previous?.excessMileagePence),
+    insuranceExcess: pounds(previous?.insuranceExcessPence),
+    congestionCharge: pounds(previous?.congestionChargePence),
+    smokingCharge: pounds(previous?.smokingChargePence),
+    panelRepair: pounds(previous?.panelRepairPence),
+    wheelScratch: pounds(previous?.wheelScratchPence),
+    ownerSignatory: previous?.ownerSignatory ?? null,
   };
 }
