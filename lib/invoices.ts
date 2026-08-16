@@ -1,4 +1,4 @@
-import { roundPence, sumPence } from './money';
+import { invoiceTax, type TaxableLine, type VatTreatment } from './vat';
 
 /**
  * Invoice arithmetic and the rules about what may still be changed.
@@ -28,22 +28,35 @@ export interface InvoiceTotals {
 }
 
 /**
- * Net, VAT and gross from a set of line amounts.
+ * Net, tax and gross from a set of lines.
  *
- * VAT is computed on the **total**, not per line and summed. Rounding each
- * line separately drifts: twenty lines of £10.99 at 20% round to £2.20 each,
- * £44.00 in total, where the correct figure on £219.80 is £43.96. HMRC would
- * accept either, but the invoice would not agree with itself when somebody
- * added the column up.
+ * A thin wrapper over `invoiceTax`, kept because the invoice header stores
+ * exactly these three numbers. The arithmetic — grouping by treatment, keeping
+ * pass-through charges out of the base, backing tax out of an inclusive price
+ * — lives in `lib/vat.ts` and is documented there.
+ *
+ * Bare numbers are accepted for the common case of "everything at the standard
+ * rate, nothing passed through", which is what every line was before
+ * treatments existed.
  */
 export function invoiceTotals(
-  linePence: number[],
+  lines: Array<TaxableLine | number>,
   vatRatePct: number,
 ): InvoiceTotals {
-  const netPence = sumPence(...linePence);
-  const vatPence = roundPence((netPence * vatRatePct) / 100);
+  const tax = invoiceTax(
+    lines.map((line) =>
+      typeof line === 'number'
+        ? { amountPence: line, treatment: 'STANDARD' as const }
+        : line,
+    ),
+    vatRatePct,
+  );
 
-  return { netPence, vatPence, grossPence: netPence + vatPence };
+  return {
+    netPence: tax.netPence,
+    vatPence: tax.taxPence,
+    grossPence: tax.grossPence,
+  };
 }
 
 export interface SettleableInvoice {
@@ -218,12 +231,44 @@ function escapeRegExp(value: string): string {
  * because a credit note that quietly credits less than the invoice is worse
  * than one that credits too much.
  */
-export function creditNoteLines(
-  lines: Array<{ description: string; amountPence: number; jobId?: string | null; rentalId?: string | null }>,
-): Array<{ description: string; amountPence: number; jobId: string | null; rentalId: string | null }> {
+export interface CreditableLine {
+  description: string;
+  amountPence: number;
+  disbursementPence?: number | null;
+  vatTreatment?: VatTreatment | null;
+  quantity?: unknown;
+  quantityUnit?: string | null;
+  unitPricePence?: number | null;
+  jobId?: string | null;
+  rentalId?: string | null;
+}
+
+export function creditNoteLines(lines: CreditableLine[]): Array<{
+  description: string;
+  amountPence: number;
+  disbursementPence: number;
+  vatTreatment: VatTreatment;
+  quantity: unknown;
+  quantityUnit: string | null;
+  unitPricePence: number | null;
+  jobId: string | null;
+  rentalId: string | null;
+}> {
   return lines.map((line) => ({
     description: line.description,
     amountPence: -line.amountPence,
+    // Negated with the amount, so the credited line's tax base is the mirror
+    // of the original's. Leaving it positive would credit the fare in full
+    // while still charging tax on a disbursement that no longer exists.
+    disbursementPence: -(line.disbursementPence ?? 0),
+    // The treatment travels with the line. A credit note that reverses an
+    // exempt line at the standard rate hands back tax nobody ever paid.
+    vatTreatment: line.vatTreatment ?? 'STANDARD',
+    // Quantity and unit price are description, not money — a credit for one
+    // trip is still one trip, and negating the count reads as nonsense.
+    quantity: line.quantity ?? null,
+    quantityUnit: line.quantityUnit ?? null,
+    unitPricePence: line.unitPricePence ?? null,
     jobId: line.jobId ?? null,
     rentalId: line.rentalId ?? null,
   }));

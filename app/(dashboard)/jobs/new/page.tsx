@@ -57,6 +57,7 @@ export default async function NewJobPage({
       // `duplicateDefaults`. A return carries the suggested one.
       clientPrice: asPounds(defaults.clientPricePence),
       driverPrice: asPounds(defaults.driverPricePence),
+      vatTreatment: '',
       // A flight number belongs to one specific arrival, never to its copy.
       flightNumber: '',
       internalNotes: '',

@@ -18,6 +18,17 @@ import {
 
 const d = (iso: string) => new Date(`${iso}T09:00:00Z`);
 
+/** A minimal line. What goes into one is `lib/invoice-lines.test.ts`'s job. */
+const line = (amountPence: number) => ({
+  description: 'A line',
+  amountPence,
+  disbursementPence: 0,
+  vatTreatment: 'STANDARD' as const,
+  quantity: null,
+  quantityUnit: null,
+  unitPricePence: null,
+});
+
 function job(overrides: Partial<BillableJob> = {}): BillableJob {
   return {
     id: 'job-1',
@@ -26,6 +37,12 @@ function job(overrides: Partial<BillableJob> = {}): BillableJob {
     totalPence: 40000,
     clientId: 'client-1',
     accountId: null,
+    jobType: 'TRANSFER',
+    pickupText: 'Heathrow Terminal 5',
+    dropoffText: 'The Savoy',
+    clientName: 'Mr Yinka',
+    driverName: 'Sam Okafor',
+    line: line(40000),
     ...overrides,
   };
 }
@@ -40,6 +57,7 @@ function rental(overrides: Partial<BillableRental> = {}): BillableRental {
     driverId: 'driver-1',
     renterName: 'Sam Okafor',
     vehicleRegistration: 'AB12 CDE',
+    line: line(56000),
     ...overrides,
   };
 }

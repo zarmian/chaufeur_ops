@@ -6,6 +6,7 @@ import {
   type BillableSummary,
   type RevenueBreakdown,
 } from './billable';
+import { buildJobLine, buildRentalLine } from './invoice-lines';
 import { financeAmountsFrom, jobEconomics } from './job-finance';
 import { prisma } from './prisma';
 import { rentalBalance, rentalCharge, renterName } from './rentals';
@@ -53,8 +54,22 @@ export async function billableFor(
         shiftId: true,
         finance: true,
         stops: { select: { chargePence: true } },
-        expenses: { select: { amountPence: true, borneBy: true } },
+        // `kind` is what says whether a recharged expense is a pass-through:
+        // parking and drop-off charges belong on the invoice but out of the
+        // tax base.
+        expenses: { select: { kind: true, amountPence: true, borneBy: true } },
         invoiceLines: { select: { id: true }, take: 1 },
+        // The facts the picker and the invoice line both need.
+        jobType: true,
+        pickupText: true,
+        dropoffText: true,
+        viaText: true,
+        passengerName: true,
+        flightNumber: true,
+        vatTreatment: true,
+        client: { select: { name: true, vatTreatment: true } },
+        account: { select: { vatTreatment: true } },
+        driver: { select: { name: true } },
       },
     }),
     // Only when no client or account filter is set: a hire is billed to the
@@ -81,10 +96,11 @@ export async function billableFor(
             damageChargePence: true,
             driverId: true,
             renterType: true,
+            vatTreatment: true,
             driver: { select: { name: true } },
-            account: { select: { name: true } },
+            account: { select: { name: true, vatTreatment: true } },
             hirerName: true,
-            vehicle: { select: { registration: true } },
+            vehicle: { select: { registration: true, make: true, model: true } },
             payments: { select: { amountPence: true } },
             invoiceLines: { select: { id: true }, take: 1 },
           },
@@ -92,8 +108,9 @@ export async function billableFor(
   ]);
 
   const billableJobs: BillableJob[] = jobs.map((job) => {
+    const finance = financeAmountsFrom(job.finance);
     const economics = jobEconomics({
-      finance: financeAmountsFrom(job.finance),
+      finance,
       clientPricePence: job.clientPricePence,
       driverPricePence: job.driverPricePence,
       stops: job.stops,
@@ -108,11 +125,21 @@ export async function billableFor(
       clientId: job.clientId,
       accountId: job.accountId,
       invoicedLineId: job.invoiceLines[0]?.id ?? null,
+      jobType: job.jobType,
+      pickupText: job.pickupText,
+      dropoffText: job.dropoffText,
+      clientName: job.client?.name ?? null,
+      driverName: job.driver?.name ?? null,
+      line: buildJobLine({
+        job: { ...job, finance },
+        amountPence: economics.totalClientPence,
+      }),
     };
   });
 
   const billableRentals: BillableRental[] = rentals.map((rental) => {
     const balance = rentalBalance(rental, rental.payments);
+    const outstanding = balance.totalPence - balance.paidPence;
     return {
       id: rental.id,
       reference: rental.reference,
@@ -125,6 +152,12 @@ export async function billableFor(
       renterName: renterName(rental),
       vehicleRegistration: rental.vehicle.registration,
       invoicedLineId: rental.invoiceLines[0]?.id ?? null,
+      line: buildRentalLine({
+        rental,
+        renterName: renterName(rental),
+        periods: balance.periods,
+        amountPence: outstanding,
+      }),
     };
   });
 

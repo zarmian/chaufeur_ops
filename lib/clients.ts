@@ -44,6 +44,9 @@ export const clientSchema = z.object({
     .min(0)
     .max(365)
     .default(14),
+  // How this client's work is normally taxed. A job may override it, and the
+  // booker's answer wins when there is one — the booker gets the invoice.
+  vatTreatment: z.enum(['STANDARD', 'INCLUSIVE', 'EXEMPT']).default('STANDARD'),
   defaultAccountId: z.string().trim().optional().or(z.literal('')),
   notes: z.string().trim().max(2000).optional().or(z.literal('')),
 });
@@ -61,6 +64,7 @@ function toData(input: ClientInput) {
     billingAddress: emptyToNull(input.billingAddress),
     vatNumber: emptyToNull(input.vatNumber),
     paymentTermsDays: input.paymentTermsDays,
+    vatTreatment: input.vatTreatment,
     defaultAccountId: emptyToNull(input.defaultAccountId),
     notes: emptyToNull(input.notes),
   };
@@ -140,6 +144,7 @@ export async function listClients(
         contactPhone: true,
         contactEmail: true,
         paymentTermsDays: true,
+        vatTreatment: true,
         deletedAt: true,
         defaultAccount: { select: { id: true, name: true } },
         _count: { select: { jobs: true } },

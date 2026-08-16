@@ -3,9 +3,10 @@ import { NextResponse } from 'next/server';
 import { apiError } from '@/lib/api';
 import { requireCapability } from '@/lib/authz';
 import { editLines, type LineEdit } from '@/lib/invoice-store';
-import { parseMoney } from '@/lib/money';
+import { parseMoney, tryParseMoney } from '@/lib/money';
 import { ForbiddenError, UnauthenticatedError } from '@/lib/permissions';
 import { clientIpFrom } from '@/lib/rate-limit';
+import { VAT_TREATMENTS, type VatTreatment } from '@/lib/vat';
 
 /**
  * `POST /api/invoices/:id/lines` — edit a draft's lines, spec 4.3.7.
@@ -64,6 +65,32 @@ export async function POST(
   });
 }
 
+/** The treatments the form may send. Anything else falls back to the default. */
+function treatmentField(value: FormDataEntryValue | null): VatTreatment {
+  const text = String(value ?? '');
+  return VAT_TREATMENTS.some((option) => option.value === text)
+    ? (text as VatTreatment)
+    : 'STANDARD';
+}
+
+/**
+ * The pass-through part, which is blank far more often than it is set.
+ *
+ * A blank means "none", not "unparseable" — and a value larger than the line
+ * is refused by clamping rather than by an error, because a negative taxable
+ * fare would compute tax backwards.
+ */
+function disbursementField(
+  value: FormDataEntryValue | null,
+  amountPence: number,
+): number {
+  const text = String(value ?? '').trim();
+  if (text === '') return 0;
+  const parsed = tryParseMoney(text) ?? 0;
+  if (amountPence < 0) return Math.max(parsed, amountPence);
+  return Math.min(Math.max(0, parsed), amountPence);
+}
+
 function parseEdit(form: FormData): LineEdit | null {
   const intent = String(form.get('intent') ?? '');
   const lineId = String(form.get('lineId') ?? '');
@@ -71,16 +98,34 @@ function parseEdit(form: FormData): LineEdit | null {
   const amount = String(form.get('amount') ?? '');
 
   switch (intent) {
-    case 'add':
-      return { kind: 'add', description, amountPence: parseMoney(amount) };
-    case 'update':
+    case 'add': {
+      const amountPence = parseMoney(amount);
+      return {
+        kind: 'add',
+        description,
+        amountPence,
+        disbursementPence: disbursementField(
+          form.get('disbursement'),
+          amountPence,
+        ),
+        vatTreatment: treatmentField(form.get('vatTreatment')),
+      };
+    }
+    case 'update': {
       if (!lineId) return null;
+      const amountPence = parseMoney(amount);
       return {
         kind: 'update',
         lineId,
         description,
-        amountPence: parseMoney(amount),
+        amountPence,
+        disbursementPence: disbursementField(
+          form.get('disbursement'),
+          amountPence,
+        ),
+        vatTreatment: treatmentField(form.get('vatTreatment')),
       };
+    }
     case 'remove':
       if (!lineId) return null;
       return { kind: 'remove', lineId };

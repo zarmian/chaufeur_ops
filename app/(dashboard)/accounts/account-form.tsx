@@ -9,6 +9,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { VAT_TREATMENTS } from '@/lib/vat';
 import { Textarea } from '@/components/ui/textarea';
 import { ACCOUNT_KINDS } from '@/lib/enum-options';
 import { INITIAL_FORM_STATE, type FormState } from '@/lib/form-state';
@@ -23,6 +24,7 @@ export interface AccountFormValues {
   billingAddress: string;
   vatNumber: string;
   paymentTermsDays: number;
+  vatTreatment: string;
   commissionPct: string;
   active: boolean;
 }
@@ -37,6 +39,7 @@ const BLANK: AccountFormValues = {
   billingAddress: '',
   vatNumber: '',
   paymentTermsDays: 14,
+  vatTreatment: 'STANDARD',
   commissionPct: '',
   active: true,
 };
@@ -175,6 +178,24 @@ export function AccountForm({
             />
           </FormField>
 
+
+          <FormField
+            name="vatTreatment"
+            label="VAT treatment"
+            hint="How this booker&rsquo;s work is normally charged. A job can override it."
+            errors={errors.vatTreatment}
+          >
+            <Select
+              {...fieldProps('vatTreatment', errors.vatTreatment)}
+              defaultValue={values.vatTreatment}
+            >
+              {VAT_TREATMENTS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
+          </FormField>
           <FormField
             name="commissionPct"
             label="Commission %"

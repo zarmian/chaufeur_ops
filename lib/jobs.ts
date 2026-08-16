@@ -192,6 +192,16 @@ export const jobSchema = z
     clientPricePence: priceField,
     driverPricePence: priceField,
     zeroValueReason: z.string().trim().max(500).optional().or(z.literal('')),
+    /**
+     * How this job is taxed, when it differs from whoever is billed.
+     *
+     * Blank means "follow the account, then the client" — which is different
+     * from choosing "added on top" here, and is why this is not defaulted.
+     */
+    vatTreatment: z
+      .enum(['STANDARD', 'INCLUSIVE', 'EXEMPT'])
+      .optional()
+      .or(z.literal('')),
 
     /**
      * What the rate card suggested, and which rule said so — spec 4.2.7 and
@@ -305,6 +315,7 @@ function toData(input: JobInput, timeZone?: string) {
     clientPricePence: input.clientPricePence,
     driverPricePence: input.driverPricePence,
     zeroValueReason: emptyToNull(input.zeroValueReason),
+    vatTreatment: input.vatTreatment ? input.vatTreatment : null,
     rateCardRuleId: input.rateCardRuleId,
 
     notes: emptyToNull(input.notes),

@@ -1,4 +1,5 @@
 import { sumPence } from './money';
+import { jobTypeLabel, type BuiltLine } from './invoice-lines';
 
 /**
  * Everything the company can bill for a period, from both sources.
@@ -28,6 +29,18 @@ export interface BillableJob {
   accountId: string | null;
   /** Already on an invoice — billing it again would double-charge. */
   invoicedLineId?: string | null;
+  /**
+   * What the job actually is, so the picker can show the same facts the jobs
+   * list does. The old screen offered a column of job numbers and nothing
+   * else, which meant choosing what to bill from references alone.
+   */
+  jobType: string;
+  pickupText: string;
+  dropoffText: string;
+  clientName: string | null;
+  driverName: string | null;
+  /** The line this job would become — text, tax treatment and all. */
+  line: BuiltLine;
 }
 
 export interface BillableRental {
@@ -47,16 +60,29 @@ export interface BillableRental {
   renterName: string;
   vehicleRegistration: string;
   invoicedLineId?: string | null;
+  /** The line this hire would become. */
+  line: BuiltLine;
 }
 
 export interface BillableItem {
   kind: BillableKind;
   id: string;
   reference: string;
+  /** One line, for a place with no room — a bulk-action label, a summary. */
   description: string;
   occurredAt: Date;
   amountPence: number;
   alreadyInvoiced: boolean;
+  /**
+   * The facts the picker shows in columns. `route` is pickup → drop-off for a
+   * job and the car for a hire; `who` is the client or the hirer.
+   */
+  what: string;
+  route: string;
+  who: string | null;
+  driverName: string | null;
+  /** Exactly what would be written if this item were billed. */
+  line: BuiltLine;
 }
 
 export interface BillableSummary {
@@ -86,10 +112,15 @@ export function billableItems(input: {
       kind: 'JOB',
       id: job.id,
       reference: job.reference,
-      description: `Job ${job.reference}`,
+      description: `${job.reference} — ${job.pickupText} to ${job.dropoffText}`,
       occurredAt: job.occurredAt,
       amountPence: job.totalPence,
       alreadyInvoiced: Boolean(job.invoicedLineId),
+      what: jobTypeLabel(job.jobType),
+      route: `${job.pickupText} → ${job.dropoffText}`,
+      who: job.clientName,
+      driverName: job.driverName,
+      line: job.line,
     });
   }
 
@@ -108,6 +139,11 @@ export function billableItems(input: {
       occurredAt: rental.occurredAt,
       amountPence: outstanding,
       alreadyInvoiced: Boolean(rental.invoicedLineId),
+      what: 'Vehicle hire',
+      route: rental.vehicleRegistration,
+      who: rental.renterName,
+      driverName: null,
+      line: rental.line,
     });
   }
 

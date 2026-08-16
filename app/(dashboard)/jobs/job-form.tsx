@@ -17,6 +17,7 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { JOB_TYPES } from '@/lib/enum-options';
+import { VAT_TREATMENTS } from '@/lib/vat';
 import { INITIAL_FORM_STATE, type FormState } from '@/lib/form-state';
 import { billedHours } from '@/lib/job-finance';
 import { DEFAULT_CURRENCY, DEFAULT_LOCALE } from '@/lib/locale';
@@ -71,6 +72,8 @@ export interface JobFormValues {
   flightNumber: string;
   clientPrice: string;
   driverPrice: string;
+  /** Empty follows the booker. */
+  vatTreatment: string;
   customerHours: string;
   customerRate: string;
   minimumHours: string;
@@ -104,6 +107,7 @@ const BLANK: JobFormValues = {
   flightNumber: '',
   clientPrice: '',
   driverPrice: '',
+  vatTreatment: '',
   customerHours: '',
   customerRate: '',
   minimumHours: '',
@@ -827,7 +831,7 @@ export function JobForm({
           </>
         ) : null}
 
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-3">
           <FormField
             name="clientPrice"
             label="Client price"
@@ -869,6 +873,28 @@ export function JobForm({
               value={driverPrice}
               onChange={(event) => setDriverPrice(event.target.value)}
             />
+          </FormField>
+
+          {/* Blank is a real answer, and the usual one: it means "whatever
+              this booker is normally charged at". Choosing a value here is
+              overriding that for this job alone. */}
+          <FormField
+            name="vatTreatment"
+            label="VAT"
+            hint="Blank follows the booker."
+            errors={errors.vatTreatment}
+          >
+            <Select
+              {...fieldProps('vatTreatment', errors.vatTreatment)}
+              defaultValue={values.vatTreatment}
+            >
+              <option value="">As the booker is charged</option>
+              {VAT_TREATMENTS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
           </FormField>
         </div>
 

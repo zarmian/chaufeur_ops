@@ -15,12 +15,14 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { formatDate, toDateOnlyString } from '@/lib/dates';
+import { formatDateTime, toDateOnlyString } from '@/lib/dates';
 import { filterValue, type SearchParams } from '@/lib/list-params';
 import { formatGBP } from '@/lib/money';
 import { pageRequireCapability } from '@/lib/page-guards';
 import { prisma } from '@/lib/prisma';
 import { billableFor } from '@/lib/revenue';
+import { vatTreatmentLabel } from '@/lib/vat';
+import { getLocaleConfig } from '@/lib/locale-store';
 import { defaultPnlWindow, windowToInputs } from '@/lib/vehicle-pnl';
 
 export const metadata = { title: 'New invoice' };
@@ -50,7 +52,7 @@ export default async function NewInvoicePage({
   const accountId = filterValue(query, 'accountId');
   const clientId = filterValue(query, 'clientId');
 
-  const [accounts, clients, billable] = await Promise.all([
+  const [accounts, clients, billable, locale] = await Promise.all([
     prisma.account.findMany({
       where: { active: true },
       select: { id: true, name: true },
@@ -72,8 +74,10 @@ export default async function NewInvoicePage({
         ...(clientId ? { clientId } : {}),
       },
     ),
+    getLocaleConfig(),
   ]);
 
+  const taxName = locale.taxName;
   const selectable = billable.items.filter((item) => !item.alreadyInvoiced);
   const error = filterValue(query, 'invoiceError');
 
@@ -225,54 +229,90 @@ export default async function NewInvoicePage({
             </div>
           </div>
 
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-10"></TableHead>
-                <TableHead>What</TableHead>
-                <TableHead>Reference</TableHead>
-                <TableHead>Date</TableHead>
-                <TableHead className="text-right">Amount</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {billable.items.map((item) => (
-                <TableRow
-                  key={`${item.kind}-${item.id}`}
-                  className={item.alreadyInvoiced ? 'opacity-50' : ''}
-                >
-                  <TableCell>
-                    <input
-                      type="checkbox"
-                      name="item"
-                      value={`${item.kind}:${item.id}`}
-                      defaultChecked={!item.alreadyInvoiced}
-                      disabled={item.alreadyInvoiced}
-                      aria-label={`Include ${item.reference}`}
-                      className="size-4"
-                    />
-                  </TableCell>
-                  <TableCell>
-                    {item.description}
-                    {item.alreadyInvoiced ? (
-                      <Badge variant="secondary" className="ml-2">
-                        Already invoiced
-                      </Badge>
-                    ) : null}
-                  </TableCell>
-                  <TableCell className="tabular text-muted-foreground">
-                    {item.reference}
-                  </TableCell>
-                  <TableCell className="tabular text-muted-foreground">
-                    {formatDate(item.occurredAt)}
-                  </TableCell>
-                  <TableCell className="text-right tabular">
-                    {formatGBP(item.amountPence)}
-                  </TableCell>
+          {/* The columns the jobs list uses. Choosing what to bill from a
+              column of references alone meant opening each job in turn to
+              find out what it was. */}
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-10"></TableHead>
+                  <TableHead>Reference</TableHead>
+                  <TableHead>Pickup time</TableHead>
+                  <TableHead>What</TableHead>
+                  <TableHead>Route</TableHead>
+                  <TableHead>Client</TableHead>
+                  <TableHead>Driver</TableHead>
+                  <TableHead>{taxName}</TableHead>
+                  <TableHead className="text-right">Amount</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {billable.items.map((item) => (
+                  <TableRow
+                    key={`${item.kind}-${item.id}`}
+                    className={item.alreadyInvoiced ? 'opacity-50' : ''}
+                  >
+                    <TableCell>
+                      <input
+                        type="checkbox"
+                        name="item"
+                        value={`${item.kind}:${item.id}`}
+                        defaultChecked={!item.alreadyInvoiced}
+                        disabled={item.alreadyInvoiced}
+                        aria-label={`Include ${item.reference}`}
+                        className="size-4"
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Link
+                        href={
+                          item.kind === 'JOB'
+                            ? `/jobs/${item.id}`
+                            : `/rentals/${item.id}`
+                        }
+                        className="font-medium tabular hover:underline"
+                      >
+                        {item.reference}
+                      </Link>
+                      {item.alreadyInvoiced ? (
+                        <Badge variant="secondary" className="ml-2">
+                          Already invoiced
+                        </Badge>
+                      ) : null}
+                    </TableCell>
+                    <TableCell className="tabular whitespace-nowrap text-muted-foreground">
+                      {formatDateTime(item.occurredAt)}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap">{item.what}</TableCell>
+                    <TableCell className="max-w-72 text-muted-foreground">
+                      <span className="block truncate">{item.route}</span>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {item.who ?? '—'}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {item.driverName ?? '—'}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-muted-foreground">
+                      {/* What this item will be taxed at, before it is
+                          billed — the point at which it can still be
+                          corrected on the job. */}
+                      {vatTreatmentLabel(item.line.vatTreatment)}
+                      {item.line.disbursementPence > 0 ? (
+                        <span className="block text-xs">
+                          {formatGBP(item.line.disbursementPence)} untaxed
+                        </span>
+                      ) : null}
+                    </TableCell>
+                    <TableCell className="text-right tabular">
+                      {formatGBP(item.amountPence)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
 
           <div className="mt-4 flex flex-wrap items-center justify-between gap-4 border-t pt-4">
             <div className="text-sm">

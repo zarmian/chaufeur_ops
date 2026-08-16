@@ -38,6 +38,7 @@ const KEYS: Record<keyof Branding, string> = {
   taxNumber: 'branding.taxNumber',
   companyNumber: 'branding.companyNumber',
   bankDetails: 'branding.bankDetails',
+  invoiceSignatory: 'branding.invoiceSignatory',
   jobReferencePrefix: 'branding.jobReferencePrefix',
   invoiceNumberPrefix: 'branding.invoiceNumberPrefix',
 };
@@ -85,6 +86,7 @@ async function readBranding(): Promise<Branding> {
     taxNumber: asText(read('taxNumber')),
     companyNumber: asText(read('companyNumber')),
     bankDetails: asText(read('bankDetails')),
+    invoiceSignatory: asText(read('invoiceSignatory')),
     jobReferencePrefix:
       asText(read('jobReferencePrefix')) ?? DEFAULT_BRANDING.jobReferencePrefix,
     invoiceNumberPrefix:
@@ -157,6 +159,7 @@ export async function saveBranding(
         taxNumber: emptyToNull(input.taxNumber),
         companyNumber: emptyToNull(input.companyNumber),
         bankDetails: emptyToNull(input.bankDetails),
+        invoiceSignatory: emptyToNull(input.invoiceSignatory),
         jobReferencePrefix: input.jobReferencePrefix,
         invoiceNumberPrefix: input.invoiceNumberPrefix,
       });

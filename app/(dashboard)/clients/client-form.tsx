@@ -9,6 +9,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { VAT_TREATMENTS } from '@/lib/vat';
 import { Textarea } from '@/components/ui/textarea';
 import {
   INITIAL_CLIENT_FORM_STATE,
@@ -24,6 +25,7 @@ export interface ClientFormValues {
   billingAddress: string;
   vatNumber: string;
   paymentTermsDays: number;
+  vatTreatment: string;
   defaultAccountId: string;
   notes: string;
 }
@@ -37,6 +39,7 @@ const BLANK: ClientFormValues = {
   billingAddress: '',
   vatNumber: '',
   paymentTermsDays: 14,
+  vatTreatment: 'STANDARD',
   defaultAccountId: '',
   notes: '',
 };
@@ -194,7 +197,7 @@ export function ClientForm({
           />
         </FormField>
 
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-3">
           <FormField
             name="vatNumber"
             label="VAT number"
@@ -220,6 +223,24 @@ export function ClientForm({
               defaultValue={values.paymentTermsDays}
               className="tabular"
             />
+          </FormField>
+
+          <FormField
+            name="vatTreatment"
+            label="VAT treatment"
+            hint="How this client&rsquo;s work is normally charged. A job can override it."
+            errors={errors.vatTreatment}
+          >
+            <Select
+              {...fieldProps('vatTreatment', errors.vatTreatment)}
+              defaultValue={values.vatTreatment}
+            >
+              {VAT_TREATMENTS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
           </FormField>
         </div>
       </section>

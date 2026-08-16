@@ -15,6 +15,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import {
   Table,
   TableBody,
@@ -28,6 +29,9 @@ import { getAllGatewayConfigs } from '@/lib/gateways/store';
 import { gatewayUsable } from '@/lib/gateways/types';
 import { formatDate, toDateOnlyString } from '@/lib/dates';
 import { getInvoice } from '@/lib/invoice-list';
+import { splitLineText } from '@/lib/invoice-lines';
+import { getLocaleConfig } from '@/lib/locale-store';
+import { invoiceTax, VAT_TREATMENTS, vatTreatmentLabel } from '@/lib/vat';
 import {
   canEdit,
   creditedTotalPence,
@@ -51,11 +55,24 @@ export default async function InvoiceDetailPage({
   const { id } = await params;
   const query = await searchParams;
 
-  const [invoice, configured] = await Promise.all([
+  const [invoice, configured, locale] = await Promise.all([
     getInvoice(id),
     getAllGatewayConfigs(),
+    getLocaleConfig(),
   ]);
   if (!invoice) notFound();
+
+  const taxName = locale.taxName;
+  // The bands as the printed document works them out, so the screen and the
+  // PDF cannot disagree about what is taxed and at what.
+  const tax = invoiceTax(
+    invoice.lines.map((line) => ({
+      amountPence: line.amountPence,
+      disbursementPence: line.disbursementPence,
+      treatment: line.vatTreatment,
+    })),
+    Number(invoice.vatRatePct),
+  );
 
   const gateways = configured.filter(gatewayUsable);
   const paymentLink = filterValue(query, 'paymentLink');
@@ -180,23 +197,48 @@ export default async function InvoiceDetailPage({
                       key={line.id}
                       method="post"
                       action={`/api/invoices/${invoice.id}/lines`}
-                      className="flex flex-wrap items-center gap-2 rounded-md border p-2"
+                      className="flex flex-wrap items-start gap-2 rounded-md border p-2"
                     >
                       <input type="hidden" name="lineId" value={line.id} />
-                      <Input
+                      {/* A textarea, because a line now carries the job: the
+                          date, the pickup and the drop-off, one per row. */}
+                      <textarea
                         name="description"
                         defaultValue={line.description}
                         aria-label="Description"
-                        className="min-w-48 flex-1"
+                        rows={Math.min(6, line.description.split('\n').length)}
+                        className="min-w-64 flex-1 rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm"
                       />
-                      <Input
-                        name="amount"
-                        inputMode="decimal"
-                        defaultValue={(line.amountPence / 100).toFixed(2)}
-                        aria-label="Amount"
-                        className="w-28 text-right tabular"
-                      />
-                      <span className="w-24 shrink-0 text-xs tabular text-muted-foreground">
+                      <div className="flex flex-col gap-1">
+                        <Input
+                          name="amount"
+                          inputMode="decimal"
+                          defaultValue={(line.amountPence / 100).toFixed(2)}
+                          aria-label="Amount"
+                          className="w-28 text-right tabular"
+                        />
+                        <Input
+                          name="disbursement"
+                          inputMode="decimal"
+                          defaultValue={(line.disbursementPence / 100).toFixed(2)}
+                          aria-label="Of which untaxed"
+                          title={`Parking and drop-off charges inside the amount. Never carries ${taxName}.`}
+                          className="w-28 text-right tabular"
+                        />
+                      </div>
+                      <Select
+                        name="vatTreatment"
+                        defaultValue={line.vatTreatment}
+                        aria-label={`${taxName} treatment`}
+                        className="w-44"
+                      >
+                        {VAT_TREATMENTS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </Select>
+                      <span className="w-24 shrink-0 pt-2 text-xs tabular text-muted-foreground">
                         {line.job ? (
                           <Link href={`/jobs/${line.job.id}`} className="hover:underline">
                             {line.job.reference}
@@ -275,14 +317,35 @@ export default async function InvoiceDetailPage({
                       className="w-28 text-right tabular"
                       required
                     />
+                    <Input
+                      name="disbursement"
+                      inputMode="decimal"
+                      placeholder="0.00"
+                      aria-label="Of which untaxed"
+                      className="w-28 text-right tabular"
+                    />
+                    <Select
+                      name="vatTreatment"
+                      defaultValue="STANDARD"
+                      aria-label={`New line ${taxName} treatment`}
+                      className="w-44"
+                    >
+                      {VAT_TREATMENTS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </Select>
                     <Button type="submit" variant="outline" size="sm">
                       <Plus aria-hidden />
                       Add line
                     </Button>
                   </form>
                   <p className="text-xs text-muted-foreground">
-                    A negative amount is a discount. Totals and VAT are
-                    recomputed on every change.
+                    A negative amount is a discount. The second box is the part
+                    of the amount paid on the client&rsquo;s behalf — parking,
+                    a drop-off charge, a toll — which never carries {taxName}.
+                    Totals are recomputed on every change.
                   </p>
                 </div>
               ) : (
@@ -290,48 +353,94 @@ export default async function InvoiceDetailPage({
                   <TableHeader>
                     <TableRow>
                       <TableHead>Description</TableHead>
+                      <TableHead>Quantity</TableHead>
+                      <TableHead>{taxName}</TableHead>
                       <TableHead>Reference</TableHead>
                       <TableHead className="text-right">Amount</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {invoice.lines.map((line) => (
-                      <TableRow key={line.id}>
-                        <TableCell>{line.description}</TableCell>
-                        <TableCell className="tabular text-muted-foreground">
-                          {line.job ? (
-                            <Link
-                              href={`/jobs/${line.job.id}`}
-                              className="hover:underline"
-                            >
-                              {line.job.reference}
-                            </Link>
-                          ) : line.rental ? (
-                            <Link
-                              href={`/rentals/${line.rental.id}`}
-                              className="hover:underline"
-                            >
-                              {line.rental.reference}
-                            </Link>
-                          ) : (
-                            '—'
-                          )}
-                        </TableCell>
-                        <TableCell className="text-right tabular">
-                          {formatGBP(line.amountPence)}
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {invoice.lines.map((line) => {
+                      const { title, details } = splitLineText(line.description);
+                      return (
+                        <TableRow key={line.id}>
+                          <TableCell>
+                            <span className="font-medium">{title}</span>
+                            {details.map((detail) => (
+                              <span
+                                key={detail}
+                                className="block text-xs text-muted-foreground"
+                              >
+                                {detail}
+                              </span>
+                            ))}
+                          </TableCell>
+                          <TableCell className="tabular whitespace-nowrap text-muted-foreground">
+                            {line.quantity === null
+                              ? '—'
+                              : `${Number(line.quantity)} ${line.quantityUnit ?? ''} × ${formatGBP(line.unitPricePence ?? 0)}`}
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap text-muted-foreground">
+                            {vatTreatmentLabel(line.vatTreatment)}
+                            {line.disbursementPence !== 0 ? (
+                              <span className="block text-xs">
+                                {formatGBP(line.disbursementPence)} untaxed
+                              </span>
+                            ) : null}
+                          </TableCell>
+                          <TableCell className="tabular text-muted-foreground">
+                            {line.job ? (
+                              <Link
+                                href={`/jobs/${line.job.id}`}
+                                className="hover:underline"
+                              >
+                                {line.job.reference}
+                              </Link>
+                            ) : line.rental ? (
+                              <Link
+                                href={`/rentals/${line.rental.id}`}
+                                className="hover:underline"
+                              >
+                                {line.rental.reference}
+                              </Link>
+                            ) : (
+                              '—'
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right tabular">
+                            {formatGBP(line.amountPence)}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               )}
 
               <dl className="mt-4 space-y-1.5 border-t pt-4 text-sm">
                 <Line label="Net" pence={invoice.netPence} />
-                <Line
-                  label={`VAT at ${Number(invoice.vatRatePct)}%`}
-                  pence={invoice.vatPence}
-                />
+                {/* One row per treatment in use. An invoice mixing taxed,
+                    tax-inclusive and non-qualifying work has no single rate,
+                    and printing an average matches nothing. */}
+                {tax.bands.map((band) => (
+                  <Line
+                    key={band.treatment}
+                    label={
+                      band.treatment === 'EXEMPT'
+                        ? `${taxName} — not chargeable`
+                        : band.treatment === 'INCLUSIVE'
+                          ? `${taxName} at ${band.ratePct}% (inside the price)`
+                          : `${taxName} at ${band.ratePct}%`
+                    }
+                    pence={band.taxPence}
+                  />
+                ))}
+                {tax.disbursementPence !== 0 ? (
+                  <Line
+                    label={`Of which paid on the client's behalf (no ${taxName})`}
+                    pence={tax.disbursementPence}
+                  />
+                ) : null}
                 <Line label="Gross" pence={invoice.grossPence} strong />
                 <Line label="Paid" pence={invoice.paidPence} />
                 <Line label="Outstanding" pence={outstanding} strong />

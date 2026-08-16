@@ -5,6 +5,7 @@ import {
   renderInvoiceDocument,
   type InvoiceDocumentData,
 } from './invoice-document';
+import { splitLineText } from './invoice-lines';
 import { getLocaleConfig } from './locale-store';
 import { prisma } from './prisma';
 
@@ -22,18 +23,24 @@ export async function invoiceDocumentHtml(
     where: { id: invoiceId },
     include: {
       client: {
-        select: { name: true, billingAddress: true, paymentTermsDays: true },
-      },
-      account: {
-        select: { name: true, billingAddress: true, paymentTermsDays: true },
-      },
-      lines: {
-        orderBy: { sortOrder: 'asc' },
-        include: {
-          job: { select: { reference: true, scheduledAt: true } },
-          rental: { select: { reference: true, startAt: true } },
+        select: {
+          name: true,
+          billingAddress: true,
+          billingEmail: true,
+          contactEmail: true,
+          paymentTermsDays: true,
         },
       },
+      account: {
+        select: {
+          name: true,
+          billingAddress: true,
+          billingEmail: true,
+          contactEmail: true,
+          paymentTermsDays: true,
+        },
+      },
+      lines: { orderBy: { sortOrder: 'asc' } },
     },
   });
 
@@ -54,16 +61,21 @@ export async function invoiceDocumentHtml(
     isCreditNote: Boolean(invoice.creditsInvoiceId),
     recipientName: recipient?.name ?? 'No recipient recorded',
     recipientAddress: recipient?.billingAddress ?? null,
-    lines: invoice.lines.map((line) => ({
-      description: line.description,
-      amountPence: line.amountPence,
-      reference: line.job?.reference ?? line.rental?.reference ?? null,
-      occurredOn: line.job
-        ? formatDate(line.job.scheduledAt)
-        : line.rental
-          ? formatDate(line.rental.startAt)
-          : null,
-    })),
+    recipientEmail: recipient?.billingEmail ?? recipient?.contactEmail ?? null,
+    lines: invoice.lines.map((line) => {
+      const { title, details } = splitLineText(line.description);
+      return {
+        title,
+        details,
+        amountPence: line.amountPence,
+        disbursementPence: line.disbursementPence,
+        vatTreatment: line.vatTreatment,
+        quantity:
+          line.quantity === null ? null : Number(line.quantity.toString()),
+        quantityUnit: line.quantityUnit,
+        unitPricePence: line.unitPricePence,
+      };
+    }),
     netPence: invoice.netPence,
     vatPence: invoice.vatPence,
     grossPence: invoice.grossPence,
@@ -71,6 +83,9 @@ export async function invoiceDocumentHtml(
     vatRatePct: Number(invoice.vatRatePct),
     paymentTermsDays: recipient?.paymentTermsDays ?? null,
     notes: invoice.notes,
+    // Who signs. From settings, so the name on the paperwork changes when the
+    // director does rather than when somebody edits a template.
+    signatory: branding.invoiceSignatory,
   };
 
   return renderInvoiceDocument(data, {

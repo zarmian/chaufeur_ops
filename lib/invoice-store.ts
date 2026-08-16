@@ -10,9 +10,19 @@ import {
   statusFor,
   type InvoiceStatus,
 } from './invoices';
+import { buildJobLine } from './invoice-lines';
+import { financeAmountsFrom, jobEconomics } from './job-finance';
 import { billableClientPence } from './job-status';
 import { getLocaleConfig } from './locale-store';
 import { prisma } from './prisma';
+import type { TaxableLine, VatTreatment } from './vat';
+
+/** Prisma hands `Decimal` back for the fractional columns; arithmetic wants a number. */
+function toNumberOrNull(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number') return value;
+  return Number((value as { toString(): string }).toString());
+}
 
 /**
  * Creating and settling invoices.
@@ -73,8 +83,75 @@ async function allocateNumber(
 export interface InvoiceLineInput {
   description: string;
   amountPence: number;
+  /** Pass-through charges inside `amountPence`, never taxed. */
+  disbursementPence?: number | null;
+  vatTreatment?: VatTreatment | null;
+  quantity?: number | null;
+  quantityUnit?: string | null;
+  unitPricePence?: number | null;
   jobId?: string | null;
   rentalId?: string | null;
+}
+
+/** The tax-bearing shape of a line, for the totals. */
+function taxable(line: {
+  amountPence: number;
+  disbursementPence?: number | null;
+  vatTreatment?: VatTreatment | null;
+}): TaxableLine {
+  return {
+    amountPence: line.amountPence,
+    disbursementPence: line.disbursementPence ?? 0,
+    treatment: line.vatTreatment ?? 'STANDARD',
+  };
+}
+
+/** The columns a line writes, with the defaults an ad-hoc line takes. */
+function lineData(line: InvoiceLineInput, sortOrder: number) {
+  return {
+    description: line.description,
+    amountPence: line.amountPence,
+    disbursementPence: line.disbursementPence ?? 0,
+    vatTreatment: line.vatTreatment ?? 'STANDARD',
+    quantity:
+      line.quantity === null || line.quantity === undefined
+        ? null
+        : new Prisma.Decimal(line.quantity),
+    quantityUnit: line.quantityUnit ?? null,
+    unitPricePence: line.unitPricePence ?? null,
+    jobId: line.jobId ?? null,
+    rentalId: line.rentalId ?? null,
+    sortOrder,
+  };
+}
+
+/**
+ * Recompute an invoice's totals from its own lines.
+ *
+ * Called after every change rather than adjusted incrementally: tax is worked
+ * out per treatment on the group's total (see `lib/vat.ts`), so adding a
+ * delta would drift away from what the document says about itself.
+ */
+async function retotal(
+  tx: Prisma.TransactionClient,
+  invoiceId: string,
+  vatRatePct: number,
+) {
+  const lines = await tx.invoiceLine.findMany({
+    where: { invoiceId },
+    select: { amountPence: true, disbursementPence: true, vatTreatment: true },
+  });
+  const totals = invoiceTotals(lines.map(taxable), vatRatePct);
+
+  return tx.invoice.update({
+    where: { id: invoiceId },
+    data: {
+      netPence: totals.netPence,
+      vatPence: totals.vatPence,
+      grossPence: totals.grossPence,
+    },
+    include: { lines: { orderBy: { sortOrder: 'asc' } } },
+  });
 }
 
 export interface CreateInvoiceInput {
@@ -129,10 +206,7 @@ export async function createInvoice(
     getLocaleConfig(),
   ]);
 
-  const totals = invoiceTotals(
-    input.lines.map((line) => line.amountPence),
-    locale.taxRatePct,
-  );
+  const totals = invoiceTotals(input.lines.map(taxable), locale.taxRatePct);
 
   const dueDate = input.dueDate ?? (await defaultDueDate(input, input.issueDate));
 
@@ -158,15 +232,7 @@ export async function createInvoice(
           grossPence: totals.grossPence,
           vatRatePct: new Prisma.Decimal(locale.taxRatePct),
           notes: input.notes ?? null,
-          lines: {
-            create: input.lines.map((line, index) => ({
-              description: line.description,
-              amountPence: line.amountPence,
-              jobId: line.jobId ?? null,
-              rentalId: line.rentalId ?? null,
-              sortOrder: index,
-            })),
-          },
+          lines: { create: input.lines.map(lineData) },
         },
         select: { id: true, number: true },
       });
@@ -467,10 +533,18 @@ export async function createCreditNote(
       status: true,
       clientId: true,
       accountId: true,
+      // The rate the original was raised at. A credit note that reverses a
+      // 20% invoice at today's 17.5% hands back the wrong money.
+      vatRatePct: true,
       lines: {
         select: {
           description: true,
           amountPence: true,
+          disbursementPence: true,
+          vatTreatment: true,
+          quantity: true,
+          quantityUnit: true,
+          unitPricePence: true,
           jobId: true,
           rentalId: true,
         },
@@ -491,16 +565,14 @@ export async function createCreditNote(
     };
   }
 
-  const [{ invoiceNumberPrefix }, locale] = await Promise.all([
-    getBranding(),
-    getLocaleConfig(),
-  ]);
+  const [{ invoiceNumberPrefix }] = await Promise.all([getBranding()]);
 
+  // The original's rate, not today's. A credit note settles a specific
+  // invoice, and one raised at a rate that has since changed would leave a
+  // balance that no payment can clear.
+  const vatRatePct = Number(original.vatRatePct);
   const lines = creditNoteLines(original.lines);
-  const totals = invoiceTotals(
-    lines.map((line) => line.amountPence),
-    locale.taxRatePct,
-  );
+  const totals = invoiceTotals(lines.map(taxable), vatRatePct);
   const issueDate = new Date();
 
   const created = await withAudit(
@@ -523,21 +595,21 @@ export async function createCreditNote(
           netPence: totals.netPence,
           vatPence: totals.vatPence,
           grossPence: totals.grossPence,
-          vatRatePct: new Prisma.Decimal(locale.taxRatePct),
+          vatRatePct: new Prisma.Decimal(vatRatePct),
           status: 'SENT',
           sentAt: issueDate,
           creditsInvoiceId: original.id,
           notes: `Credit note for ${original.number}`,
           lines: {
-            // The link back to the job or rental is kept: a credit note that
-            // is untraceable free text means nothing reconciles.
-            create: lines.map((line, index) => ({
-              description: line.description,
-              amountPence: line.amountPence,
-              jobId: line.jobId,
-              rentalId: line.rentalId,
-              sortOrder: index,
-            })),
+            // The link back to the job or rental is kept, along with the
+            // treatment and the quantity columns: a credit note that is
+            // untraceable free text means nothing reconciles.
+            create: lines.map((line, index) =>
+              lineData(
+                { ...line, quantity: toNumberOrNull(line.quantity) },
+                index,
+              ),
+            ),
           },
         },
         select: { id: true, number: true },
@@ -566,9 +638,20 @@ export async function createCreditNote(
  * charged on the total, not per line (see `invoiceTotals`), so an incremental
  * adjustment would drift away from what the invoice says about itself.
  */
+export interface LineFields {
+  description: string;
+  amountPence: number;
+  /**
+   * The pass-through part. Editable because the operator is the one who knows
+   * that £7.50 of a £97.50 line was the car park — see `lib/vat.ts`.
+   */
+  disbursementPence?: number | null;
+  vatTreatment?: VatTreatment | null;
+}
+
 export type LineEdit =
-  | { kind: 'add'; description: string; amountPence: number }
-  | { kind: 'update'; lineId: string; description: string; amountPence: number }
+  | ({ kind: 'add' } & LineFields)
+  | ({ kind: 'update'; lineId: string } & LineFields)
   | { kind: 'remove'; lineId: string }
   | { kind: 'move'; lineId: string; direction: 'up' | 'down' };
 
@@ -603,9 +686,10 @@ export async function editLines(
         await tx.invoiceLine.create({
           data: {
             invoiceId,
-            description: edit.description.trim(),
-            amountPence: edit.amountPence,
-            sortOrder: before.lines.length,
+            ...lineData(
+              { ...edit, description: edit.description.trim() },
+              before.lines.length,
+            ),
           },
         });
       } else if (edit.kind === 'update') {
@@ -614,6 +698,8 @@ export async function editLines(
           data: {
             description: edit.description.trim(),
             amountPence: edit.amountPence,
+            disbursementPence: edit.disbursementPence ?? 0,
+            vatTreatment: edit.vatTreatment ?? 'STANDARD',
           },
         });
       } else if (edit.kind === 'remove') {
@@ -638,24 +724,7 @@ export async function editLines(
         }
       }
 
-      const lines = await tx.invoiceLine.findMany({
-        where: { invoiceId },
-        select: { amountPence: true },
-      });
-      const totals = invoiceTotals(
-        lines.map((line) => line.amountPence),
-        Number(before.vatRatePct),
-      );
-
-      const after = await tx.invoice.update({
-        where: { id: invoiceId },
-        data: {
-          netPence: totals.netPence,
-          vatPence: totals.vatPence,
-          grossPence: totals.grossPence,
-        },
-        include: { lines: { orderBy: { sortOrder: 'asc' } } },
-      });
+      const after = await retotal(tx, invoiceId, Number(before.vatRatePct));
 
       return { entityId: invoiceId, before, after, result: null };
     },
@@ -690,14 +759,28 @@ export async function addJobLine(
     select: {
       id: true,
       reference: true,
+      jobType: true,
       scheduledAt: true,
       pickupText: true,
       dropoffText: true,
+      viaText: true,
+      passengerName: true,
+      flightNumber: true,
       clientPricePence: true,
       // The hourly total, for an as-directed job. Without it this refused
       // every as-directed job as "no client price" and, worse, would have
       // billed one at zero if it had let it through.
-      finance: { select: { totalClientPence: true } },
+      finance: true,
+      // Stop charges and recharged expenses are revenue the finance panel
+      // never saw — see `jobEconomics`. `kind` additionally says which of the
+      // recharged ones are pass-through.
+      stops: { select: { chargePence: true } },
+      expenses: { select: { kind: true, amountPence: true, borneBy: true } },
+      driverPricePence: true,
+      shiftId: true,
+      vatTreatment: true,
+      account: { select: { vatTreatment: true } },
+      client: { select: { vatTreatment: true } },
       zeroValueReason: true,
       status: true,
       invoiceLines: { select: { invoice: { select: { number: true } } } },
@@ -717,11 +800,25 @@ export async function addJobLine(
     };
   }
 
-  // From wherever the figure lives: a fixed fare, or hours × rate for
-  // as-directed work.
-  const amountPence = billableClientPence(job);
+  // Everything the client owes for this job: the fare or hours × rate, plus
+  // stop charges and any expense recharged to them. The same function the
+  // "new invoice" picker prices with — the two used to disagree, and this
+  // path silently dropped a job's recharged parking, so it was never billed
+  // by anybody.
+  const finance = financeAmountsFrom(job.finance);
+  const amountPence = jobEconomics({
+    finance,
+    clientPricePence: job.clientPricePence,
+    driverPricePence: job.driverPricePence,
+    stops: job.stops,
+    expenses: job.expenses,
+    paidByShift: Boolean(job.shiftId),
+  }).totalClientPence;
 
-  if (amountPence <= 0 && !job.zeroValueReason) {
+  // Guarded on the fare, not the total: a job with no price but £7.50 of
+  // recharged parking is still an unpriced job, and letting it through would
+  // mark it billed for the car park alone.
+  if (billableClientPence(job) <= 0 && !job.zeroValueReason) {
     return {
       ok: false,
       code: 'NO_PRICE',
@@ -741,31 +838,14 @@ export async function addJobLine(
       await tx.invoiceLine.create({
         data: {
           invoiceId,
-          jobId: job.id,
-          description: `${job.reference} — ${job.pickupText} to ${job.dropoffText}`,
-          amountPence,
-          sortOrder: before.lines.length,
+          ...lineData(
+            { ...buildJobLine({ job: { ...job, finance }, amountPence }), jobId: job.id },
+            before.lines.length,
+          ),
         },
       });
 
-      const lines = await tx.invoiceLine.findMany({
-        where: { invoiceId },
-        select: { amountPence: true },
-      });
-      const totals = invoiceTotals(
-        lines.map((line) => line.amountPence),
-        Number(before.vatRatePct),
-      );
-
-      const after = await tx.invoice.update({
-        where: { id: invoiceId },
-        data: {
-          netPence: totals.netPence,
-          vatPence: totals.vatPence,
-          grossPence: totals.grossPence,
-        },
-        include: { lines: { orderBy: { sortOrder: 'asc' } } },
-      });
+      const after = await retotal(tx, invoiceId, Number(before.vatRatePct));
 
       return { entityId: invoiceId, before, after, result: null };
     },

@@ -33,6 +33,12 @@ export interface Branding {
   taxNumber: string | null;
   companyNumber: string | null;
   bankDetails: string | null;
+  /**
+   * Who signs the paperwork, and in what capacity — "A. Patel, Director".
+   * Printed under the signature rule on an invoice. Null leaves the rule
+   * blank, which is what a company that signs by hand wants.
+   */
+  invoiceSignatory: string | null;
 
   /** Job reference prefix — `ACME` produces `ACME-000767`. */
   jobReferencePrefix: string;
@@ -55,6 +61,7 @@ export const DEFAULT_BRANDING: Branding = {
   taxNumber: null,
   companyNumber: null,
   bankDetails: null,
+  invoiceSignatory: null,
   jobReferencePrefix: 'JOB',
   invoiceNumberPrefix: 'INV',
 };
@@ -150,6 +157,7 @@ export const brandingSchema = z.object({
   taxNumber: optionalText(40),
   companyNumber: optionalText(40),
   bankDetails: optionalText(600),
+  invoiceSignatory: optionalText(120),
   jobReferencePrefix: referencePrefix('job reference'),
   invoiceNumberPrefix: referencePrefix('invoice number'),
 

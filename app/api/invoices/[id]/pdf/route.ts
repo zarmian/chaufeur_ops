@@ -28,7 +28,20 @@ export const GET = withErrorHandling(
       return new Response('No such invoice', { status: 404 });
     }
 
-    const rendered = await tryRenderPdf(html);
+    const number = numberFrom(html) ?? id;
+
+    /*
+     * The footer is what sets the page margins.
+     *
+     * The document declares no `@page { margin }` — a CSS page margin silently
+     * overrides the one `page.pdf()` is given, which is how body text ends up
+     * printing through a running footer. So the margins come from `lib/pdf.ts`,
+     * and they only come at all when a footer is asked for.
+     *
+     * An invoice wants one regardless: a four-page invoice whose later pages
+     * carry no number is a document that cannot be shown to be complete.
+     */
+    const rendered = await tryRenderPdf(html, { footerText: number });
     if (!rendered.ok) {
       // 503 rather than 500: nothing is wrong with the invoice, and the
       // printable version at `/document` works regardless.
@@ -37,8 +50,6 @@ export const GET = withErrorHandling(
         headers: { 'Content-Type': 'text/plain; charset=utf-8' },
       });
     }
-
-    const number = numberFrom(html) ?? id;
 
     return new Response(new Uint8Array(rendered.pdf), {
       headers: {

@@ -54,6 +54,7 @@ export default async function EditClientPage({
           billingAddress: client.billingAddress ?? '',
           vatNumber: client.vatNumber ?? '',
           paymentTermsDays: client.paymentTermsDays,
+          vatTreatment: client.vatTreatment,
           defaultAccountId: client.defaultAccountId ?? '',
           notes: client.notes ?? '',
         }}

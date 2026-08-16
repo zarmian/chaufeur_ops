@@ -76,6 +76,7 @@ export default async function EditJobPage({
           flightNumber: job.flightNumber ?? '',
           clientPrice: asPounds(job.clientPricePence),
           driverPrice: asPounds(job.driverPricePence),
+          vatTreatment: job.vatTreatment ?? '',
           customerHours: job.finance?.customerHours?.toString() ?? '',
           customerRate: asPounds(job.finance?.customerRatePence ?? null),
           minimumHours: '',

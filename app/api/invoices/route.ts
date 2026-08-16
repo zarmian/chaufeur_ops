@@ -84,9 +84,11 @@ export async function POST(request: Request) {
           `${match.reference} is already on an invoice.`,
         );
       }
+      // The line as `billableFor` built it — description, tax treatment,
+      // pass-through part and quantity columns. Derived here rather than
+      // posted, for the same reason the amount is.
       lines.push({
-        description: match.description,
-        amountPence: match.amountPence,
+        ...match.line,
         jobId: match.kind === 'JOB' ? match.id : null,
         rentalId: match.kind === 'RENTAL' ? match.id : null,
       });

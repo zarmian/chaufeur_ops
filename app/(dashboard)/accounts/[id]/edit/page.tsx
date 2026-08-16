@@ -35,6 +35,7 @@ export default async function EditAccountPage({
           billingAddress: account.billingAddress ?? '',
           vatNumber: account.vatNumber ?? '',
           paymentTermsDays: account.paymentTermsDays,
+          vatTreatment: account.vatTreatment,
           commissionPct: account.commissionPct?.toString() ?? '',
           active: account.active,
         }}

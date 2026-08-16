@@ -41,6 +41,7 @@ export interface BrandingFormValues {
   taxNumber: string;
   companyNumber: string;
   bankDetails: string;
+  invoiceSignatory: string;
   jobReferencePrefix: string;
   invoiceNumberPrefix: string;
 }
@@ -187,6 +188,19 @@ export function BrandingForm({
                 rows={3}
                 defaultValue={values.bankDetails}
                 maxLength={600}
+              />
+            </FormField>
+
+            <FormField
+              name="invoiceSignatory"
+              label="Invoice signatory"
+              hint="Printed under the signature rule on an invoice — a name and a capacity, e.g. “A. Patel, Director”. Leave it blank to print a rule and nothing else."
+            >
+              <Input
+                id="invoiceSignatory"
+                name="invoiceSignatory"
+                defaultValue={values.invoiceSignatory}
+                maxLength={120}
               />
             </FormField>
           </Section>

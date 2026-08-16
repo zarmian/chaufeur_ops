@@ -104,7 +104,10 @@ export async function emailInvoice(
     };
   }
 
-  const pdf = await tryRenderPdf(html);
+  // The footer is also what sets the page margins — the document declares no
+  // `@page { margin }`, because a CSS page margin silently overrides the one
+  // `page.pdf()` is given. See the note in `app/api/invoices/[id]/pdf`.
+  const pdf = await tryRenderPdf(html, { footerText: invoice.number });
   if (!pdf.ok) {
     return {
       attempted: false,

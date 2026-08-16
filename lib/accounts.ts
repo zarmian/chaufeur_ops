@@ -34,6 +34,8 @@ export const accountSchema = z.object({
   billingAddress: z.string().trim().max(500).optional().or(z.literal('')),
   vatNumber: z.string().trim().max(50).optional().or(z.literal('')),
   paymentTermsDays: z.coerce.number().int().min(0).max(365).default(14),
+  // How this booker's work is normally taxed. A job may override it.
+  vatTreatment: z.enum(['STANDARD', 'INCLUSIVE', 'EXEMPT']).default('STANDARD'),
   commissionPct: z
     .union([z.coerce.number().min(0).max(100), z.literal('')])
     .optional(),
@@ -53,6 +55,7 @@ function toData(input: AccountInput) {
     billingAddress: emptyToNull(input.billingAddress),
     vatNumber: emptyToNull(input.vatNumber),
     paymentTermsDays: input.paymentTermsDays,
+    vatTreatment: input.vatTreatment,
     // Commission is a percentage, not money — Decimal is right here, and the
     // pence rule does not apply.
     commissionPct:
@@ -115,6 +118,7 @@ export async function listAccounts(
         kind: true,
         contactName: true,
         paymentTermsDays: true,
+        vatTreatment: true,
         active: true,
         deletedAt: true,
         _count: { select: { jobs: true, clients: true } },

@@ -55,6 +55,7 @@ export default async function BrandingSettingsPage({
           taxNumber: branding.taxNumber ?? '',
           companyNumber: branding.companyNumber ?? '',
           bankDetails: branding.bankDetails ?? '',
+          invoiceSignatory: branding.invoiceSignatory ?? '',
           jobReferencePrefix: branding.jobReferencePrefix,
           invoiceNumberPrefix: branding.invoiceNumberPrefix,
         }}

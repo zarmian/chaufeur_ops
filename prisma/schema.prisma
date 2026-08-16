@@ -222,11 +222,30 @@ enum HandoverPhase {
 enum ExpenseKind {
   TOLL
   PARKING
+  /// The barrier fee an airport charges to set down at the terminal. Kept
+  /// apart from PARKING because it is the other charge that must never carry
+  /// tax, and "parking" on a statement that means a drop-off barrier is how
+  /// somebody later fails to spot it.
+  DROPOFF_CHARGE
   FUEL
   CONGESTION_CHARGE
   ULEZ
   WAITING
   OTHER
+}
+
+/// How the agreed price relates to tax.
+///
+/// Not every job is tax-qualifying, and of the ones that are, some are priced
+/// before tax and some after. One rate on the invoice header forced all three
+/// into whichever the operator picked; see `lib/vat.ts`.
+enum VatTreatment {
+  /// The price is before tax. Tax is added to it.
+  STANDARD
+  /// The price already contains tax. It is shown separately, not added.
+  INCLUSIVE
+  /// Not tax-qualifying. Nothing is added.
+  EXEMPT
 }
 
 // ------------------------------------------------------- people and access
@@ -355,6 +374,8 @@ model Client {
   billingAddress   String?
   vatNumber        String?
   paymentTermsDays Int            @default(14)
+  /// What this client's work is normally charged at. A job may override it.
+  vatTreatment     VatTreatment   @default(STANDARD)
   /// How this client is kept informed — spec 5.10.4. `NONE` is a real
   /// choice: a corporate booker whose PA handles everything does not want
   /// four texts a day, and defaulting everybody to "both" is how a system
@@ -391,6 +412,10 @@ model Account {
   billingAddress   String?
   vatNumber        String?
   paymentTermsDays Int         @default(14)
+  /// What this booker's work is normally charged at — an agency billing its
+  /// own client gross wants INCLUSIVE, a non-registered partner EXEMPT. A job
+  /// may override it.
+  vatTreatment     VatTreatment @default(STANDARD)
   rateCardId       String?
   /// agency margin, not money — Decimal is correct here
   commissionPct    Decimal?    @db.Decimal(5, 2)
@@ -713,6 +738,9 @@ model Job {
   rateCardRuleId   String?
   /// required to complete a zero-value job
   zeroValueReason  String?
+  /// Overrides the account's or client's treatment for this job alone. Null
+  /// means "follow whoever is billed" — see `resolveVatTreatment`.
+  vatTreatment     VatTreatment?
 
   notes         String?
   internalNotes String?
@@ -1103,6 +1131,9 @@ model VehicleRental {
 
   rateType  RentalRateType @default(DAILY)
   ratePence Int
+  /// Overrides the renter's treatment for this hire alone. Null follows the
+  /// account, then the install default.
+  vatTreatment VatTreatment?
 
   depositPence         Int       @default(0)
   depositReturnedPence Int       @default(0)
@@ -1264,8 +1295,25 @@ model InvoiceLine {
   /// text — nothing would tie the line back to the agreement it came from.
   rentalId String?
 
+  /// The first line is the line's title; the rest is detail — the date, the
+  /// pickup, the drop-off. Stored rather than derived from the job, because an
+  /// invoice that has been sent must not change when somebody corrects the
+  /// job it came from.
   description String
+  /// The charge as agreed and as shown. Before tax under STANDARD, already
+  /// containing it under INCLUSIVE.
   amountPence Int
+  /// The part of `amountPence` that is passed through — parking, a drop-off
+  /// charge, a toll. Never taxed under any treatment.
+  disbursementPence Int @default(0)
+  /// Snapshotted when the line is added. The invoice header keeps the rate;
+  /// this is how the rate applies to this line.
+  vatTreatment VatTreatment @default(STANDARD)
+  /// What the quantity/rate columns show. Null on an ad-hoc line, which has
+  /// only an amount — a made-up "1 × £45" is worse than no columns at all.
+  quantity      Decimal? @db.Decimal(9, 2)
+  quantityUnit  String?
+  unitPricePence Int?
   sortOrder   Int    @default(0)
 
   invoice Invoice        @relation(fields: [invoiceId], references: [id])
