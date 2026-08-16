@@ -3,7 +3,11 @@ import { PageHeader } from '@/components/page-header';
 import { toDateOnlyString } from '@/lib/dates';
 import { formatMoney } from '@/lib/money';
 import { pageRequireCapability } from '@/lib/page-guards';
-import { getVehicle, listDriverOptions } from '@/lib/vehicles';
+import {
+  getVehicle,
+  listDriverOptions,
+  openFinanceAgreement,
+} from '@/lib/vehicles';
 import { updateVehicleAction } from '../../actions';
 import { VehicleForm } from '../../vehicle-form';
 
@@ -20,6 +24,19 @@ const asNumberInput = (value: number | null) =>
 const asMoneyInput = (pence: number | null) =>
   pence === null ? '' : formatMoney(pence, { bare: true }).replace(/,/g, '');
 
+/**
+ * The provider back out of a standing cost's label.
+ *
+ * The label is what the costs panel shows, so it reads "Lease — Arval" rather
+ * than carrying a separate column nothing else would use. Splitting on the
+ * dash is enough, and a label somebody typed by hand simply yields nothing.
+ */
+function providerFrom(label: string | null): string {
+  if (!label) return '';
+  const [, provider] = label.split(' — ');
+  return provider?.trim() ?? '';
+}
+
 export default async function EditVehiclePage({
   params,
 }: {
@@ -31,7 +48,13 @@ export default async function EditVehiclePage({
   const vehicle = await getVehicle(id);
   if (!vehicle) notFound();
 
-  const drivers = await listDriverOptions();
+  // The agreement still running on the car, if any. An expired one is left
+  // alone: the months it covered are real cost, and the form edits only what
+  // is in force.
+  const [drivers, agreement] = await Promise.all([
+    listDriverOptions(),
+    openFinanceAgreement(vehicle.id),
+  ]);
 
   return (
     <>
@@ -64,6 +87,12 @@ export default async function EditVehiclePage({
           acquiredOn: asDateInput(vehicle.acquiredOn),
           disposedOn: asDateInput(vehicle.disposedOn),
           purchasePrice: asMoneyInput(vehicle.purchasePricePence),
+          financePayment: asMoneyInput(agreement?.amountPence ?? null),
+          financePeriodMonths: asNumberInput(agreement?.periodMonths ?? null),
+          financeStartsOn: asDateInput(agreement?.startsOn ?? null),
+          financeEndsOn: asDateInput(agreement?.endsOn ?? null),
+          // The provider is stored as part of the label — "Lease — Arval".
+          financeProvider: providerFrom(agreement?.label ?? null),
           currentOdometer: asNumberInput(vehicle.currentOdometer),
           lastServicedOn: asDateInput(vehicle.lastServicedOn),
           lastServiceMiles: asNumberInput(vehicle.lastServiceMiles),

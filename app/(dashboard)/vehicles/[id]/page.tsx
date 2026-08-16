@@ -58,6 +58,15 @@ export default async function VehicleDetailPage({
   ]);
 
   const companyOwned = companyBearsCosts(vehicle.ownership);
+  // The finance or lease agreement still running, out of the standing costs
+  // already loaded. An ended one stays in the list below, where its months of
+  // accrued cost belong, but it is not what the car costs today.
+  const agreement =
+    standing.find(
+      (cost) =>
+        (cost.kind === 'FINANCE' || cost.kind === 'LEASE') &&
+        (cost.endsOn === null || cost.endsOn >= new Date()),
+    ) ?? null;
   const mayEditCosts = can(user, 'editJobFinances');
   const costError = filterValue(query, 'costError');
 
@@ -162,14 +171,30 @@ export default async function VehicleDetailPage({
                   label="Acquired"
                   value={vehicle.acquiredOn ? formatDate(vehicle.acquiredOn) : null}
                 />
-                <Row
-                  label="Purchase price"
-                  value={
-                    vehicle.purchasePricePence === null
-                      ? null
-                      : formatGBP(vehicle.purchasePricePence)
-                  }
-                />
+                {/* A leased car has no purchase price — it has a payment, and
+                    that payment is what it costs to hold. Showing the price
+                    field on one is asking a question with no answer. */}
+                {agreement ? (
+                  <Row
+                    label={
+                      agreement.kind === 'LEASE' ? 'Lease payment' : 'Finance payment'
+                    }
+                    value={`${formatGBP(agreement.amountPence)}${
+                      agreement.periodMonths === 1
+                        ? ' a month'
+                        : ` every ${agreement.periodMonths} months`
+                    }${agreement.endsOn ? `, until ${formatDate(agreement.endsOn)}` : ''}`}
+                  />
+                ) : (
+                  <Row
+                    label="Purchase price"
+                    value={
+                      vehicle.purchasePricePence === null
+                        ? null
+                        : formatGBP(vehicle.purchasePricePence)
+                    }
+                  />
+                )}
                 <Row
                   label="Odometer"
                   value={

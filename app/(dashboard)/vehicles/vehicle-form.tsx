@@ -45,6 +45,11 @@ export interface VehicleFormValues {
   acquiredOn: string;
   disposedOn: string;
   purchasePrice: string;
+  financePayment: string;
+  financePeriodMonths: string;
+  financeStartsOn: string;
+  financeEndsOn: string;
+  financeProvider: string;
   currentOdometer: string;
   lastServicedOn: string;
   lastServiceMiles: string;
@@ -75,6 +80,11 @@ const BLANK: VehicleFormValues = {
   acquiredOn: '',
   disposedOn: '',
   purchasePrice: '',
+  financePayment: '',
+  financePeriodMonths: '',
+  financeStartsOn: '',
+  financeEndsOn: '',
+  financeProvider: '',
   currentOdometer: '',
   lastServicedOn: '',
   lastServiceMiles: '',
@@ -113,6 +123,12 @@ export function VehicleForm({
   // operator to work out which half to ignore.
   const [ownership, setOwnership] = useState(values.ownership);
   const companyOwned = ownership !== 'DRIVER_OWNED';
+  // A financed or leased car has no purchase price worth recording; it has a
+  // payment. Asking for the price instead left the largest running cost on the
+  // fleet off the books, so every leased car reported a profit it was not
+  // making.
+  const onAgreement = ownership === 'FINANCED' || ownership === 'LEASED';
+  const agreementWord = ownership === 'LEASED' ? 'Lease' : 'Finance';
 
   return (
     <form action={formAction} className="max-w-2xl space-y-8">
@@ -249,7 +265,19 @@ export function VehicleForm({
             </Select>
           </FormField>
 
-          {companyOwned ? (
+          {onAgreement ? (
+            <FormField
+              name="financeProvider"
+              label={`${agreementWord} company`}
+              hint="Who the payments go to."
+              errors={errors.financeProvider}
+            >
+              <Input
+                {...fieldProps('financeProvider', errors.financeProvider)}
+                defaultValue={values.financeProvider}
+              />
+            </FormField>
+          ) : companyOwned ? (
             <FormField
               name="purchasePrice"
               label="Purchase price"
@@ -286,6 +314,80 @@ export function VehicleForm({
           )}
         </div>
 
+        {onAgreement ? (
+          <div className="space-y-4 rounded-md border border-dashed p-3">
+            <p className="text-sm font-medium">The agreement</p>
+            <p className="text-sm text-muted-foreground">
+              The payment is what this car costs to hold, so it belongs in its
+              profit and loss. Recorded once here and spread across the months
+              it covers — it appears under Standing costs on the vehicle, and
+              in the fleet report, without being entered again each month.
+            </p>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <FormField
+                name="financePayment"
+                label={`${agreementWord} payment`}
+                hint="The amount that leaves the account each period."
+                errors={errors.financePayment}
+              >
+                <Input
+                  {...fieldProps('financePayment', errors.financePayment)}
+                  inputMode="decimal"
+                  placeholder="750.00"
+                  defaultValue={values.financePayment}
+                  className="tabular"
+                />
+              </FormField>
+
+              <FormField
+                name="financePeriodMonths"
+                label="Every (months)"
+                hint="1 for a monthly payment."
+                errors={errors.financePeriodMonths}
+              >
+                <Input
+                  {...fieldProps('financePeriodMonths', errors.financePeriodMonths)}
+                  type="number"
+                  min={1}
+                  max={120}
+                  placeholder="1"
+                  defaultValue={values.financePeriodMonths}
+                  className="tabular"
+                />
+              </FormField>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <FormField
+                name="financeStartsOn"
+                label="Agreement starts"
+                hint="Payments are spread from here, not from today."
+                errors={errors.financeStartsOn}
+              >
+                <Input
+                  {...fieldProps('financeStartsOn', errors.financeStartsOn)}
+                  type="date"
+                  defaultValue={values.financeStartsOn}
+                />
+              </FormField>
+
+              <FormField
+                name="financeEndsOn"
+                label="Agreement ends"
+                hint="Leave blank while it is still running."
+                errors={errors.financeEndsOn}
+              >
+                <Input
+                  {...fieldProps('financeEndsOn', errors.financeEndsOn)}
+                  type="date"
+                  defaultValue={values.financeEndsOn}
+                />
+              </FormField>
+            </div>
+          </div>
+        ) : null}
+
         {companyOwned ? (
           <div className="grid gap-4 sm:grid-cols-2">
             <FormField
@@ -315,10 +417,23 @@ export function VehicleForm({
           </div>
         ) : null}
 
-        {/* A collapsed field posts nothing, and nothing saves as null. Held
-            here so switching a car to its driver's own — which is where these
-            costs stop being the company's — does not also erase the record of
-            what it cost and when it was last serviced. */}
+        {/* A collapsed field posts nothing, and nothing saves as null. A car
+            bought outright and later refinanced still cost what it cost, and
+            the purchase price should not vanish because the form stopped
+            asking for it. The agreement needs no equivalent: it lives on its
+            own standing-cost record, which is closed rather than erased when
+            the car stops being financed. */}
+        {onAgreement ? (
+          <input
+            type="hidden"
+            name="purchasePrice"
+            value={values.purchasePrice}
+          />
+        ) : null}
+
+        {/* Same reasoning for the company-only fields, on the switch to a
+            driver's own car — which is where these costs stop being the
+            company's, but the record of them is still worth keeping. */}
         {companyOwned ? null : (
           <>
             <input

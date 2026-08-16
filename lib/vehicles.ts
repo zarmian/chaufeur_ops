@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { withAudit, type AuditContext } from './audit';
 import {
@@ -8,7 +9,7 @@ import {
 } from './compliance';
 import { fromDateOnlyString } from './dates';
 import type { ListParams } from './list-params';
-import { parseMoney } from './money';
+import { parseMoney, tryParseMoney } from './money';
 import { prisma } from './prisma';
 import { emptyToNull, normaliseRegistration, tidy } from './text';
 
@@ -34,6 +35,29 @@ const optionalInt = z.preprocess(
     value === '' || value === null || value === undefined ? null : value,
   z.coerce.number().int().min(0).max(2_000_000).nullable(),
 );
+
+/**
+ * A typed amount, rejected here rather than at `parseMoney`.
+ *
+ * `parseMoney` throws, and a throw out of a Server Action reaches the route's
+ * error boundary as "this page could not be loaded" — which tells the operator
+ * the page is broken when in fact one field is. Validating in the schema turns
+ * the same mistake into a message under the box it belongs to.
+ */
+const optionalMoney = (hint: string) =>
+  z
+    .string()
+    .trim()
+    .optional()
+    .superRefine((value, ctx) => {
+      if (!value) return;
+      if (tryParseMoney(value) === null) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Enter an amount like ${hint}, or leave it blank`,
+        });
+      }
+    });
 
 export const vehicleSchema = z.object({
   registration: z
@@ -63,8 +87,8 @@ export const vehicleSchema = z.object({
   // enough to be enforceable.
   insurerName: z.string().trim().max(120).optional().or(z.literal('')),
   chassisNumber: z.string().trim().max(40).optional().or(z.literal('')),
-  firstRegisteredOn: z.string().trim().optional().or(z.literal('')),
-  valuePence: z.string().trim().optional().or(z.literal('')),
+  firstRegisteredOn: optionalDate,
+  valuePence: optionalMoney('143000.00'),
   status: z.enum(['ACTIVE', 'OFF_ROAD', 'RETIRED']),
 
   // Phase 2.6. Defaulted so an existing record saved through an older form
@@ -75,21 +99,26 @@ export const vehicleSchema = z.object({
   ownerDriverId: z.string().trim().optional().or(z.literal('')),
   acquiredOn: optionalDate,
   disposedOn: optionalDate,
-  purchasePrice: z
-    .string()
-    .trim()
-    .optional()
-    .superRefine((value, ctx) => {
-      if (!value) return;
-      try {
-        parseMoney(value);
-      } catch {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'Enter an amount like 34500.00, or leave it blank',
-        });
-      }
-    }),
+  purchasePrice: optionalMoney('34500.00'),
+
+  /**
+   * The agreement on a financed or leased car — spec 2.6.
+   *
+   * A lease has no purchase price. What it has is a payment, every month, for
+   * a term, and that payment is the whole cost of holding the car — asking for
+   * a purchase price instead left the single largest running cost on the
+   * fleet unrecorded, so every leased car reported a profit it was not making.
+   *
+   * These are not columns on `Vehicle`. They read and write the vehicle's open
+   * `VehicleStandingCost` of kind FINANCE or LEASE, which is what the
+   * per-vehicle P&L already accrues — one record of the payment, not two that
+   * can disagree.
+   */
+  financePayment: optionalMoney('750.00'),
+  financePeriodMonths: optionalInt,
+  financeStartsOn: optionalDate,
+  financeEndsOn: optionalDate,
+  financeProvider: z.string().trim().max(120).optional().or(z.literal('')),
   currentOdometer: optionalInt,
   lastServicedOn: optionalDate,
   lastServiceMiles: optionalInt,
@@ -119,7 +148,11 @@ function toData(input: VehicleInput) {
     insurancePolicyNo: emptyToNull(input.insurancePolicyNo),
     insurerName: emptyToNull(input.insurerName),
     chassisNumber: emptyToNull(input.chassisNumber),
-    firstRegisteredOn: fromDateOnlyString(input.firstRegisteredOn ?? ''),
+    // Through `toDate`, like every other date here. Called directly it threw
+    // a RangeError on a blank — and since almost no car has a first-registered
+    // date recorded, saving *any* vehicle blew up with "this page could not be
+    // loaded", which reads as the page being broken rather than the date.
+    firstRegisteredOn: toDate(input.firstRegisteredOn),
     valuePence: input.valuePence ? parseMoney(input.valuePence) : null,
     status: input.status,
 
@@ -295,6 +328,122 @@ export async function listDriverOptions() {
   });
 }
 
+/** The kind of standing cost a given ownership implies, if any. */
+export function financeCostKind(
+  ownership: VehicleInput['ownership'],
+): 'FINANCE' | 'LEASE' | null {
+  if (ownership === 'FINANCED') return 'FINANCE';
+  if (ownership === 'LEASED') return 'LEASE';
+  return null;
+}
+
+/**
+ * The agreement currently running on a car.
+ *
+ * "Open" means it has not ended yet. A car that was leased last year and is
+ * now owned still has that lease on file — the months it covered are real
+ * cost, and deleting it would rewrite last year's profit — so what the form
+ * edits is only the agreement still in force.
+ */
+export async function openFinanceAgreement(vehicleId: string, at = new Date()) {
+  return prisma.vehicleStandingCost.findFirst({
+    where: {
+      vehicleId,
+      kind: { in: ['FINANCE', 'LEASE'] },
+      OR: [{ endsOn: null }, { endsOn: { gte: at } }],
+    },
+    orderBy: { startsOn: 'desc' },
+  });
+}
+
+/**
+ * Keep the finance or lease payment in step with the ownership.
+ *
+ * Three cases, and the third is the one worth being careful about:
+ *
+ * - Financed or leased, with a payment: create the standing cost, or update
+ *   the one already running.
+ * - Financed or leased, with no payment typed: leave whatever is there. A
+ *   blank field means "not stated", not "the payment is nothing", and the
+ *   operator who saves an unrelated field should not silently drop the cost.
+ * - No longer financed or leased: **close** the agreement at today's date
+ *   rather than delete it. A car leased January to June and bought in July
+ *   really did cost six months of lease payments, and a P&L run over that
+ *   period has to keep saying so.
+ */
+async function syncFinanceAgreement(
+  tx: Prisma.TransactionClient,
+  vehicleId: string,
+  input: VehicleInput,
+  at = new Date(),
+): Promise<void> {
+  const kind = financeCostKind(input.ownership);
+
+  const existing = await tx.vehicleStandingCost.findFirst({
+    where: {
+      vehicleId,
+      kind: { in: ['FINANCE', 'LEASE'] },
+      OR: [{ endsOn: null }, { endsOn: { gte: at } }],
+    },
+    orderBy: { startsOn: 'desc' },
+  });
+
+  if (!kind) {
+    if (existing) {
+      await tx.vehicleStandingCost.update({
+        where: { id: existing.id },
+        data: { endsOn: startOfDay(at) },
+      });
+    }
+    return;
+  }
+
+  const amountPence = input.financePayment?.trim()
+    ? parseMoney(input.financePayment)
+    : null;
+  if (amountPence === null && !existing) return;
+
+  const label = input.financeProvider?.trim()
+    ? `${kind === 'LEASE' ? 'Lease' : 'Finance'} — ${tidy(input.financeProvider)}`
+    : kind === 'LEASE'
+      ? 'Lease payment'
+      : 'Finance payment';
+
+  const data = {
+    kind,
+    label,
+    periodMonths: input.financePeriodMonths ?? existing?.periodMonths ?? 1,
+    // Dated from when the agreement started, so the P&L accrues it across the
+    // months it actually covered rather than from whenever somebody typed it.
+    startsOn:
+      toDate(input.financeStartsOn) ??
+      existing?.startsOn ??
+      toDate(input.acquiredOn) ??
+      startOfDay(at),
+    // Blank means the agreement is still running, which is the normal case.
+    endsOn: toDate(input.financeEndsOn),
+  };
+
+  if (existing) {
+    await tx.vehicleStandingCost.update({
+      where: { id: existing.id },
+      data: { ...data, ...(amountPence === null ? {} : { amountPence }) },
+    });
+    return;
+  }
+
+  await tx.vehicleStandingCost.create({
+    data: { ...data, vehicleId, amountPence: amountPence ?? 0 },
+  });
+}
+
+/** Midnight UTC, matching the `@db.Date` columns these dates land in. */
+function startOfDay(at: Date): Date {
+  return new Date(
+    Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate()),
+  );
+}
+
 export async function createVehicle(
   input: VehicleInput,
   context: AuditContext,
@@ -305,6 +454,7 @@ export async function createVehicle(
     'create',
     async (tx) => {
       const created = await tx.vehicle.create({ data: toData(input) });
+      await syncFinanceAgreement(tx, created.id, input);
       return { entityId: created.id, after: created, result: { id: created.id } };
     },
     context,
@@ -323,6 +473,7 @@ export async function updateVehicle(
     async (tx) => {
       const before = await tx.vehicle.findUniqueOrThrow({ where: { id } });
       const after = await tx.vehicle.update({ where: { id }, data: toData(input) });
+      await syncFinanceAgreement(tx, id, input);
       return { entityId: id, before, after, result: { id } };
     },
     context,

@@ -31,6 +31,14 @@ function readForm(formData: FormData) {
     acquiredOn: formData.get('acquiredOn') ?? '',
     disposedOn: formData.get('disposedOn') ?? '',
     purchasePrice: formData.get('purchasePrice') ?? '',
+    // The finance or lease agreement. Only rendered for those two ownerships,
+    // so on any other it arrives blank and the agreement is closed rather
+    // than rewritten — see `syncFinanceAgreement`.
+    financePayment: formData.get('financePayment') ?? '',
+    financePeriodMonths: formData.get('financePeriodMonths') ?? '',
+    financeStartsOn: formData.get('financeStartsOn') ?? '',
+    financeEndsOn: formData.get('financeEndsOn') ?? '',
+    financeProvider: formData.get('financeProvider') ?? '',
     currentOdometer: formData.get('currentOdometer') ?? '',
     lastServicedOn: formData.get('lastServicedOn') ?? '',
     lastServiceMiles: formData.get('lastServiceMiles') ?? '',
