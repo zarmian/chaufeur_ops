@@ -1,10 +1,18 @@
 import type { Metadata, Viewport } from 'next';
 import { Fira_Code, Fira_Sans } from 'next/font/google';
+import { cookies } from 'next/headers';
+import { ThemeProvider } from '@/components/theme-provider';
 import { brandAssetSrc } from '@/lib/branding';
 import { SURFACE_DARK, SURFACE_LIGHT } from '@/lib/colour';
 import { getBranding } from '@/lib/branding-store';
 import { getLocaleConfig } from '@/lib/locale-store';
 import { brandStyleSheet } from '@/lib/theme';
+import {
+  parseThemePreference,
+  THEME_COOKIE,
+  THEME_SCRIPT,
+  themeClassFor,
+} from '@/lib/theme-preference';
 import './globals.css';
 
 /**
@@ -81,10 +89,20 @@ export const viewport: Viewport = {
 export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  const [branding, locale] = await Promise.all([
+  const [branding, locale, cookieStore] = await Promise.all([
     getBranding(),
     getLocaleConfig(),
+    cookies(),
   ]);
+
+  // Resolved here so an explicit choice is already on `<html>` in the markup
+  // the server sends — there is nothing to correct after hydration, so no
+  // flash. `system` is the one case the server cannot answer, and
+  // `THEME_SCRIPT` settles that before the first paint.
+  const themePreference = parseThemePreference(
+    cookieStore.get(THEME_COOKIE)?.value,
+  );
+  const themeClass = themeClassFor(themePreference);
 
   // One `<style>` element carrying only the tokens that differ from the
   // stylesheet's neutral defaults. Inline rather than a generated file
@@ -94,10 +112,18 @@ export default async function RootLayout({
   return (
     <html
       lang={locale.locale}
-      className={`${firaSans.variable} ${firaCode.variable}`}
+      className={`${firaSans.variable} ${firaCode.variable}${themeClass ? ` ${themeClass}` : ''}`}
+      data-theme={themePreference}
       suppressHydrationWarning
     >
       <head>
+        {/*
+          Before anything paints. On `system` this is what reads the machine's
+          preference — the server cannot — and it has to be blocking and
+          inline, because a deferred script runs after the first paint and the
+          page would flash the wrong theme on every single load.
+        */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
         {themeCss ? (
           <style
             id="brand-theme"
@@ -109,7 +135,7 @@ export default async function RootLayout({
         ) : null}
       </head>
       <body className="min-h-screen bg-background font-sans text-foreground antialiased">
-        {children}
+        <ThemeProvider preference={themePreference}>{children}</ThemeProvider>
       </body>
     </html>
   );

@@ -95,40 +95,54 @@ async function unassignedJob(page: Page, day: string, time: string, pickup: stri
 }
 
 /**
- * Drag one element onto another.
+ * Drag one element onto another, with the mouse.
  *
- * Playwright's `dragTo` does not always drive the HTML5 drag events React
- * listens for, so the events are dispatched directly. A shared DataTransfer
- * is what makes `dragstart` and `drop` part of the same gesture.
+ * This used to dispatch `DragEvent`s by hand, with a `DataTransfer` stashed
+ * on `window` to tie `dragstart` and `drop` into one gesture, a fixed wait
+ * between the two steps, and a retry around the whole thing. That was all
+ * scaffolding for the HTML5 drag API, which the board no longer uses.
+ *
+ * Against Pointer Events there is nothing to synthesise: Playwright's mouse
+ * produces the real thing, and the board responds to it exactly as it
+ * responds to a hand. The intermediate moves are not decoration — the board
+ * needs to see the pointer cross its ten-pixel threshold before it treats the
+ * gesture as a drag at all, which is the same reason a click on the card's
+ * reference link still opens the job.
  */
 async function dragOnto(page: Page, fromSelector: string, toSelector: string) {
-  // Wait for the board to be interactive first. A synthetic drag against a
-  // server-rendered tree that React has not hydrated yet dispatches into
-  // nothing: the markup is there, the handlers are not, and the drop
-  // silently does nothing.
+  // React has to have hydrated: the markup is server-rendered, and a mouse
+  // gesture against a tree with no handlers attached does nothing at all.
   await page.waitForLoadState('networkidle');
 
-  // The DataTransfer is stashed on `window` so the three steps are one
-  // gesture, and each step is its own call so React can flush the state the
-  // next one reads. Dispatching all three in a single tick means `drop` runs
-  // against the state as it was before `dragstart` — which is nothing at all.
-  await page.evaluate((selector) => {
-    const from = document.querySelector(selector);
-    if (!from) throw new Error('drag source missing');
-    const dataTransfer = new DataTransfer();
-    (window as unknown as { __dt: DataTransfer }).__dt = dataTransfer;
-    from.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer }));
-  }, fromSelector);
+  const from = page.locator(fromSelector);
+  const to = page.locator(toSelector);
+  await expect(from).toBeVisible();
+  await expect(to).toBeVisible();
 
-  await page.waitForTimeout(150);
+  const source = await from.boundingBox();
+  const target = await to.boundingBox();
+  if (!source) throw new Error('drag source has no box');
+  if (!target) throw new Error('drop target has no box');
 
-  await page.evaluate((selector) => {
-    const to = document.querySelector(selector);
-    if (!to) throw new Error('drop target missing');
-    const dataTransfer = (window as unknown as { __dt: DataTransfer }).__dt;
-    to.dispatchEvent(new DragEvent('dragover', { bubbles: true, dataTransfer }));
-    to.dispatchEvent(new DragEvent('drop', { bubbles: true, dataTransfer }));
-  }, toSelector);
+  const startX = source.x + source.width / 2;
+  const startY = source.y + source.height / 2;
+  const endX = target.x + target.width / 2;
+  const endY = target.y + target.height / 2;
+
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+
+  // Several steps rather than one jump, so the threshold is crossed and the
+  // board sees the row under the pointer before the button comes up.
+  const STEPS = 12;
+  for (let step = 1; step <= STEPS; step += 1) {
+    await page.mouse.move(
+      startX + ((endX - startX) * step) / STEPS,
+      startY + ((endY - startY) * step) / STEPS,
+    );
+  }
+
+  await page.mouse.up();
 }
 
 test.describe.configure({ mode: 'serial' });
@@ -180,19 +194,10 @@ test.describe('dispatch', () => {
     // The job leaves the unassigned pile, which is the outcome that matters.
     const stillThere = page.getByTestId('unassigned-job').filter({ hasText: pickup });
 
-    // One retry. The drag is synthetic and the board re-renders under it; a
-    // single repeat costs a second and removes a flake that otherwise only
-    // shows up on a loaded machine.
-    try {
-      await expect(stillThere).toHaveCount(0, { timeout: 5_000 });
-    } catch {
-      await dragOnto(
-        page,
-        `[data-testid="unassigned-job"][data-job-id="${jobId}"]`,
-        `[data-driver-id="${driverId}"]`,
-      );
-    }
-
+    // The retry that used to be here is gone with the synthetic events it was
+    // covering for: a real mouse gesture either happens or does not, so a
+    // failure now means the drop was genuinely refused and the message below
+    // will say why.
     try {
       await expect(stillThere).toHaveCount(0, { timeout: 20_000 });
     } catch (error) {

@@ -29,6 +29,17 @@
     /* #0F172A. */
     --primary: 222 47% 11%;
     --primary-foreground: 210 40% 98%;
+    /*
+     * The pressed and hovered shades of the brand.
+     *
+     * `lib/theme.ts` has always written these from branding settings, but
+     * nothing defined them here and nothing consumed them, so a configured
+     * brand reached the resting state of a button and not its hover or its
+     * press. The neutral defaults follow the same rule `buildPalette` uses —
+     * six points of lightness per step, away from the base.
+     */
+    --primary-hover: 222 47% 17%;
+    --primary-active: 222 47% 23%;
 
     --secondary: 210 40% 96%;
     --secondary-foreground: 222 47% 11%;
@@ -42,6 +53,10 @@
        at unambiguous on a dense table. */
     --accent: 201 60% 94%;
     --accent-foreground: 222 47% 11%;
+    /* The same hue at full strength, for the few places that need the accent
+       as a fill rather than as a surface. Also written by `lib/theme.ts`. */
+    --accent-solid: 201 96% 32%;
+    --accent-solid-foreground: 210 40% 98%;
 
     /* Semantic states. These stay fixed across brands — a red that means
        "expired" should not become a customer's brand colour. */
@@ -63,6 +78,59 @@
     /* Density, from the Data-Dense Dashboard profile. A row an operator
        scans a hundred times a day is worth four pixels. */
     --table-row-height: 2.25rem;
+
+    /*
+     * Motion.
+     *
+     * Four durations, because five would be two people's opinions. Press is
+     * the one that matters: feedback belongs on the pointer going down, and
+     * anything slower than about 100ms stops reading as a response to the
+     * finger and starts reading as an animation about it.
+     *
+     * Gesture-driven motion does not use these at all — it uses the springs
+     * in `lib/motion.ts`, because a spring can be interrupted and redirected
+     * mid-flight and a CSS duration cannot.
+     */
+    --duration-press: 100ms;
+    --duration-fast: 200ms;
+    --duration-base: 300ms;
+    --duration-slow: 400ms;
+
+    /*
+     * Paired easings, for transitions that reverse.
+     *
+     * `--ease-in` is the literal inverse of `--ease-out` — control points
+     * mirrored through (0.5, 0.5) — so a panel returns along the path it
+     * arrived on. Two independently chosen curves look subtly wrong on the
+     * way back and nobody can say why.
+     */
+    --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+    --ease-in: cubic-bezier(0.64, 0, 0.78, 0);
+
+    /*
+     * Translucent materials — the floating layer chrome sits on.
+     *
+     * Built from `--card` rather than from white, so they follow the theme
+     * and a customer's configured surface instead of assuming a light one.
+     * Weight encodes hierarchy: thin for small floating chips, thick for a
+     * sheet that has to hold text over whatever is behind it.
+     */
+    --material-thin: hsl(var(--card) / 0.55);
+    --material-regular: hsl(var(--card) / 0.72);
+    --material-thick: hsl(var(--card) / 0.86);
+    /* The bright top edge — light catching a real material. */
+    --material-edge: hsl(0 0% 100% / 0.55);
+    --blur-chrome: 12px;
+    --blur-sheet: 24px;
+
+    /* Dims the page behind a modal task, so attention has one place to go. */
+    --scrim: hsl(var(--foreground) / 0.4);
+
+    /* Bigger surfaces read as thicker: a menu casts more shadow than a chip,
+       a sheet more than a menu. */
+    --shadow-chip: 0 1px 2px hsl(var(--foreground) / 0.06);
+    --shadow-panel: 0 4px 16px -2px hsl(var(--foreground) / 0.12);
+    --shadow-sheet: 0 16px 48px -8px hsl(var(--foreground) / 0.28);
   }
 
   .dark {
@@ -77,6 +145,9 @@
 
     --primary: 210 40% 98%;
     --primary-foreground: 222 47% 11%;
+    /* Away from the base, which on a near-white primary means downwards. */
+    --primary-hover: 210 40% 92%;
+    --primary-active: 210 40% 86%;
 
     --secondary: 217 33% 17%;
     --secondary-foreground: 210 40% 98%;
@@ -88,6 +159,8 @@
        the accent hue rather than going flat grey. */
     --accent: 205 40% 20%;
     --accent-foreground: 210 40% 98%;
+    --accent-solid: 201 90% 55%;
+    --accent-solid-foreground: 222 47% 11%;
 
     --destructive: 0 63% 45%;
     --destructive-foreground: 210 40% 98%;
@@ -103,6 +176,27 @@
     --ring: 201 90% 55%;
 
     --table-row-height: 2.25rem;
+
+    /*
+     * Only what the dark theme has to change.
+     *
+     * Durations and easings are the same motion in either theme. The
+     * materials are not: the same alpha over a near-black card reads as a
+     * dirty smear rather than as glass, so it is raised, and the bright edge
+     * drops to a hint — a white line at 55% on a dark sheet looks like a
+     * rendering artefact. Shadows deepen, because a soft shadow is invisible
+     * against a dark page and separation has to come from somewhere.
+     */
+    --material-thin: hsl(var(--card) / 0.66);
+    --material-regular: hsl(var(--card) / 0.8);
+    --material-thick: hsl(var(--card) / 0.92);
+    --material-edge: hsl(0 0% 100% / 0.08);
+
+    --scrim: hsl(222 47% 4% / 0.65);
+
+    --shadow-chip: 0 1px 2px hsl(222 47% 2% / 0.4);
+    --shadow-panel: 0 4px 16px -2px hsl(222 47% 2% / 0.55);
+    --shadow-sheet: 0 16px 48px -8px hsl(222 47% 2% / 0.7);
   }
 }
 
@@ -142,19 +236,203 @@
   h3 {
     text-wrap: balance;
   }
+
+  /*
+   * Easing the theme change rather than jumping it.
+   *
+   * A whole page inverting between one frame and the next is a brightness
+   * jump of the kind that triggers migraine. `.theme-changing` is set for the
+   * length of the transition by the theme toggle and removed again, so this
+   * costs nothing on any other interaction — a permanent transition on
+   * `background-color` would make every hover on every surface lag.
+   */
+  .theme-changing,
+  .theme-changing *,
+  .theme-changing *::before,
+  .theme-changing *::after {
+    transition:
+      background-color var(--duration-base) var(--ease-out),
+      border-color var(--duration-base) var(--ease-out),
+      color var(--duration-base) var(--ease-out) !important;
+  }
 }
 
-/* Somebody who has asked their operating system to reduce motion has usually
-   asked for a reason — vestibular disorders, migraine, or simply working on a
-   machine where animation costs more than it gives. Honoured globally rather
-   than per-component, so nothing added later has to remember. */
+@layer components {
+  /*
+   * Press feedback, in one place.
+   *
+   * "Respond on pointer-down, not on release" is the foundation the rest of
+   * the interaction design sits on — an interface that waits for the click to
+   * acknowledge the finger feels dead however good everything after it is.
+   *
+   * A class rather than a utility repeated at each call site, because the
+   * reduced-motion rule below needs one thing to switch off, and forty
+   * hand-written `active:scale-*` would each have to remember.
+   */
+  .press {
+    transition:
+      transform var(--duration-press) var(--ease-out),
+      background-color var(--duration-fast) var(--ease-out),
+      border-color var(--duration-fast) var(--ease-out),
+      color var(--duration-fast) var(--ease-out);
+  }
+
+  .press:active {
+    transform: scale(0.97);
+  }
+
+  /*
+   * The same, for surfaces rather than controls.
+   *
+   * Scale is a proportion, so the 3% that reads as a firm press on a button
+   * is a table row visibly shrinking away from its neighbours. Large targets
+   * get a smaller ratio to land in the same place perceptually.
+   */
+  .press-surface {
+    transition:
+      transform var(--duration-press) var(--ease-out),
+      background-color var(--duration-fast) var(--ease-out);
+  }
+
+  .press-surface:active {
+    transform: scale(0.995);
+  }
+
+  /*
+   * Chrome that content passes underneath.
+   *
+   * Not an opaque strip: the point of a translucent layer is that you can see
+   * there is more page under it, which is what stops a sticky header reading
+   * as the top of the document.
+   */
+  .material {
+    background-color: var(--material-regular);
+    backdrop-filter: blur(var(--blur-chrome)) saturate(180%);
+  }
+
+  .material-thick {
+    background-color: var(--material-thick);
+    backdrop-filter: blur(var(--blur-sheet)) saturate(180%);
+  }
+
+  /*
+   * "There is more table this way", shown only when there is.
+   *
+   * A wide jobs table scrolls sideways inside its own box, and nothing said
+   * so — the columns past the right edge were found by accident. A permanent
+   * fade would lie on the tables narrow enough to fit.
+   *
+   * The trick is `background-attachment`: the two covers scroll *with* the
+   * content (`local`) and the two shadows are pinned to the box (`scroll`),
+   * so at the far left the cover sits exactly on top of the shadow and hides
+   * it, and as soon as the content moves the cover moves off and the shadow
+   * appears. No JavaScript and no scroll listener.
+   */
+  .scroll-shadow-x {
+    background:
+      linear-gradient(to right, hsl(var(--card)) 30%, hsl(var(--card) / 0)) left
+        center / 2.5rem 100% no-repeat local,
+      linear-gradient(to left, hsl(var(--card)) 30%, hsl(var(--card) / 0)) right
+        center / 2.5rem 100% no-repeat local,
+      radial-gradient(
+          farthest-side at 0 50%,
+          hsl(var(--foreground) / 0.14),
+          hsl(var(--foreground) / 0)
+        )
+        left center / 0.75rem 100% no-repeat scroll,
+      radial-gradient(
+          farthest-side at 100% 50%,
+          hsl(var(--foreground) / 0.14),
+          hsl(var(--foreground) / 0)
+        )
+        right center / 0.75rem 100% no-repeat scroll;
+    background-color: hsl(var(--card));
+  }
+
+  /*
+   * Text over a translucent surface.
+   *
+   * Muted grey is legible over a fixed background and stops being legible
+   * over a moving one. Slightly heavier and slightly tracked out holds up
+   * over whatever happens to scroll underneath.
+   */
+  .vibrant {
+    font-weight: 500;
+    letter-spacing: 0.01em;
+  }
+}
+
+/*
+ * Somebody who has asked their operating system to reduce motion has usually
+ * asked for a reason — vestibular disorders, migraine, or simply working on a
+ * machine where animation costs more than it gives.
+ *
+ * Reduced motion is not no feedback. This used to force every duration to
+ * 0.01ms, which switched off the *acknowledgement* along with the movement:
+ * pressing a button did nothing visible, a menu appeared with no indication
+ * of where it came from, and the interface became harder to read rather than
+ * calmer. What actually causes trouble is translation and scale — things
+ * flying across the field of view — so those go, and the colour and opacity
+ * changes that tell you what just happened stay, shortened.
+ *
+ * JavaScript-driven motion follows the same signal through Motion's
+ * `MotionConfig reducedMotion="user"` in `app/layout.tsx`, which drops
+ * transform animations and keeps opacity ones. The two halves agree.
+ */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
-    animation-duration: 0.01ms !important;
+    /* Fast, not absent. */
+    animation-duration: var(--duration-fast) !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    transition-duration: var(--duration-fast) !important;
     scroll-behavior: auto !important;
+  }
+
+  /* Nothing moves or changes size under the finger; the colour change alone
+     carries the press. */
+  .press:active,
+  .press-surface:active {
+    transform: none;
+  }
+}
+
+/*
+ * Translucency is a preference somebody switches off, usually because a
+ * blurred surface with text over it is hard work to read.
+ *
+ * The surfaces stay — they are how the hierarchy is expressed — but they go
+ * solid and lose the blur rather than disappearing, so the layout does not
+ * change under anyone who turns this on.
+ */
+@media (prefers-reduced-transparency: reduce) {
+  .material,
+  .material-thick {
+    background-color: hsl(var(--card));
+    backdrop-filter: none;
+  }
+}
+
+/*
+ * More contrast: near-solid surfaces with a border that is actually visible.
+ *
+ * A translucent panel and a 1px hairline are both the first things to
+ * disappear for somebody who has asked for this.
+ */
+@media (prefers-contrast: more) {
+  :root,
+  .dark {
+    --material-thin: hsl(var(--card));
+    --material-regular: hsl(var(--card));
+    --material-thick: hsl(var(--card));
+    --border: var(--foreground);
+    --input: var(--foreground);
+  }
+
+  .material,
+  .material-thick {
+    backdrop-filter: none;
+    border-color: hsl(var(--foreground));
   }
 }

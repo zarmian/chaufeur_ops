@@ -4,8 +4,9 @@ import { cn } from '@/lib/utils';
 const Table = React.forwardRef<HTMLTableElement, React.ComponentProps<'table'>>(
   ({ className, ...props }, ref) => (
     // The wrapper scrolls rather than the page, so a wide job table never
-    // pushes the sidebar off screen.
-    <div className="relative w-full overflow-x-auto rounded-lg border">
+    // pushes the sidebar off screen — and `scroll-shadow-x` says so, fading
+    // an edge only while there is actually something past it.
+    <div className="scroll-shadow-x relative w-full overflow-x-auto rounded-lg border">
       <table
         ref={ref}
         className={cn('w-full caption-bottom text-sm', className)}
@@ -37,7 +38,10 @@ const TableRow = React.forwardRef<HTMLTableRowElement, React.ComponentProps<'tr'
     <tr
       ref={ref}
       className={cn(
-        'border-b transition-colors hover:bg-muted/40 data-[state=selected]:bg-muted',
+        // The row's own background stays transparent so the wrapper's scroll
+        // shadows show through at the edges; the hover tint is painted over
+        // it rather than replacing it.
+        'border-b transition-colors duration-fast ease-out hover:bg-muted/40 data-[state=selected]:bg-muted',
         className,
       )}
       {...props}

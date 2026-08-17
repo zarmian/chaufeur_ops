@@ -1,8 +1,10 @@
-import { headers } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { AppShell } from '@/components/layout/app-shell';
 import { UserMenu } from '@/components/layout/user-menu';
 import { signOutAction } from '@/app/(auth)/actions';
+import { setThemePreference } from '@/app/theme-actions';
+import { parseThemePreference, THEME_COOKIE } from '@/lib/theme-preference';
 import { can, getCurrentUser } from '@/lib/authz';
 import { BrandMark } from '@/components/brand-mark';
 import { getBranding } from '@/lib/branding-store';
@@ -33,7 +35,10 @@ export default async function DashboardLayout({
     if (!path.startsWith('/change-password')) redirect('/change-password');
   }
 
-  const branding = await getBranding();
+  const [branding, cookieStore] = await Promise.all([getBranding(), cookies()]);
+  const themePreference = parseThemePreference(
+    cookieStore.get(THEME_COOKIE)?.value,
+  );
 
   const sections = NAVIGATION.map((section) => ({
     ...section,
@@ -50,6 +55,8 @@ export default async function DashboardLayout({
             name={user.name}
             email={user.email}
             role={user.role}
+            themePreference={themePreference}
+            setThemeAction={setThemePreference}
             signOutAction={signOutAction}
           />
         </div>

@@ -1,18 +1,29 @@
 import * as React from 'react';
 import { cn } from '@/lib/utils';
 
-const Card = React.forwardRef<HTMLDivElement, React.ComponentProps<'div'>>(
-  ({ className, ...props }, ref) => (
-    <div
-      ref={ref}
-      className={cn(
-        'rounded-lg border bg-card text-card-foreground shadow-sm',
-        className,
-      )}
-      {...props}
-    />
-  ),
-);
+const Card = React.forwardRef<
+  HTMLDivElement,
+  React.ComponentProps<'div'> & {
+    /**
+     * Set when the whole card is a target — a tile that navigates, a row that
+     * opens something. It adds the press response and lifts the shadow on
+     * hover, so a card you can click is distinguishable from one you cannot
+     * before you try it.
+     */
+    interactive?: boolean;
+  }
+>(({ className, interactive = false, ...props }, ref) => (
+  <div
+    ref={ref}
+    className={cn(
+      'rounded-lg border bg-card text-card-foreground shadow-chip',
+      interactive &&
+        'press-surface cursor-pointer hover:bg-accent/40 hover:shadow-panel',
+      className,
+    )}
+    {...props}
+  />
+));
 Card.displayName = 'Card';
 
 const CardHeader = React.forwardRef<HTMLDivElement, React.ComponentProps<'div'>>(

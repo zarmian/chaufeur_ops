@@ -36,15 +36,65 @@ const config: Config = {
         sans: ['var(--font-sans)', ...defaultTheme.fontFamily.sans],
         mono: ['var(--font-mono)', ...defaultTheme.fontFamily.mono],
       },
+      /**
+       * Type as a set, not a size.
+       *
+       * Tracking is size-specific: letters read too far apart as they grow,
+       * so large text is tightened, and too close together as they shrink, so
+       * small text is opened up. A single `letter-spacing` for the whole
+       * scale is wrong at one end or the other. Leading moves the other way —
+       * tight on a heading, comfortable on body copy.
+       *
+       * These override Tailwind's defaults for the same keys, so `text-2xl`
+       * carries its own leading and tracking and nothing has to remember to
+       * add them.
+       */
+      fontSize: {
+        xs: ['0.75rem', { lineHeight: '1.5', letterSpacing: '0.01em' }],
+        sm: ['0.875rem', { lineHeight: '1.5', letterSpacing: '0.005em' }],
+        base: ['1rem', { lineHeight: '1.5', letterSpacing: '0' }],
+        lg: ['1.125rem', { lineHeight: '1.45', letterSpacing: '-0.005em' }],
+        xl: ['1.25rem', { lineHeight: '1.4', letterSpacing: '-0.01em' }],
+        '2xl': ['1.5rem', { lineHeight: '1.3', letterSpacing: '-0.015em' }],
+        '3xl': ['1.875rem', { lineHeight: '1.2', letterSpacing: '-0.02em' }],
+        '4xl': ['2.25rem', { lineHeight: '1.1', letterSpacing: '-0.025em' }],
+      },
+      transitionDuration: {
+        press: 'var(--duration-press)',
+        fast: 'var(--duration-fast)',
+        base: 'var(--duration-base)',
+        slow: 'var(--duration-slow)',
+      },
+      /** Paired, so a reversible transition can mirror its own curve. */
+      transitionTimingFunction: {
+        out: 'var(--ease-out)',
+        in: 'var(--ease-in)',
+      },
+      /** Bigger surfaces read as thicker. */
+      boxShadow: {
+        chip: 'var(--shadow-chip)',
+        panel: 'var(--shadow-panel)',
+        sheet: 'var(--shadow-sheet)',
+      },
+      backdropBlur: {
+        chrome: 'var(--blur-chrome)',
+        sheet: 'var(--blur-sheet)',
+      },
       colors: {
         border: 'hsl(var(--border))',
         input: 'hsl(var(--input))',
         ring: 'hsl(var(--ring))',
         background: 'hsl(var(--background))',
         foreground: 'hsl(var(--foreground))',
+        scrim: 'var(--scrim)',
         primary: {
           DEFAULT: 'hsl(var(--primary))',
           foreground: 'hsl(var(--primary-foreground))',
+          // Written by `lib/theme.ts` from branding settings since Phase 3,
+          // and until now consumed by nothing — a configured brand reached a
+          // button's resting state but not its hover or its press.
+          hover: 'hsl(var(--primary-hover))',
+          active: 'hsl(var(--primary-active))',
         },
         secondary: {
           DEFAULT: 'hsl(var(--secondary))',
@@ -69,6 +119,9 @@ const config: Config = {
         accent: {
           DEFAULT: 'hsl(var(--accent))',
           foreground: 'hsl(var(--accent-foreground))',
+          // The accent as a fill rather than as a surface.
+          solid: 'hsl(var(--accent-solid))',
+          'solid-foreground': 'hsl(var(--accent-solid-foreground))',
         },
         popover: {
           DEFAULT: 'hsl(var(--popover))',
