@@ -605,8 +605,8 @@ Rounding: always to the nearest whole penny, half away from zero. Put it in one 
 
 ```
 DRAFT ──► PENDING ──► ASSIGNED ──► ACCEPTED ──► IN_PROGRESS ──► COMPLETED
-             │            │            │              │
-             └────────────┴────────────┴──────────────┴──► CANCELLED
+             │            │            │              │             │
+             └────────────┴────────────┴──────────────┴─────────────┴──► CANCELLED
                                        └──────────────────► NO_SHOW
 ```
 
@@ -614,7 +614,13 @@ Rules enforced server-side:
 - `ASSIGNED` requires a driver **and** a vehicle, both with valid documents at `scheduledAt`
 - `IN_PROGRESS` is set by the driver's `ON_WAY` event, or manually by OPS
 - `COMPLETED` requires `clientPricePence > 0` **or** a non-empty `zeroValueReason`
-- A job on a `SENT` or `PAID` invoice cannot move to `CANCELLED` — raise a credit note instead
+- `COMPLETED` may still be cancelled, but only while the job is not on an invoice.
+  The wrong job gets marked off the board, and leaving work on the books that
+  never happened is worse than the correction
+- A job on an issued invoice (`SENT`, `PART_PAID`, `PAID`, `OVERDUE`, `CREDITED`)
+  cannot move to `CANCELLED` — raise a credit note instead. On a `DRAFT` invoice
+  the line comes off the invoice first
+- `CANCELLED` and `NO_SHOW` are the only statuses with no way out
 
 ## Indexes worth having from day one
 

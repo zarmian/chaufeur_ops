@@ -72,6 +72,7 @@ function jobInput(overrides: Record<string, unknown> = {}) {
 
 describe.skipIf(!DATABASE_AVAILABLE)('job lifecycle', () => {
   const jobIds: string[] = [];
+  const invoiceIds: string[] = [];
   let driverId = '';
   let vehicleId = '';
   let expiredDriverId = '';
@@ -129,6 +130,13 @@ describe.skipIf(!DATABASE_AVAILABLE)('job lifecycle', () => {
 
   afterAll(async () => {
     if (!raw) return;
+    // Lines before invoices, invoices before jobs — the foreign keys point
+    // the other way, and a cleanup in the wrong order fails and leaves the
+    // fixtures behind for the next run to trip over.
+    if (invoiceIds.length > 0) {
+      await raw.invoiceLine.deleteMany({ where: { invoiceId: { in: invoiceIds } } });
+      await raw.invoice.deleteMany({ where: { id: { in: invoiceIds } } });
+    }
     if (jobIds.length > 0) {
       await raw.jobEvent.deleteMany({ where: { jobId: { in: jobIds } } });
       await raw.job.deleteMany({ where: { id: { in: jobIds } } });
@@ -144,6 +152,37 @@ describe.skipIf(!DATABASE_AVAILABLE)('job lifecycle', () => {
     const created = await createJob(jobInput(overrides), audit);
     jobIds.push(created.id);
     return created;
+  }
+
+  /** A job taken all the way to `COMPLETED` through the real transitions. */
+  async function makeCompletedJob() {
+    const created = await makeJob({ driverId, vehicleId, clientPricePence: '125.50' });
+    await transitionJob(created.id, 'ASSIGNED', audit);
+    await transitionJob(created.id, 'IN_PROGRESS', audit);
+    expect((await transitionJob(created.id, 'COMPLETED', audit)).ok).toBe(true);
+    return created;
+  }
+
+  /** Put a job on an invoice in the given status. */
+  async function invoiceJob(jobId: string, status: 'DRAFT' | 'SENT' | 'PART_PAID') {
+    const today = new Date();
+    const invoice = await raw!.invoice.create({
+      data: {
+        number: `INV-T${Date.now()}-${invoiceIds.length}`,
+        issueDate: today,
+        dueDate: today,
+        netPence: 12550,
+        vatPence: 2510,
+        grossPence: 15060,
+        paidPence: status === 'PART_PAID' ? 5000 : 0,
+        status,
+        lines: {
+          create: { jobId, description: 'Transfer', amountPence: 12550 },
+        },
+      },
+    });
+    invoiceIds.push(invoice.id);
+    return invoice;
   }
 
   it('allocates a reference and writes a CREATED event atomically', async () => {
@@ -250,6 +289,64 @@ describe.skipIf(!DATABASE_AVAILABLE)('job lifecycle', () => {
       where: { jobId: created.id, type: 'COMPLETED' },
     });
     expect(events).toHaveLength(0);
+  });
+
+  it('cancels a completed job that has not been invoiced', async () => {
+    // The wrong job gets marked off the board, or the client stands one down
+    // after the driver has been sent. Without this the only options were to
+    // leave work on the books that never happened, or to edit the row by hand.
+    const created = await makeCompletedJob();
+
+    const result = await transitionJob(created.id, 'CANCELLED', audit);
+    expect(result.ok).toBe(true);
+
+    const row = await raw!.job.findUniqueOrThrow({ where: { id: created.id } });
+    expect(row.status).toBe('CANCELLED');
+
+    const events = await raw!.jobEvent.findMany({
+      where: { jobId: created.id, type: 'CANCELLED' },
+    });
+    expect(events).toHaveLength(1);
+  });
+
+  it('refuses to cancel a completed job that has been invoiced', async () => {
+    const created = await makeCompletedJob();
+    const invoice = await invoiceJob(created.id, 'SENT');
+
+    const result = await transitionJob(created.id, 'CANCELLED', audit);
+    expect(result).toMatchObject({ ok: false, code: 'INVOICE_LOCKED' });
+    if (!result.ok) {
+      expect(result.message).toContain(invoice.number);
+      expect(result.message).toContain('credit note');
+    }
+
+    const row = await raw!.job.findUniqueOrThrow({ where: { id: created.id } });
+    expect(row.status).toBe('COMPLETED');
+  });
+
+  it('holds the lock for a part-paid invoice too', async () => {
+    // The list of locking statuses used to be spelled out by hand as
+    // SENT and PAID, so a job on an invoice the client had part-paid could
+    // be cancelled while the invoice went on asking for the money.
+    const created = await makeCompletedJob();
+    await invoiceJob(created.id, 'PART_PAID');
+
+    expect(await transitionJob(created.id, 'CANCELLED', audit)).toMatchObject({
+      ok: false,
+      code: 'INVOICE_LOCKED',
+    });
+  });
+
+  it('sends a draft invoice back to the invoice rather than to a credit note', async () => {
+    const created = await makeCompletedJob();
+    const invoice = await invoiceJob(created.id, 'DRAFT');
+
+    const result = await transitionJob(created.id, 'CANCELLED', audit);
+    expect(result).toMatchObject({ ok: false, code: 'INVOICE_LOCKED' });
+    if (!result.ok) {
+      expect(result.message).toContain(invoice.number);
+      expect(result.message).toContain('Remove it from that invoice');
+    }
   });
 
   it('reports a missing job rather than throwing', async () => {

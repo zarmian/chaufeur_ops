@@ -7,10 +7,18 @@ import type { JobEventType, JobStatus } from '@prisma/client';
  *
  * ```
  * DRAFT ──► PENDING ──► ASSIGNED ──► ACCEPTED ──► IN_PROGRESS ──► COMPLETED
- *              │            │            │              │
- *              └────────────┴────────────┴──────────────┴──► CANCELLED
+ *              │            │            │              │             │
+ *              └────────────┴────────────┴──────────────┴─────────────┴──► CANCELLED
  *                                        └──────────────────► NO_SHOW
  * ```
+ *
+ * The last of those arrows is the one the diagram did not have. A job marked
+ * completed by mistake — the wrong one of two picked off the board, or a
+ * transfer the client stood down after the driver had already been sent —
+ * had no way back, and the only remedy on offer was to leave a job on the
+ * books that never happened. It may be cancelled, provided it has not been
+ * put on an invoice: past that point the client is holding a document that
+ * says otherwise, and the remedy is a credit note.
  *
  * Everything here is pure. The rules are the part of the system most likely
  * to be argued about later, so they are stated once, in one place, and tested
@@ -28,7 +36,9 @@ const TRANSITIONS: Record<JobStatus, readonly JobStatus[]> = {
   ASSIGNED: ['ACCEPTED', 'IN_PROGRESS', 'CANCELLED', 'NO_SHOW'],
   ACCEPTED: ['IN_PROGRESS', 'CANCELLED', 'NO_SHOW'],
   IN_PROGRESS: ['COMPLETED', 'CANCELLED', 'NO_SHOW'],
-  COMPLETED: [],
+  // Cancelling is the only way out, and the invoice guard below decides
+  // whether it is open.
+  COMPLETED: ['CANCELLED'],
   CANCELLED: [],
   NO_SHOW: [],
 };
@@ -45,6 +55,12 @@ const STATUS_EVENT: Record<JobStatus, JobEventType | null> = {
   NO_SHOW: 'NO_SHOW',
 };
 
+/**
+ * Statuses at which the work has finished, for counting and filtering.
+ *
+ * Not the same thing as "cannot change": a completed job can still be
+ * cancelled. Use `allowedTransitions` for that question.
+ */
 export const TERMINAL_STATUSES: readonly JobStatus[] = [
   'COMPLETED',
   'CANCELLED',
@@ -94,8 +110,15 @@ export interface TransitionContext {
    * `billableClientPence`.
    */
   finance?: { totalClientPence: number } | null;
-  /** Set when the job sits on an invoice that has left draft. */
-  lockedByInvoice?: { reference: string; status: string } | null;
+  /**
+   * Set when the job sits on an invoice. `issued` separates the two remedies:
+   * an invoice that has left draft is a document the client is holding and
+   * needs a credit note, while a draft one only needs the line taking off it.
+   *
+   * Passed in rather than derived here so this module stays free of the
+   * invoice rules — and of the Prisma types they are written against.
+   */
+  lockedByInvoice?: { reference: string; status: string; issued: boolean } | null;
   /** Result of `isDriverCompliantAt(scheduledAt)`, when assignment is in play. */
   compliance?: { compliant: boolean; reasons: string[] } | null;
 }
@@ -118,13 +141,18 @@ export function canTransition(
     };
   }
 
-  if (!TRANSITIONS[job.status].includes(next)) {
+  const exits = TRANSITIONS[job.status];
+  if (!exits.includes(next)) {
     return {
       ok: false,
       code: 'INVALID_TRANSITION',
-      message: isTerminal(job.status)
-        ? `This job is ${describeStatus(job.status)} and cannot change status`
-        : `A ${describeStatus(job.status)} job cannot become ${describeStatus(next)}`,
+      // "Cannot change status" is only true where nothing at all is allowed.
+      // A completed job has one way out, so it gets the specific refusal
+      // rather than one that reads as though the job were sealed.
+      message:
+        exits.length === 0
+          ? `This job is ${describeStatus(job.status)} and cannot change status`
+          : `A ${describeStatus(job.status)} job cannot become ${describeStatus(next)}`,
     };
   }
 
@@ -162,12 +190,19 @@ export function canTransition(
   }
 
   if (next === 'CANCELLED' && job.lockedByInvoice) {
+    const invoice = job.lockedByInvoice;
     return {
       ok: false,
       code: 'INVOICE_LOCKED',
-      message:
-        `This job is on invoice ${job.lockedByInvoice.reference}, which has been ` +
-        `${job.lockedByInvoice.status.toLowerCase()}. Raise a credit note rather than cancelling it.`,
+      message: invoice.issued
+        ? `This job is on invoice ${invoice.reference}, which has been ` +
+          `${invoice.status.toLowerCase()}. Raise a credit note rather than cancelling it.`
+        : // A draft invoice can still be changed, so the fix is cheap — but it
+          // has to happen, because cancelling underneath the draft leaves a
+          // line for work that is not going to be done, and nothing on the
+          // invoice says so before it goes out.
+          `This job is on draft invoice ${invoice.reference}. Remove it from that ` +
+          `invoice first, then cancel it.`,
     };
   }
 

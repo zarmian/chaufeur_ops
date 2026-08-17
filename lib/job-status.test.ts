@@ -71,13 +71,51 @@ describe('the transition graph', () => {
     }
   });
 
-  it('never lets a terminal job change again', () => {
-    for (const status of TERMINAL_STATUSES) {
+  it('counts the three finished statuses as terminal', () => {
+    // Terminal means the work has finished, which is what the lists and the
+    // counts ask. It is not the same question as "can this still change" —
+    // a completed job can still be cancelled.
+    expect([...TERMINAL_STATUSES]).toEqual(['COMPLETED', 'CANCELLED', 'NO_SHOW']);
+    for (const status of ALL_STATUSES) {
+      expect(isTerminal(status), status).toBe(TERMINAL_STATUSES.includes(status));
+    }
+  });
+
+  it('never lets a cancelled or no-show job change again', () => {
+    for (const status of ['CANCELLED', 'NO_SHOW'] as const) {
       expect(isTerminal(status)).toBe(true);
       for (const next of ALL_STATUSES) {
         const result = canTransition(job({ status }), next);
         expect(result.ok, `${status} -> ${next}`).toBe(false);
       }
+    }
+  });
+
+  it('lets a completed job be cancelled, and nothing else', () => {
+    // The one thing a completed job may still do. Marking the wrong job off
+    // the board should not leave work on the books that never happened.
+    expect(isTerminal('COMPLETED')).toBe(true);
+    expect(allowedTransitions('COMPLETED')).toEqual(['CANCELLED']);
+    expect(canTransition(job({ status: 'COMPLETED' }), 'CANCELLED')).toEqual({
+      ok: true,
+    });
+
+    for (const next of ALL_STATUSES.filter((s) => s !== 'CANCELLED')) {
+      const result = canTransition(job({ status: 'COMPLETED' }), next);
+      expect(result.ok, `COMPLETED -> ${next}`).toBe(false);
+    }
+  });
+
+  it('does not tell a completed job it cannot change status', () => {
+    // It can — it can be cancelled. Saying otherwise sends somebody looking
+    // for a workaround for a thing the button on the page already does.
+    const sealed = canTransition(job({ status: 'CANCELLED' }), 'PENDING');
+    if (!sealed.ok) expect(sealed.message).toContain('cannot change status');
+
+    const completed = canTransition(job({ status: 'COMPLETED' }), 'IN_PROGRESS');
+    if (!completed.ok) {
+      expect(completed.message).not.toContain('cannot change status');
+      expect(completed.message).toContain('in progress');
     }
   });
 
@@ -228,7 +266,7 @@ describe('the invoice lock', () => {
     const result = canTransition(
       job({
         status: 'IN_PROGRESS',
-        lockedByInvoice: { reference: 'INV-0042', status: 'SENT' },
+        lockedByInvoice: { reference: 'INV-0042', status: 'SENT', issued: true },
       }),
       'CANCELLED',
     );
@@ -245,11 +283,46 @@ describe('the invoice lock', () => {
       canTransition(
         job({
           status: 'IN_PROGRESS',
-          lockedByInvoice: { reference: 'INV-0042', status: 'PAID' },
+          lockedByInvoice: { reference: 'INV-0042', status: 'PAID', issued: true },
         }),
         'COMPLETED',
       ),
     ).toEqual({ ok: true });
+  });
+
+  it('keeps a completed job cancellable until it is invoiced', () => {
+    expect(canTransition(job({ status: 'COMPLETED' }), 'CANCELLED')).toEqual({
+      ok: true,
+    });
+
+    const result = canTransition(
+      job({
+        status: 'COMPLETED',
+        lockedByInvoice: { reference: 'INV-0042', status: 'PART_PAID', issued: true },
+      }),
+      'CANCELLED',
+    );
+    expect(result).toMatchObject({ ok: false, code: 'INVOICE_LOCKED' });
+    if (!result.ok) expect(result.message).toContain('credit note');
+  });
+
+  it('sends a draft invoice back to the invoice rather than to a credit note', () => {
+    // Nothing has gone to the client yet, so there is nothing to credit. The
+    // line still has to come off, or the draft goes out billing for work that
+    // was cancelled underneath it.
+    const result = canTransition(
+      job({
+        status: 'COMPLETED',
+        lockedByInvoice: { reference: 'INV-0043', status: 'DRAFT', issued: false },
+      }),
+      'CANCELLED',
+    );
+    expect(result).toMatchObject({ ok: false, code: 'INVOICE_LOCKED' });
+    if (!result.ok) {
+      expect(result.message).toContain('INV-0043');
+      expect(result.message).toContain('Remove it from that invoice');
+      expect(result.message).not.toContain('credit note');
+    }
   });
 });
 

@@ -9,6 +9,7 @@ import {
   hasPriceOrReason,
   type TransitionResult,
 } from './job-status';
+import { isIssued, type InvoiceStatus } from './invoices';
 import type { ListParams } from './list-params';
 import { billedDays, billedHours, calculateFinance } from './job-finance';
 import { noteLocationUse } from './pricing/config';
@@ -879,6 +880,37 @@ function snapshotOf(job: {
 }
 
 /**
+ * Which invoice, if any, holds this job — and whether it has gone out.
+ *
+ * The list this replaced was `['SENT', 'PAID']`, written out by hand. That
+ * left `PART_PAID`, `OVERDUE` and `CREDITED` out of it: a job on an invoice
+ * the client had part-paid could be cancelled, and the invoice went on
+ * claiming money for it. `isIssued` is the same list the invoice rules use,
+ * so the two cannot drift apart again.
+ *
+ * A cancelled invoice claims nothing, so it holds nothing. A draft one does
+ * hold the job, but is still editable — hence `issued`, which picks the
+ * wording of the refusal. An issued invoice wins over a draft when a job is
+ * on both, because the credit note is the harder remedy to discover.
+ */
+function invoiceLock(
+  lines: { invoice: { number: string; status: string } | null }[],
+): { reference: string; status: string; issued: boolean } | null {
+  const invoices = lines
+    .map((line) => line.invoice)
+    .filter((invoice): invoice is { number: string; status: string } =>
+      Boolean(invoice) && invoice!.status !== 'CANCELLED',
+    )
+    .map((invoice) => ({
+      reference: invoice.number,
+      status: invoice.status,
+      issued: isIssued(invoice.status as InvoiceStatus),
+    }));
+
+  return invoices.find((invoice) => invoice.issued) ?? invoices[0] ?? null;
+}
+
+/**
  * Move a job to `next`, or explain why not.
  *
  * The guards run against freshly-read state inside the transaction, so a
@@ -922,9 +954,7 @@ export async function transitionJob(
       ? emptyToNull(options.zeroValueReason)
       : job.zeroValueReason;
 
-  const locked = job.invoiceLines
-    .map((line) => line.invoice)
-    .find((invoice) => invoice && ['SENT', 'PAID'].includes(invoice.status));
+  const locked = invoiceLock(job.invoiceLines);
 
   // Only fetched when assignment is actually in play — it costs a few
   // queries. Goes through checkAssignmentCompliance rather than
@@ -943,9 +973,7 @@ export async function transitionJob(
       clientPricePence: job.clientPricePence,
       finance: job.finance,
       zeroValueReason,
-      lockedByInvoice: locked
-        ? { reference: locked.number, status: locked.status }
-        : null,
+      lockedByInvoice: locked,
       compliance: compliance
         ? { compliant: compliance.compliant, reasons: compliance.reasons }
         : null,
