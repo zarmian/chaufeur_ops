@@ -45,6 +45,13 @@ export const NAVIGATION: NavSection[] = [
         matchPrefix: true,
       },
       {
+        href: '/contracts',
+        label: 'Contracts',
+        icon: 'CalendarSync',
+        capability: 'viewJobs',
+        matchPrefix: true,
+      },
+      {
         href: '/dispatch',
         label: 'Dispatch',
         icon: 'CalendarClock',

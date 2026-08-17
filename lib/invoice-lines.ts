@@ -1,4 +1,4 @@
-import { formatDate, formatDateTime } from './dates';
+import { formatDateTime } from './dates';
 import { unitCharge } from './job-finance';
 import { RATE_TYPE_UNIT } from './rentals';
 import {
@@ -58,7 +58,6 @@ export function jobLineText(job: {
   reference: string;
   jobType: string;
   scheduledAt: Date;
-  contractEndsAt?: Date | null;
   pickupText: string;
   dropoffText: string;
   viaText?: string | null;
@@ -67,11 +66,7 @@ export function jobLineText(job: {
 }): string[] {
   return [
     `${jobTypeLabel(job.jobType)} · ${job.reference}`,
-    // A contract states the block it covers. One date on a five-day booking
-    // is the question the client rings up to ask.
-    job.contractEndsAt
-      ? `${formatDate(job.scheduledAt)} to ${formatDate(job.contractEndsAt)}`
-      : formatDateTime(job.scheduledAt),
+    formatDateTime(job.scheduledAt),
     `Pick up: ${job.pickupText}`,
     ...(job.viaText ? [`Via: ${job.viaText}`] : []),
     `Drop off: ${job.dropoffText}`,
@@ -106,7 +101,6 @@ export interface JobLineInput {
     vatTreatment?: VatTreatment | null;
     account?: { vatTreatment?: VatTreatment | null } | null;
     client?: { vatTreatment?: VatTreatment | null } | null;
-    contractEndsAt?: Date | null;
     finance?: {
       customerHours?: number | null;
       customerRatePence?: number | null;

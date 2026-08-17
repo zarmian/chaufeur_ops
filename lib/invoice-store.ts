@@ -761,7 +761,6 @@ export async function addJobLine(
       reference: true,
       jobType: true,
       scheduledAt: true,
-      contractEndsAt: true,
       pickupText: true,
       dropoffText: true,
       viaText: true,

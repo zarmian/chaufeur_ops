@@ -77,8 +77,7 @@ export interface JobFormValues {
   customerHours: string;
   customerRate: string;
   minimumHours: string;
-  /** Contract hire. The last day of the block, and what it is charged at. */
-  contractEndsOn: string;
+  /** One day of a standing contract, charged at a day rate. */
   customerDays: string;
   customerDayRate: string;
   minimumDays: string;
@@ -118,7 +117,6 @@ const BLANK: JobFormValues = {
   customerHours: '',
   customerRate: '',
   minimumHours: '',
-  contractEndsOn: '',
   customerDays: '',
   customerDayRate: '',
   minimumDays: '',
@@ -143,30 +141,6 @@ export interface DriverOption extends JobFormOption {
 export interface VehicleOption extends JobFormOption {
   /** The rate card matches on it, so the form has to know it. */
   vehicleClass: string;
-}
-
-/**
- * Days from one date picker to another, counting both ends.
- *
- * Monday to Friday is five days — the car is out on the Friday. Done on
- * date strings rather than `Date` arithmetic so a clocks-change weekend
- * cannot produce four and a half.
- */
-function daySpan(startDate: string, endDate: string): number | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) return null;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(endDate)) return null;
-  const start = Date.UTC(
-    Number(startDate.slice(0, 4)),
-    Number(startDate.slice(5, 7)) - 1,
-    Number(startDate.slice(8, 10)),
-  );
-  const end = Date.UTC(
-    Number(endDate.slice(0, 4)),
-    Number(endDate.slice(5, 7)) - 1,
-    Number(endDate.slice(8, 10)),
-  );
-  if (end < start) return null;
-  return Math.round((end - start) / 86_400_000) + 1;
 }
 
 function SubmitButton({ label }: { label: string }) {
@@ -247,7 +221,6 @@ export function JobForm({
   const [customerHours, setCustomerHours] = useState(values.customerHours);
   const [customerRate, setCustomerRate] = useState(values.customerRate);
   const [minimumHours, setMinimumHours] = useState(values.minimumHours);
-  const [contractEndsOn, setContractEndsOn] = useState(values.contractEndsOn);
   const [customerDays, setCustomerDays] = useState(values.customerDays);
   const [customerDayRate, setCustomerDayRate] = useState(values.customerDayRate);
   const [minimumDays, setMinimumDays] = useState(values.minimumDays);
@@ -336,7 +309,7 @@ export function JobForm({
       scheduledDate: field('scheduledDate'),
       scheduledTime: field('scheduledTime'),
       hours: customerHours.trim() === '' ? null : Number(customerHours),
-      contractEndsOn: contractEndsOn || null,
+      isContract,
     };
 
     if (submitted.current || submitting) return;
@@ -437,7 +410,7 @@ export function JobForm({
       scheduledDate: field('scheduledDate'),
       scheduledTime: field('scheduledTime'),
       hours: customerHours.trim() === '' ? null : Number(customerHours),
-      contractEndsOn: contractEndsOn || null,
+      isContract,
     };
 
     if (submitted.current || submitting) return;
@@ -470,9 +443,9 @@ export function JobForm({
     driverId,
     vehicleId,
     customerHours,
-    // A contract holds the driver for its whole block, so a changed end date
-    // changes who is free.
-    contractEndsOn,
+    // A contract day raises no clash, so switching to or from one changes
+    // the answer.
+    isContract,
     revision,
     submitting,
   ]);
@@ -1050,33 +1023,6 @@ export function JobForm({
             </p>
 
             <div className="grid gap-4 sm:grid-cols-3">
-              <FormField
-                name="contractEndsOn"
-                label="Last day"
-                hint="The block runs to the end of this day."
-                errors={errors.contractEndsOn}
-              >
-                <Input
-                  {...fieldProps('contractEndsOn', errors.contractEndsOn)}
-                  type="date"
-                  value={contractEndsOn}
-                  onChange={(event) => {
-                    setContractEndsOn(event.target.value);
-                    // The block is the contract, so the days follow from it.
-                    // Overwritten rather than only filled when blank: moving
-                    // the end date changes how long the car is out, and
-                    // leaving a stale count would bill the old block.
-                    const start = formRef.current
-                      ? String(
-                          new FormData(formRef.current).get('scheduledDate') ?? '',
-                        )
-                      : '';
-                    const span = daySpan(start, event.target.value);
-                    if (span !== null) setCustomerDays(String(span));
-                    setConfirmedUnpriced(false);
-                  }}
-                />
-              </FormField>
               <FormField
                 name="customerDays"
                 label="Days charged"

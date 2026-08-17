@@ -17,7 +17,6 @@ import {
 import { can } from '@/lib/authz';
 import { checkAssignmentCompliance, getJob } from '@/lib/jobs';
 import { formatDate, formatDateTime } from '@/lib/dates';
-import { contractDays } from '@/lib/job-finance';
 import { buildTimeline, ACTOR_LABELS } from '@/lib/job-events';
 import { allowedTransitions, hasPriceOrReason } from '@/lib/job-status';
 import { JOB_TYPES } from '@/lib/enum-options';
@@ -183,15 +182,18 @@ export default async function JobDetailPage({
                   <span className="tabular">{formatDateTime(job.scheduledAt)}</span>
                 </Field>
                 <Field label="Type">{jobTypeLabel(job.jobType)}</Field>
-                {/* A contract is a block, and one date does not describe it.
-                    The car and the driver are held for every day of this. */}
-                {job.contractEndsAt ? (
-                  <Field label="Contract runs to">
-                    <span className="tabular">
-                      {formatDateTime(job.contractEndsAt)}
-                    </span>
-                    <span className="ml-2 text-xs text-muted-foreground">
-                      {contractDays(job.scheduledAt, job.contractEndsAt)} days
+                {/* One day of a standing contract. The contract is where the
+                    arrangement lives; this is what it produced for today. */}
+                {job.contract ? (
+                  <Field label="Contract">
+                    <Link
+                      href={`/contracts/${job.contract.id}`}
+                      className="hover:underline"
+                    >
+                      {job.contract.label}
+                    </Link>
+                    <span className="ml-2 text-xs text-muted-foreground tabular">
+                      {job.contract.reference}
                     </span>
                   </Field>
                 ) : null}

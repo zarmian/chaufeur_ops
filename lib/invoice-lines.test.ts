@@ -99,7 +99,6 @@ describe('buildJobLine', () => {
       job: {
         ...job,
         jobType: 'CONTRACT',
-        contractEndsAt: at('2026-05-18T22:59:59Z'),
         finance: { customerDays: 5, customerDayRatePence: 40_000 },
       },
       amountPence: 200_000,
@@ -107,12 +106,9 @@ describe('buildJobLine', () => {
     expect(line.quantity).toBe(5);
     expect(line.quantityUnit).toBe('days');
     expect(line.unitPricePence).toBe(40_000);
-
-    // And the line states the block, not one date — a single date on a
-    // five-day booking is the question the client rings up to ask.
-    const { title, details } = splitLineText(line.description);
-    expect(title).toBe('Contract hire \u00b7 JOB-000123');
-    expect(details[0]).toBe('14 May 2026 to 18 May 2026');
+    expect(splitLineText(line.description).title).toBe(
+      'Contract hire \u00b7 JOB-000123',
+    );
   });
 
   it('says day, not days, for a one-day contract', () => {
@@ -120,7 +116,6 @@ describe('buildJobLine', () => {
       job: {
         ...job,
         jobType: 'CONTRACT',
-        contractEndsAt: at('2026-05-14T22:59:59Z'),
         finance: { customerDays: 1, customerDayRatePence: 40_000 },
       },
       amountPence: 40_000,

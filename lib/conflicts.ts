@@ -31,11 +31,13 @@ export interface Occupies {
   /** Set for an as-directed hire, where the hours are the duration. */
   customerHours?: number | null;
   /**
-   * The end of a contract's last day. A contract holds the car and the driver
-   * for the whole block, so it is the one job whose duration is stated
-   * outright rather than estimated.
+   * A contract day. Excluded from clash warnings entirely: a contract is a
+   * standing arrangement — a school run, a daily office collection — and the
+   * driver and the car are expected to do other work around it. Warning on
+   * every one would put a permanent clash on the board that nobody can clear,
+   * and a board of warnings nobody can clear is a board nobody reads.
    */
-  contractEndsAt?: Date | null;
+  isContract?: boolean | null;
 }
 
 export interface Interval {
@@ -51,12 +53,6 @@ export interface Interval {
  * would show as free from ten o'clock when it is not.
  */
 export function occupiedBy(job: Occupies): Interval {
-  // A contract states its own end. Falling through to an estimate would show
-  // a driver on a five-day booking as free from ten o'clock on the Monday.
-  if (job.contractEndsAt && job.contractEndsAt > job.scheduledAt) {
-    return { from: job.scheduledAt, to: job.contractEndsAt };
-  }
-
   const minutes =
     job.customerHours && job.customerHours > 0
       ? Math.round(job.customerHours * 60)
@@ -125,10 +121,15 @@ export function findConflicts(
   against: ConflictCandidate[],
   bufferMinutes: number,
 ): Conflict[] {
+  if (proposed.isContract) return [];
+
   const window = occupiedBy(proposed);
 
   return against
     .filter((candidate) => candidate.id !== proposed.id)
+    // A contract day never raises a clash, on either side of the comparison.
+    // See `Occupies.isContract`.
+    .filter((candidate) => !candidate.isContract)
     .flatMap((candidate) => {
       const theirs = occupiedBy(candidate);
       if (!overlaps(window, theirs, bufferMinutes)) return [];

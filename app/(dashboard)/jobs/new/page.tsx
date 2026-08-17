@@ -51,7 +51,6 @@ export default async function NewJobPage({
       customerHours: '',
       customerRate: '',
       minimumHours: '',
-      contractEndsOn: '',
       customerDays: '',
       customerDayRate: '',
       minimumDays: '',

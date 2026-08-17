@@ -98,7 +98,7 @@ const JOB_SELECT = {
   id: true,
   reference: true,
   scheduledAt: true,
-  contractEndsAt: true,
+  jobType: true,
   estimatedMinutes: true,
   status: true,
   pickupText: true,
@@ -136,19 +136,11 @@ export async function loadDispatchDay(
   const [jobs, drivers] = await Promise.all([
     prisma.job.findMany({
       where: {
+        scheduledAt: {
+          gte: new Date(from.getTime() - 12 * 60 * 60 * 1000),
+          lte: to,
+        },
         status: { notIn: ['CANCELLED'] },
-        OR: [
-          {
-            scheduledAt: {
-              gte: new Date(from.getTime() - 12 * 60 * 60 * 1000),
-              lte: to,
-            },
-          },
-          // A contract runs across days. It belongs on the board every day it
-          // covers, not only on the one it started — otherwise a car held all
-          // week looks free from Tuesday.
-          { contractEndsAt: { gte: from }, scheduledAt: { lte: to } },
-        ],
       },
       select: JOB_SELECT,
       orderBy: { scheduledAt: 'asc' },
@@ -190,7 +182,7 @@ export async function loadDispatchDay(
     id: job.id,
     reference: job.reference,
     scheduledAt: job.scheduledAt,
-    contractEndsAt: job.contractEndsAt,
+    isContract: job.jobType === 'CONTRACT',
     estimatedMinutes: job.estimatedMinutes,
     customerHours: job.finance?.customerHours
       ? Number(job.finance.customerHours)
@@ -296,16 +288,7 @@ export async function loadDispatchDay(
     }),
   );
 
-  /**
-   * On the board for this day.
-   *
-   * A contract that began earlier is still today's work — the car is out —
-   * so "starts today or later" is not the test. Anything whose block reaches
-   * into the day counts.
-   */
-  const onToday = (job: JobRow) =>
-    job.scheduledAt >= from ||
-    (job.contractEndsAt !== null && job.contractEndsAt >= from);
+  const onToday = (job: JobRow) => job.scheduledAt >= from;
 
   const unassigned = jobs.filter((job) => !job.driverId && onToday(job)).map(toBlock);
 

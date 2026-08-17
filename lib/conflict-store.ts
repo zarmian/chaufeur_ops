@@ -30,8 +30,7 @@ const CANDIDATE_SELECT = {
   id: true,
   reference: true,
   scheduledAt: true,
-  // A contract holds the driver for its whole block, not for an estimate.
-  contractEndsAt: true,
+  jobType: true,
   estimatedMinutes: true,
   pickupText: true,
   dropoffText: true,
@@ -45,7 +44,7 @@ type Row = {
   id: string;
   reference: string;
   scheduledAt: Date;
-  contractEndsAt: Date | null;
+  jobType: string;
   estimatedMinutes: number | null;
   pickupText: string;
   dropoffText: string;
@@ -60,7 +59,7 @@ function toCandidate(row: Row): ConflictCandidate {
     id: row.id,
     reference: row.reference,
     scheduledAt: row.scheduledAt,
-    contractEndsAt: row.contractEndsAt,
+    isContract: row.jobType === 'CONTRACT',
     estimatedMinutes: row.estimatedMinutes,
     // Prisma hands a Decimal back; Number is exact enough for hours.
     customerHours: row.finance?.customerHours
@@ -97,7 +96,7 @@ export async function checkDriverConflicts(
     scheduledAt: Date;
     estimatedMinutes?: number | null;
     customerHours?: number | null;
-    contractEndsAt?: Date | null;
+    isContract?: boolean | null;
   },
   bufferMinutes?: number,
 ): Promise<ConflictCheck> {
@@ -127,7 +126,7 @@ export async function checkVehicleConflicts(
     scheduledAt: Date;
     estimatedMinutes?: number | null;
     customerHours?: number | null;
-    contractEndsAt?: Date | null;
+    isContract?: boolean | null;
   },
   bufferMinutes?: number,
 ): Promise<ConflictCheck> {
@@ -163,13 +162,7 @@ async function candidatesAround(
     where: {
       ...who,
       status: { notIn: ['CANCELLED', 'COMPLETED', 'NO_SHOW'] },
-      // A contract is found by the block it spans, not only by the day it
-      // began. Fourteen hours of lookback would miss a five-day booking that
-      // started on Monday, and the driver would look free all week.
-      OR: [
-        { scheduledAt: { gte: from, lte: to } },
-        { contractEndsAt: { gte: from }, scheduledAt: { lte: to } },
-      ],
+      scheduledAt: { gte: from, lte: to },
     },
     select: CANDIDATE_SELECT,
     orderBy: { scheduledAt: 'asc' },
@@ -209,21 +202,11 @@ export async function conflictsForDay(
   const rows = (await prisma.job.findMany({
     where: {
       status: { notIn: ['CANCELLED', 'COMPLETED', 'NO_SHOW'] },
-      AND: [
-        { OR: [{ driverId: { not: null } }, { vehicleId: { not: null } }] },
-        // As above: a running contract counts on every day it covers.
-        {
-          OR: [
-            {
-              scheduledAt: {
-                gte: new Date(from.getTime() - LOOKBACK_HOURS * 60 * 60 * 1000),
-                lte: to,
-              },
-            },
-            { contractEndsAt: { gte: from }, scheduledAt: { lte: to } },
-          ],
-        },
-      ],
+      scheduledAt: {
+        gte: new Date(from.getTime() - LOOKBACK_HOURS * 60 * 60 * 1000),
+        lte: to,
+      },
+      OR: [{ driverId: { not: null } }, { vehicleId: { not: null } }],
     },
     select: {
       ...CANDIDATE_SELECT,

@@ -31,9 +31,8 @@ enum JobType {
   AS_DIRECTED
   TRANSFER
   AIRPORT_TRANSFER
-  /// Contract hire: a car and driver held for a block of days at an agreed
-  /// day rate. One job covering the whole block, not one per day — that is
-  /// how the contract is agreed and how it is billed.
+  /// One day of a standing contract, charged at an agreed day rate. Created
+  /// by the cron from a `JobContract` rather than booked one at a time.
   CONTRACT
 }
 
@@ -277,6 +276,7 @@ model User {
   auditEntries     AuditLog[]
   createdJobs      Job[]           @relation("JobCreatedBy")
   createdJobSeries JobSeries[]     @relation("JobSeriesCreatedBy")
+  createdContracts JobContract[]   @relation("JobContractCreatedBy")
   bulkOperations   BulkOperation[] @relation("BulkOperationCreatedBy")
   createdRentals   VehicleRental[] @relation("RentalCreatedBy")
   sessions         Session[]
@@ -393,6 +393,7 @@ model Client {
 
   defaultAccount     Account?                  @relation(fields: [defaultAccountId], references: [id])
   jobs               Job[]
+  contracts          JobContract[]
   invoices           Invoice[]
   bankTxns           BankTransaction[]
   credits            UnallocatedCredit[]
@@ -406,34 +407,35 @@ model Client {
 /// The booker. Not the client — the client rides, the account placed the
 /// booking and is usually who gets invoiced.
 model Account {
-  id               String      @id @default(cuid())
-  name             String      @unique
-  kind             AccountKind @default(INTERNAL)
+  id               String       @id @default(cuid())
+  name             String       @unique
+  kind             AccountKind  @default(INTERNAL)
   contactName      String?
   contactPhone     String?
   contactEmail     String?
   billingEmail     String?
   billingAddress   String?
   vatNumber        String?
-  paymentTermsDays Int         @default(14)
+  paymentTermsDays Int          @default(14)
   /// What this booker's work is normally charged at — an agency billing its
   /// own client gross wants INCLUSIVE, a non-registered partner EXEMPT. A job
   /// may override it.
   vatTreatment     VatTreatment @default(STANDARD)
   rateCardId       String?
   /// agency margin, not money — Decimal is correct here
-  commissionPct    Decimal?    @db.Decimal(5, 2)
-  active           Boolean     @default(true)
-  createdAt        DateTime    @default(now())
+  commissionPct    Decimal?     @db.Decimal(5, 2)
+  active           Boolean      @default(true)
+  createdAt        DateTime     @default(now())
   deletedAt        DateTime?
 
-  rateCard RateCard?           @relation(fields: [rateCardId], references: [id])
-  jobs     Job[]
-  clients  Client[]
-  invoices Invoice[]
-  bankTxns BankTransaction[]
-  credits  UnallocatedCredit[]
-  rentals  VehicleRental[]
+  rateCard  RateCard?           @relation(fields: [rateCardId], references: [id])
+  jobs      Job[]
+  contracts JobContract[]
+  clients   Client[]
+  invoices  Invoice[]
+  bankTxns  BankTransaction[]
+  credits   UnallocatedCredit[]
+  rentals   VehicleRental[]
 
   @@index([deletedAt])
 }
@@ -472,6 +474,7 @@ model Driver {
   assignedVehicle Vehicle?           @relation(fields: [assignedVehicleId], references: [id])
   documents       Document[]
   jobs            Job[]
+  contracts       JobContract[]
   payouts         DriverPayout[]
   bankTxns        BankTransaction[]
   linkTokens      LinkToken[]
@@ -548,6 +551,7 @@ model Vehicle {
   jobs      Job[]
   shifts    DriverShift[]
   rentals   VehicleRental[]
+  contracts JobContract[]
 
   @@index([status])
   @@index([ownership])
@@ -710,13 +714,8 @@ model Job {
   jobType   JobType
   status    JobStatus @default(PENDING)
 
-  /// UTC. Displayed in the configured timezone. On a contract this is when
-  /// the first day starts.
+  /// UTC. Displayed in the configured timezone.
   scheduledAt      DateTime
-  /// The last instant a CONTRACT job covers — the end of its final day, in
-  /// the configured timezone. Null on every other type: one day's work ends
-  /// when it ends, and an estimate is what says when.
-  contractEndsAt   DateTime?
   estimatedMinutes Int?
 
   /// as typed
@@ -769,6 +768,11 @@ model Job {
   /// The series this job was generated from — spec 6.3.4. Nullable, and the
   /// job is a complete booking without it: generation creates independent
   /// jobs, so a series that is later deleted leaves its jobs standing.
+  /// The standing contract this day came from — spec 6.6. Nullable, and the
+  /// job is a complete booking without it: generation creates independent
+  /// jobs, exactly as a series does, so ending a contract leaves the days it
+  /// already produced standing.
+  contractId    String?
   seriesId      String?
   /// Position in the series, from 1. For display only — "this and future"
   /// filters on the date, because an individually-edited job may no longer
@@ -784,6 +788,7 @@ model Job {
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
 
+  contract        JobContract?  @relation(fields: [contractId], references: [id])
   series          JobSeries?    @relation(fields: [seriesId], references: [id])
   returnOf        Job?          @relation("JobReturn", fields: [returnOfJobId], references: [id])
   returnJob       Job?          @relation("JobReturn")
@@ -808,7 +813,7 @@ model Job {
 
   @@index([scheduledAt])
   @@index([status, scheduledAt])
-  @@index([contractEndsAt])
+  @@index([contractId, scheduledAt])
   @@index([driverId, scheduledAt])
   @@index([vehicleId, scheduledAt])
   @@index([clientId])
@@ -825,6 +830,88 @@ model Job {
 /// real booking somebody may have already assigned a driver to. What the
 /// series gives is the ability to find them together and act on them as a
 /// group.
+/// A standing arrangement charged by the day — spec 6.6.
+///
+/// A school run, a daily office collection, an executive on retainer. The
+/// contract holds what each day looks like and what it is worth; the cron
+/// turns it into one ordinary job per day, a few days ahead.
+///
+/// Deliberately **open-ended**. Most of these have no agreed last day — they
+/// run until somebody stops them — and forcing an end date would either
+/// invent one or stop the arrangement being recordable at all.
+///
+/// Like `JobSeries`, it never reaches back into a job it produced. By the time
+/// anybody edits a contract, some of its days have drivers assigned and prices
+/// agreed, and rewriting them would undo work somebody did on purpose.
+model JobContract {
+  id        String @id @default(cuid())
+  /// human-facing, e.g. CON-000012
+  reference String @unique
+  /// What it is, in words — "Aldridge school run".
+  label     String
+
+  clientId  String?
+  accountId String?
+
+  /// What each day's job looks like.
+  jobType          JobType @default(CONTRACT)
+  pickupText       String
+  dropoffText      String
+  pickupPostcode   String?
+  dropoffPostcode  String?
+  viaText          String?
+  /// Local wall clock, "09:00". Stored as text rather than an instant because
+  /// it is a time of day that repeats, and an instant would drift by an hour
+  /// across a clocks change — putting a driver at the school gates at 8am.
+  startTime        String
+  estimatedMinutes Int?
+  passengerName    String?
+  passengerPhone   String?
+
+  /// Who normally does it. Copied onto each day, and changeable per day —
+  /// nothing here stops the driver or the car doing other work.
+  driverId  String?
+  vehicleId String?
+
+  /// Which weekdays it runs, 0 = Sunday. Empty means every day.
+  weekdays Int[]
+
+  startsOn DateTime  @db.Date
+  /// Open-ended when null, which is the normal case.
+  endsOn   DateTime? @db.Date
+
+  /// The day rate, and what the driver is paid for a day.
+  dayRatePence       Int
+  driverDayRatePence Int           @default(0)
+  /// Overrides the account's or client's tax treatment for this contract.
+  vatTreatment       VatTreatment?
+
+  /// How far ahead the cron books. Days exist before they happen so dispatch
+  /// can see them and a driver can be told.
+  generateAheadDays  Int       @default(14)
+  /// The last date jobs have been created through. The cron's watermark, so
+  /// running it twice in a day creates nothing the second time.
+  generatedThroughOn DateTime? @db.Date
+
+  active Boolean @default(true)
+  notes  String?
+
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  client    Client?  @relation(fields: [clientId], references: [id])
+  account   Account? @relation(fields: [accountId], references: [id])
+  driver    Driver?  @relation(fields: [driverId], references: [id])
+  vehicle   Vehicle? @relation(fields: [vehicleId], references: [id])
+  createdBy User?    @relation("JobContractCreatedBy", fields: [createdById], references: [id])
+  jobs      Job[]
+
+  @@index([active, startsOn])
+  @@index([deletedAt])
+}
+
 model JobSeries {
   id String @id @default(cuid())
 
@@ -1152,8 +1239,8 @@ model VehicleRental {
   /// Actual return. Charged to this when it is later than planned.
   returnedAt DateTime?
 
-  rateType  RentalRateType @default(DAILY)
-  ratePence Int
+  rateType     RentalRateType @default(DAILY)
+  ratePence    Int
   /// Overrides the renter's treatment for this hire alone. Null follows the
   /// account, then the install default.
   vatTreatment VatTreatment?
@@ -1322,22 +1409,22 @@ model InvoiceLine {
   /// pickup, the drop-off. Stored rather than derived from the job, because an
   /// invoice that has been sent must not change when somebody corrects the
   /// job it came from.
-  description String
+  description       String
   /// The charge as agreed and as shown. Before tax under STANDARD, already
   /// containing it under INCLUSIVE.
-  amountPence Int
+  amountPence       Int
   /// The part of `amountPence` that is passed through — parking, a drop-off
   /// charge, a toll. Never taxed under any treatment.
-  disbursementPence Int @default(0)
+  disbursementPence Int          @default(0)
   /// Snapshotted when the line is added. The invoice header keeps the rate;
   /// this is how the rate applies to this line.
-  vatTreatment VatTreatment @default(STANDARD)
+  vatTreatment      VatTreatment @default(STANDARD)
   /// What the quantity/rate columns show. Null on an ad-hoc line, which has
   /// only an amount — a made-up "1 × £45" is worse than no columns at all.
-  quantity      Decimal? @db.Decimal(9, 2)
-  quantityUnit  String?
-  unitPricePence Int?
-  sortOrder   Int    @default(0)
+  quantity          Decimal?     @db.Decimal(9, 2)
+  quantityUnit      String?
+  unitPricePence    Int?
+  sortOrder         Int          @default(0)
 
   invoice Invoice        @relation(fields: [invoiceId], references: [id])
   job     Job?           @relation(fields: [jobId], references: [id])

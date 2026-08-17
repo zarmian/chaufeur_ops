@@ -4,7 +4,7 @@ import { apiError, withErrorHandling } from '@/lib/api';
 import { requireCapability } from '@/lib/authz';
 import { checkDriverConflicts, checkVehicleConflicts } from '@/lib/conflict-store';
 
-import { lastInstantOf, scheduledAtFrom } from '@/lib/jobs';
+import { scheduledAtFrom } from '@/lib/jobs';
 import { getLocaleConfig } from '@/lib/locale-store';
 
 /**
@@ -30,12 +30,7 @@ const schema = z.object({
   scheduledTime: z.string().trim().regex(/^\d{2}:\d{2}$/),
   estimatedMinutes: z.coerce.number().int().min(0).max(24 * 60).nullable().optional(),
   hours: z.coerce.number().min(0).max(24).nullable().optional(),
-  contractEndsOn: z
-    .string()
-    .trim()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
-    .nullable()
-    .optional(),
+  isContract: z.coerce.boolean().nullable().optional(),
 });
 
 export const POST = withErrorHandling(async (request: Request): Promise<Response> => {
@@ -67,11 +62,9 @@ export const POST = withErrorHandling(async (request: Request): Promise<Response
     scheduledAt,
     estimatedMinutes: input.estimatedMinutes ?? null,
     customerHours: input.hours ?? null,
-    // A contract holds the driver for its whole block, so the check has to
-    // compare against the block rather than an hour at the start of it.
-    contractEndsAt: input.contractEndsOn
-      ? lastInstantOf(input.contractEndsOn, timeZone)
-      : null,
+    // A contract day raises no clash at all — the driver and the car do
+    // other work around a standing arrangement. See `lib/conflicts.ts`.
+    isContract: input.isContract ?? false,
   };
 
   const [driver, vehicle] = await Promise.all([

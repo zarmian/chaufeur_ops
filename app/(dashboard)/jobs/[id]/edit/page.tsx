@@ -35,13 +35,6 @@ export default async function EditJobPage({
   const local = getPartsInZone(job.scheduledAt);
   const pad = (n: number) => String(n).padStart(2, '0');
 
-  /** A stored instant as the date its local day falls on. */
-  const localDate = (instant: Date | null) => {
-    if (!instant) return '';
-    const parts = getPartsInZone(instant);
-    return `${parts.year}-${pad(parts.month)}-${pad(parts.day)}`;
-  };
-
   return (
     <>
       <PageHeader title={`Edit ${job.reference}`} />
@@ -87,9 +80,6 @@ export default async function EditJobPage({
           customerHours: job.finance?.customerHours?.toString() ?? '',
           customerRate: asPounds(job.finance?.customerRatePence ?? null),
           minimumHours: '',
-          // The contract block, as it was agreed. `contractEndsAt` is the end
-          // of its last day, so the date picker shows that day.
-          contractEndsOn: localDate(job.contractEndsAt),
           customerDays: job.finance?.customerDays?.toString() ?? '',
           customerDayRate: asPounds(job.finance?.customerDayRatePence ?? null),
           minimumDays: '',

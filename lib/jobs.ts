@@ -2,7 +2,7 @@ import type { JobStatus, JobType, Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { withAudit, type AuditContext } from './audit';
 import { isDriverCompliantAt } from './compliance';
-import { endOfZonedDay, fromDateOnlyString, toUTC } from './dates';
+import { toUTC } from './dates';
 import {
   canTransition,
   eventTypeForStatus,
@@ -86,17 +86,6 @@ const optionalQuantity = z.preprocess(
   (value) =>
     value === '' || value === null || value === undefined ? null : value,
   z.coerce.number().min(0).max(9999.99).nullable(),
-);
-
-/** A date from a date picker. Blank is null. */
-const optionalDateOnly = z.preprocess(
-  (value) =>
-    value === '' || value === null || value === undefined ? null : value,
-  z
-    .string()
-    .trim()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use the date picker')
-    .nullable(),
 );
 
 /**
@@ -256,14 +245,12 @@ export const jobSchema = z
     ),
 
     /**
-     * Contract hire — a car and driver held for a block of days.
+     * One day of a standing contract, charged at a day rate.
      *
-     * The end is a date rather than a datetime: the contract is agreed in
-     * days ("through Friday"), and asking for a time invites somebody to
-     * guess one. It is stored as the end of that day in the configured
-     * timezone, so the block covers the whole of its last day.
+     * Days rather than a fixed fare because that is what the arrangement
+     * says, and a day billed at the contract rate reconciles against the
+     * contract without anybody working backwards from a total.
      */
-    contractEndsOn: optionalDateOnly,
     customerDays: optionalQuantity,
     customerDayRatePence: priceField,
     minimumDays: optionalQuantity,
@@ -303,25 +290,6 @@ export const jobSchema = z
       });
     }
 
-    // A contract is a block of days. Without an end it is not a contract —
-    // it is one day, and nothing downstream could say how many days to bill
-    // or which days the car is spoken for.
-    if (input.jobType === 'CONTRACT' && !input.contractEndsOn) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['contractEndsOn'],
-        message: 'Enter the last day of the contract',
-      });
-    }
-
-    if (input.contractEndsOn && input.contractEndsOn < input.scheduledDate) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['contractEndsOn'],
-        message: 'The contract cannot end before it starts',
-      });
-    }
-
     // Priced by the day, or priced at a fixed figure — but a day rate with no
     // days is a job that would bill nothing, which is the silent zero this
     // system exists to prevent.
@@ -335,20 +303,6 @@ export const jobSchema = z
   });
 
 export type JobInput = z.infer<typeof jobSchema>;
-
-/**
- * The last instant of a day, in the operator's zone.
- *
- * `endOfZonedDay` returns the *start of the next* day — an exclusive bound,
- * which is right for a range query and wrong here. Stored as an exclusive
- * bound, a contract ending on Friday would print as ending on Saturday, and
- * the conflict interval would spill a millisecond into a day the car is free.
- */
-export function lastInstantOf(dateOnly: string, timeZone?: string): Date {
-  return new Date(
-    endOfZonedDay(fromDateOnlyString(dateOnly), timeZone).getTime() - 1,
-  );
-}
 
 /** Combine the two form fields into the single UTC instant the schema stores. */
 export function scheduledAtFrom(
@@ -364,13 +318,6 @@ function toData(input: JobInput, timeZone?: string) {
     accountId: input.accountId,
     jobType: input.jobType,
     scheduledAt: scheduledAtFrom(input, timeZone),
-    // The end of the contract's last day, so the block covers the whole of
-    // it. Cleared when the type is anything else: a stale end date left on a
-    // job converted to a transfer would go on holding the car for a week.
-    contractEndsAt:
-      input.jobType === 'CONTRACT' && input.contractEndsOn
-        ? lastInstantOf(input.contractEndsOn, timeZone)
-        : null,
     estimatedMinutes: input.estimatedMinutes,
 
     pickupText: tidy(input.pickupText),
@@ -691,6 +638,7 @@ export async function getJob(id: string) {
       // Spec 6.3.7 — enough to say "3 of 12" and offer the way back to the
       // series, without loading its other eleven jobs.
       series: { select: { id: true, label: true, cancelledAt: true } },
+      contract: { select: { id: true, label: true, reference: true } },
       invoiceLines: {
         select: {
           invoice: { select: { id: true, number: true, status: true } },
@@ -709,11 +657,23 @@ export async function getJob(id: string) {
  * A job that exists without a creation event would leave a gap in the
  * timeline that nothing could later reconstruct, so the two are atomic.
  */
+export interface CreateJobOptions {
+  timeZone?: string;
+  /** The standing contract this day came from — see `lib/contracts.ts`. */
+  contractId?: string | null;
+}
+
 export async function createJob(
   input: JobInput,
   context: AuditContext,
-  timeZone?: string,
+  options: string | CreateJobOptions = {},
 ): Promise<{ id: string; reference: string }> {
+  // The third argument was a bare timezone before contracts existed, and a
+  // dozen callers still pass one. Both shapes are accepted rather than
+  // touching every call site to add a field almost none of them set.
+  const { timeZone, contractId } =
+    typeof options === 'string' ? { timeZone: options, contractId: null } : options;
+
   noteLocationsUsed(input);
 
   const booked = await withJobReference((reference) =>
@@ -726,6 +686,7 @@ export async function createJob(
             ...toData(input, timeZone),
             reference,
             status: 'PENDING',
+            contractId: contractId ?? null,
             createdById: context.userId ?? null,
             ...(input.stops.length > 0
               ? { stops: { create: toStopData(input.stops) } }
