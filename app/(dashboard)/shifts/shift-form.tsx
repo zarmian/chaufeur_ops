@@ -3,9 +3,9 @@
 import { AlertCircle } from 'lucide-react';
 import Link from 'next/link';
 import { useActionState } from 'react';
-import { useFormStatus } from 'react-dom';
 import { FormField, fieldProps } from '@/components/form-field';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { SubmitButton } from '@/components/submit-button';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
@@ -107,7 +107,7 @@ export function ShiftForm({
       </FormField>
 
       <div className="flex items-center gap-3 border-t pt-6">
-        <SubmitButton />
+        <StartShiftButton />
         <Button asChild variant="ghost">
           <Link href={cancelHref}>Cancel</Link>
         </Button>
@@ -116,13 +116,8 @@ export function ShiftForm({
   );
 }
 
-function SubmitButton() {
-  const { pending } = useFormStatus();
-  return (
-    <Button type="submit" disabled={pending}>
-      {pending ? 'Starting…' : 'Start the shift'}
-    </Button>
-  );
+function StartShiftButton() {
+  return <SubmitButton label="Start the shift" pendingLabel="Starting…" />;
 }
 
 /**

@@ -2,21 +2,17 @@
 
 import { AlertCircle } from 'lucide-react';
 import { useActionState } from 'react';
-import { useFormStatus } from 'react-dom';
 import { loginAction, type LoginState } from '@/app/(auth)/actions';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
+import { SubmitButton } from '@/components/submit-button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
 const INITIAL: LoginState = { error: null };
 
-function SubmitButton() {
-  const { pending } = useFormStatus();
+function SignInButton() {
   return (
-    <Button type="submit" className="w-full" disabled={pending}>
-      {pending ? 'Signing in…' : 'Sign in'}
-    </Button>
+    <SubmitButton className="w-full" label="Sign in" pendingLabel="Signing in…" />
   );
 }
 
@@ -57,7 +53,7 @@ export function LoginForm({ next }: { next?: string }) {
         />
       </div>
 
-      <SubmitButton />
+      <SignInButton />
     </form>
   );
 }

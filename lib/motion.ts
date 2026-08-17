@@ -205,6 +205,52 @@ export function zoneAt(zones: Zone[], x: number, y: number): string | null {
 }
 
 /**
+ * How fast to scroll while a drag is held near the edge of the screen.
+ *
+ * Without this a board taller than the window can only accept a drop on the
+ * part of it you can already see. The first customer runs 195 owner-drivers,
+ * so on any given day most of the rows are off screen — and the gesture that
+ * fails is indistinguishable from one that was refused, because in both cases
+ * nothing happens.
+ *
+ * Proportional rather than a fixed speed: barely into the zone creeps, right
+ * at the edge moves at `max`. A single speed is either too slow to cross a
+ * long board or too fast to stop on the row you wanted.
+ *
+ * @param pointer  Pointer position along the axis, in viewport coordinates.
+ * @param size     The viewport's length along that axis.
+ * @param zone     How deep the sensitive band at each end is, in px.
+ * @param max      Top speed, px per second.
+ * @returns px per second; negative scrolls towards the start, 0 means don't.
+ */
+export function edgeScrollVelocity(
+  pointer: number,
+  size: number,
+  zone = 80,
+  max = 1200,
+): number {
+  if (size <= 0 || zone <= 0) return 0;
+
+  // Guard against a zone deeper than half the viewport, where the two bands
+  // would overlap and fight each other in the middle of the screen.
+  const band = Math.min(zone, size / 2);
+
+  if (pointer < band) {
+    // Clamped at the top: dragging above the window keeps scrolling rather
+    // than accelerating without limit.
+    const depth = Math.min(1, (band - pointer) / band);
+    return -max * depth;
+  }
+
+  if (pointer > size - band) {
+    const depth = Math.min(1, (pointer - (size - band)) / band);
+    return max * depth;
+  }
+
+  return 0;
+}
+
+/**
  * The distance a pointer must travel before a drag is a drag.
  *
  * Without it every click on a draggable thing is a one-pixel drag, and the

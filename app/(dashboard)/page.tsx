@@ -1,3 +1,4 @@
+import { ChevronRight } from 'lucide-react';
 import Link from 'next/link';
 import { PageHeader } from '@/components/page-header';
 import { TrendChart } from '@/components/trend-chart';
@@ -87,10 +88,23 @@ function Tile({ tile }: { tile: DashboardTile }) {
   return (
     <Link
       href={tile.href}
-      className="block rounded-lg border p-4 transition-colors hover:bg-accent"
+      className="press-surface group block rounded-lg border bg-card p-4 shadow-chip hover:bg-accent hover:shadow-panel"
       data-testid={`tile-${tile.key}`}
     >
-      <p className="text-sm text-muted-foreground">{tile.label}</p>
+      <p className="flex items-center gap-1 text-sm text-muted-foreground">
+        {tile.label}
+        {/*
+          A tile is a door, and the arrow leans towards it before you have
+          committed. Intermediate motion that points at the outcome is what
+          lets somebody predict where a click goes without reading the label
+          twice — and every tile here goes somewhere, which is the whole
+          reason the numbers are worth showing.
+        */}
+        <ChevronRight
+          className="size-3.5 -translate-x-1 opacity-0 transition-[transform,opacity] duration-fast ease-out group-hover:translate-x-0 group-hover:opacity-100"
+          aria-hidden
+        />
+      </p>
       <p
         className={cn(
           'mt-1 text-3xl font-semibold tabular',

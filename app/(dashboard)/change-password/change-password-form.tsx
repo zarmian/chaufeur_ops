@@ -2,20 +2,14 @@
 
 import { AlertCircle } from 'lucide-react';
 import { useActionState } from 'react';
-import { useFormStatus } from 'react-dom';
 import { FormField, fieldProps } from '@/components/form-field';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
+import { SubmitButton } from '@/components/submit-button';
 import { Input } from '@/components/ui/input';
 import { INITIAL_FORM_STATE, type FormState } from '@/lib/form-state';
 
-function SubmitButton() {
-  const { pending } = useFormStatus();
-  return (
-    <Button type="submit" disabled={pending}>
-      {pending ? 'Saving…' : 'Set password'}
-    </Button>
-  );
+function SetPasswordButton() {
+  return <SubmitButton label="Set password" />;
 }
 
 export function ChangePasswordForm({
@@ -54,7 +48,7 @@ export function ChangePasswordForm({
         />
       </FormField>
 
-      <SubmitButton />
+      <SetPasswordButton />
     </form>
   );
 }

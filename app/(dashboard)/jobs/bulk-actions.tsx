@@ -1,11 +1,13 @@
 'use client';
 
+import { AnimatePresence, motion } from 'motion/react';
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { TableCell, TableHead } from '@/components/ui/table';
 import { JOB_STATUSES } from '@/lib/enum-options';
+import { SPRING } from '@/lib/motion';
 
 /**
  * Row selection, and the two things you can do with a selection.
@@ -148,9 +150,15 @@ export function BulkActionBar({
 
   const modes: Array<{ value: BulkMode; label: string }> = [
     ...(mayPrice ? [{ value: 'price' as const, label: 'Set prices' }] : []),
-    ...(mayTransition ? [{ value: 'status' as const, label: 'Change status' }] : []),
-    ...(canAssign ? [{ value: 'assign' as const, label: 'Assign driver' }] : []),
-    ...(canInvoice ? [{ value: 'invoice' as const, label: 'Add to invoice' }] : []),
+    ...(mayTransition
+      ? [{ value: 'status' as const, label: 'Change status' }]
+      : []),
+    ...(canAssign
+      ? [{ value: 'assign' as const, label: 'Assign driver' }]
+      : []),
+    ...(canInvoice
+      ? [{ value: 'invoice' as const, label: 'Add to invoice' }]
+      : []),
   ];
 
   const [mode, setMode] = useState<BulkMode>(modes[0]?.value ?? 'price');
@@ -158,128 +166,166 @@ export function BulkActionBar({
   if (modes.length === 0) return null;
 
   const ids = [...selected];
-  // Nothing selected means nothing to offer; the bar would just be noise.
-  if (ids.length === 0) return null;
 
   return (
-    <div className="mb-4 rounded-lg border bg-muted/30 p-3" data-testid="bulk-bar">
-      <div className="flex flex-wrap items-end gap-3">
-        <span className="pb-2 text-sm font-medium" data-testid="bulk-count">
-          {ids.length} selected
-        </span>
+    /*
+     * The bar arrives instead of appearing.
+     *
+     * It used to be `if (ids.length === 0) return null`, so ticking the first
+     * checkbox inserted a block of controls in one frame and everything below
+     * it jumped down the page — on a list somebody is working through, that
+     * moves the row they were about to tick out from under the pointer.
+     *
+     * Animating the height means the list is pushed rather than displaced,
+     * and unticking the last box reverses the same movement. Nothing is
+     * rendered at all when the selection is empty, so `AnimatePresence` has
+     * something to remove rather than something to hide.
+     */
+    <AnimatePresence initial={false}>
+      {ids.length > 0 ? (
+        <motion.div
+          key="bulk-bar"
+          initial={{ height: 0, opacity: 0 }}
+          animate={{ height: 'auto', opacity: 1 }}
+          exit={{ height: 0, opacity: 0 }}
+          transition={SPRING.snappy}
+          className="overflow-hidden"
+        >
+          <div
+            className="mb-4 rounded-lg border bg-muted/30 p-3"
+            data-testid="bulk-bar"
+          >
+            <div className="flex flex-wrap items-end gap-3">
+              <span
+                className="pb-2 text-sm font-medium"
+                data-testid="bulk-count"
+              >
+                {ids.length} selected
+              </span>
 
-        {modes.length > 1 ? (
-          <div>
-            <label htmlFor="bulk-mode" className="mb-1.5 block text-sm font-medium">
-              Action
-            </label>
-            <Select
-              id="bulk-mode"
-              value={mode}
-              onChange={(event) => setMode(event.target.value as BulkMode)}
-              className="w-44"
-            >
-              {modes.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </Select>
-          </div>
-        ) : null}
+              {modes.length > 1 ? (
+                <div>
+                  <label
+                    htmlFor="bulk-mode"
+                    className="mb-1.5 block text-sm font-medium"
+                  >
+                    Action
+                  </label>
+                  <Select
+                    id="bulk-mode"
+                    value={mode}
+                    onChange={(event) =>
+                      setMode(event.target.value as BulkMode)
+                    }
+                    className="w-44"
+                  >
+                    {modes.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              ) : null}
 
-        <BulkForm intent={mode} ids={ids} returnTo={returnTo}>
-          {mode === 'price' ? (
-            <>
-              <div>
-                <label
-                  htmlFor="bulk-client-price"
-                  className="mb-1.5 block text-sm font-medium"
-                >
-                  Client price
-                </label>
-                <Input
-                  id="bulk-client-price"
-                  name="clientPrice"
-                  inputMode="decimal"
-                  placeholder="Leave blank to keep"
-                  className="w-44"
-                />
-              </div>
-              <div>
-                <label
-                  htmlFor="bulk-driver-price"
-                  className="mb-1.5 block text-sm font-medium"
-                >
-                  Driver price
-                </label>
-                <Input
-                  id="bulk-driver-price"
-                  name="driverPrice"
-                  inputMode="decimal"
-                  placeholder="Leave blank to keep"
-                  className="w-44"
-                />
-              </div>
-              <BulkSubmit verb="Price" count={ids.length} />
-            </>
-          ) : null}
+              <BulkForm intent={mode} ids={ids} returnTo={returnTo}>
+                {mode === 'price' ? (
+                  <>
+                    <div>
+                      <label
+                        htmlFor="bulk-client-price"
+                        className="mb-1.5 block text-sm font-medium"
+                      >
+                        Client price
+                      </label>
+                      <Input
+                        id="bulk-client-price"
+                        name="clientPrice"
+                        inputMode="decimal"
+                        placeholder="Leave blank to keep"
+                        className="w-44"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="bulk-driver-price"
+                        className="mb-1.5 block text-sm font-medium"
+                      >
+                        Driver price
+                      </label>
+                      <Input
+                        id="bulk-driver-price"
+                        name="driverPrice"
+                        inputMode="decimal"
+                        placeholder="Leave blank to keep"
+                        className="w-44"
+                      />
+                    </div>
+                    <BulkSubmit verb="Price" count={ids.length} />
+                  </>
+                ) : null}
 
-          {mode === 'status' ? (
-            <>
-              <div>
-                <label htmlFor="bulk-status" className="mb-1.5 block text-sm font-medium">
-                  Move to
-                </label>
-                <Select id="bulk-status" name="status" className="w-44">
-                  {JOB_STATUSES.map((status) => (
-                    <option key={status.value} value={status.value}>
-                      {status.label}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              <BulkSubmit verb="Update" count={ids.length} />
-            </>
-          ) : null}
+                {mode === 'status' ? (
+                  <>
+                    <div>
+                      <label
+                        htmlFor="bulk-status"
+                        className="mb-1.5 block text-sm font-medium"
+                      >
+                        Move to
+                      </label>
+                      <Select id="bulk-status" name="status" className="w-44">
+                        {JOB_STATUSES.map((status) => (
+                          <option key={status.value} value={status.value}>
+                            {status.label}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                    <BulkSubmit verb="Update" count={ids.length} />
+                  </>
+                ) : null}
 
-          {mode === 'assign' ? (
-            <>
-              <Chooser
-                id="bulk-driver"
-                name="driverId"
-                label="Driver"
-                placeholder="Choose a driver"
-                options={drivers}
-              />
-              <BulkSubmit verb="Assign" count={ids.length} />
-            </>
-          ) : null}
+                {mode === 'assign' ? (
+                  <>
+                    <Chooser
+                      id="bulk-driver"
+                      name="driverId"
+                      label="Driver"
+                      placeholder="Choose a driver"
+                      options={drivers}
+                    />
+                    <BulkSubmit verb="Assign" count={ids.length} />
+                  </>
+                ) : null}
 
-          {mode === 'invoice' ? (
-            <>
-              <Chooser
-                id="bulk-invoice"
-                name="invoiceId"
-                label="Draft invoice"
-                placeholder="Choose a draft"
-                options={draftInvoices}
-              />
-              <BulkSubmit verb="Add" count={ids.length} />
-            </>
-          ) : null}
-        </BulkForm>
+                {mode === 'invoice' ? (
+                  <>
+                    <Chooser
+                      id="bulk-invoice"
+                      name="invoiceId"
+                      label="Draft invoice"
+                      placeholder="Choose a draft"
+                      options={draftInvoices}
+                    />
+                    <BulkSubmit verb="Add" count={ids.length} />
+                  </>
+                ) : null}
+              </BulkForm>
 
-        {/* Spec 6.5.4. Said before the click, not after — somebody selecting
+              {/* Spec 6.5.4. Said before the click, not after — somebody selecting
             four hundred jobs should know the answer will not be immediate. */}
-        {ids.length > backgroundThreshold ? (
-          <p className="basis-full text-xs text-muted-foreground">
-            More than {backgroundThreshold} jobs, so this runs in the background.
-            The result appears here when it finishes.
-          </p>
-        ) : null}
-      </div>
-    </div>
+              {ids.length > backgroundThreshold ? (
+                <p className="basis-full text-xs text-muted-foreground">
+                  More than {backgroundThreshold} jobs, so this runs in the
+                  background. The result appears here when it finishes.
+                </p>
+              ) : null}
+            </div>
+          </div>
+        </motion.div>
+      ) : null}
+    </AnimatePresence>
   );
 }
 
@@ -414,7 +460,10 @@ export function BulkProgress({ operationId }: { operationId: string }) {
   const done = progress.succeeded + progress.failed;
 
   return (
-    <div className="mb-4 rounded-lg border p-3 text-sm" data-testid="bulk-progress">
+    <div
+      className="mb-4 rounded-lg border p-3 text-sm"
+      data-testid="bulk-progress"
+    >
       {progress.status === 'RUNNING' ? (
         <p>
           {done} of {progress.total} done…

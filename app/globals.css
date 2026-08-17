@@ -396,6 +396,19 @@
   .press-surface:active {
     transform: none;
   }
+
+  /*
+   * The chart is drawn, not grown.
+   *
+   * Twelve bars rising and a line drawing itself across them is exactly the
+   * kind of thing this preference exists to switch off, and unlike a press
+   * there is nothing lost by skipping it — the chart's job is to be read, and
+   * the finished state reads the same.
+   */
+  .animate-grow-up,
+  .animate-draw-in {
+    animation: none;
+  }
 }
 
 /*

@@ -3,10 +3,10 @@ import Link from 'next/link';
 import { EmptyState } from '@/components/empty-state';
 import { JobStatusBadge } from '@/components/job-status-badge';
 import { ListToolbar } from '@/components/list-toolbar';
+import { Notice } from '@/components/notice';
 import { PageHeader } from '@/components/page-header';
 import { Pagination } from '@/components/pagination';
 import { UnpricedBadge } from '@/components/unpriced-badge';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import {
   Table,
@@ -271,13 +271,12 @@ export default async function JobsPage({
               `app/api/jobs/bulk/route.ts` for why it cannot be a Server
               Action. */}
           {bulkMessage || bulkError ? (
-            <Alert
+            <Notice
               variant={bulkError ? 'destructive' : 'default'}
-              className="mb-4"
               data-testid="bulk-result"
             >
-              <AlertDescription>{bulkError ?? bulkMessage}</AlertDescription>
-            </Alert>
+              {bulkError ?? bulkMessage}
+            </Notice>
           ) : null}
           {bulkOperation ? <BulkProgress operationId={bulkOperation} /> : null}
 

@@ -146,10 +146,32 @@ const config: Config = {
           from: { height: 'var(--radix-accordion-content-height)' },
           to: { height: '0' },
         },
+        /**
+         * A bar growing out of its own baseline.
+         *
+         * `scaleY` on a transform rather than an animated `height`, so it runs
+         * on the compositor — the chart has twelve of these and an animated
+         * layout property would relayout the SVG on every frame of all of
+         * them.
+         */
+        'grow-up': {
+          from: { transform: 'scaleY(0)' },
+          to: { transform: 'scaleY(1)' },
+        },
+        /**
+         * A line drawing itself, by walking its own dash offset to zero. The
+         * dash length is set per-path from its measured length.
+         */
+        'draw-in': {
+          from: { strokeDashoffset: 'var(--draw-length)' },
+          to: { strokeDashoffset: '0' },
+        },
       },
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
         'accordion-up': 'accordion-up 0.2s ease-out',
+        'grow-up': 'grow-up var(--duration-slow) var(--ease-out) backwards',
+        'draw-in': 'draw-in 900ms var(--ease-out) backwards',
       },
     },
   },

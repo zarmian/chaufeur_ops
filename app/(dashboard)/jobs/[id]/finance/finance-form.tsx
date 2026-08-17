@@ -3,9 +3,9 @@
 import { AlertCircle } from 'lucide-react';
 import Link from 'next/link';
 import { useActionState, useState } from 'react';
-import { useFormStatus } from 'react-dom';
 import { FormField, fieldProps } from '@/components/form-field';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { SubmitButton } from '@/components/submit-button';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
@@ -48,13 +48,8 @@ export interface FinanceFormValues {
   paymentNotes: string;
 }
 
-function SubmitButton() {
-  const { pending } = useFormStatus();
-  return (
-    <Button type="submit" disabled={pending}>
-      {pending ? 'Saving…' : 'Save finances'}
-    </Button>
-  );
+function SaveButton() {
+  return <SubmitButton label="Save finances" />;
 }
 
 /** Pence as a display string. Kept local — this panel edits pence directly. */
@@ -425,7 +420,7 @@ export function FinanceForm({
       </section>
 
       <div className="flex items-center gap-3 border-t pt-6">
-        {readOnly ? null : <SubmitButton />}
+        {readOnly ? null : <SaveButton />}
         <Button asChild variant="ghost">
           <Link href={cancelHref}>{readOnly ? 'Back' : 'Cancel'}</Link>
         </Button>

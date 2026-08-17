@@ -2,6 +2,7 @@ import { Pencil } from 'lucide-react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { JobStatusBadge } from '@/components/job-status-badge';
+import { Notice } from '@/components/notice';
 import { PageHeader } from '@/components/page-header';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -93,9 +94,9 @@ export default async function ContractDetailPage({
           touch. An operator who assumed everything moved would bill the
           difference and wonder why it did not reconcile. */}
       {notice ? (
-        <Alert className="mb-6" data-testid="contract-notice">
-          <AlertDescription>{notice}</AlertDescription>
-        </Alert>
+        <Notice className="mb-6" data-testid="contract-notice">
+          {notice}
+        </Notice>
       ) : null}
 
       {!contract.active ? (

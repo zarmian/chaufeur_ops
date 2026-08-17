@@ -46,12 +46,31 @@ export function TrendChart({ points }: { points: TrendPoint[] }) {
   const barWidth = width / points.length - BAR_GAP;
   const y = (pence: number) => HEIGHT - ((pence - floor) / span) * HEIGHT;
 
-  const line = points
-    .map((point, index) => {
-      const x = index * (width / points.length) + barWidth / 2 + BAR_GAP / 2;
-      return `${index === 0 ? 'M' : 'L'}${x.toFixed(1)},${y(point.profitPence).toFixed(1)}`;
-    })
+  const vertices = points.map((point, index) => ({
+    x: index * (width / points.length) + barWidth / 2 + BAR_GAP / 2,
+    y: y(point.profitPence),
+  }));
+
+  const line = vertices
+    .map(
+      (vertex, index) =>
+        `${index === 0 ? 'M' : 'L'}${vertex.x.toFixed(1)},${vertex.y.toFixed(1)}`,
+    )
     .join(' ');
+
+  /**
+   * How long the profit line is, in user units.
+   *
+   * Needed to draw it on with `stroke-dashoffset`, and computed here rather
+   * than measured with `getTotalLength()` because this is a Server Component
+   * and there is no DOM to ask. It is exact rather than an estimate: the path
+   * is straight segments, so the sum of the segment lengths *is* its length.
+   */
+  const lineLength = vertices.reduce((total, vertex, index) => {
+    if (index === 0) return 0;
+    const previous = vertices[index - 1]!;
+    return total + Math.hypot(vertex.x - previous.x, vertex.y - previous.y);
+  }, 0);
 
   return (
     <div className="overflow-x-auto">
@@ -104,7 +123,18 @@ export function TrendChart({ points }: { points: TrendPoint[] }) {
                 width={barWidth}
                 height={Math.max(HEIGHT - top, 1)}
                 rx={2}
-                className="fill-primary/25"
+                className="animate-grow-up fill-primary/25"
+                style={{
+                  // Out of the axis, not out of thin air: without an origin
+                  // the bar scales about its own middle and grows downwards
+                  // through the baseline as well as up from it.
+                  transformOrigin: `0 ${HEIGHT}px`,
+                  // Left to right, a month at a time, so the eye reads the
+                  // series in the order it happened rather than seeing twelve
+                  // bars arrive at once. Small enough that the whole chart is
+                  // settled well inside a second.
+                  animationDelay: `${index * 35}ms`,
+                }}
               />
               <text
                 x={x + barWidth / 2}
@@ -118,7 +148,22 @@ export function TrendChart({ points }: { points: TrendPoint[] }) {
           );
         })}
 
-        <path d={line} fill="none" className="stroke-primary" strokeWidth={2} />
+        {/* The profit line arrives after the bars it runs across, so the
+            chart reads as "here is the revenue — and here is what was left of
+            it" rather than as everything appearing at once. */}
+        <path
+          d={line}
+          fill="none"
+          className="animate-draw-in stroke-primary"
+          strokeWidth={2}
+          strokeDasharray={lineLength}
+          style={
+            {
+              '--draw-length': lineLength,
+              animationDelay: `${points.length * 35}ms`,
+            } as React.CSSProperties
+          }
+        />
       </svg>
 
       <div className="mt-1 flex items-center gap-4 text-xs text-muted-foreground">

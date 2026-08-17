@@ -8,10 +8,10 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { useActionState, useEffect, useRef, useState } from 'react';
-import { useFormStatus } from 'react-dom';
 import { AddressField } from '@/components/address-field';
 import { FormField, fieldProps } from '@/components/form-field';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { SubmitButton } from '@/components/submit-button';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
@@ -143,14 +143,7 @@ export interface VehicleOption extends JobFormOption {
   vehicleClass: string;
 }
 
-function SubmitButton({ label }: { label: string }) {
-  const { pending } = useFormStatus();
-  return (
-    <Button type="submit" disabled={pending}>
-      {pending ? 'Saving…' : label}
-    </Button>
-  );
-}
+
 
 export function JobForm({
   action,

@@ -1,12 +1,13 @@
 'use client';
 
-import { animate, motion, useMotionValue } from 'motion/react';
+import { AnimatePresence, animate, motion, useMotionValue } from 'motion/react';
 import { AlertTriangle, MapPin, Send } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import {
+  edgeScrollVelocity,
   hasCommitted,
   pushSample,
   SPRING,
@@ -115,6 +116,35 @@ export function DispatchBoard({
   const [message, setMessage] = useState<string | null>(null);
 
   /**
+   * Jobs the server has accepted but this page has not been told about yet.
+   *
+   * `router.refresh()` re-renders the board from the server, and how long
+   * that takes is not something a gesture can wait on — on a loaded board it
+   * is comfortably long enough to look like nothing happened. The card sat
+   * in the unassigned pile after a successful drop, so the operator dropped
+   * it again.
+   *
+   * Hiding it the moment the server says yes makes the outcome part of the
+   * gesture rather than a consequence of it. The refresh then arrives and
+   * agrees, and the effect below drops the id once the server's own answer
+   * no longer lists the job — so this can only ever run ahead of the truth,
+   * never diverge from it.
+   */
+  const [accepted, setAccepted] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    setAccepted((previous) => {
+      if (previous.size === 0) return previous;
+      const stillPending = new Set(
+        [...previous].filter((id) => unassigned.some((block) => block.id === id)),
+      );
+      return stillPending.size === previous.size ? previous : stillPending;
+    });
+  }, [unassigned]);
+
+  const waiting = unassigned.filter((block) => !accepted.has(block.id));
+
+  /**
    * Where the driver rows are, measured once when a drag commits.
    *
    * Measuring on every pointer move would mean a layout read per frame — and
@@ -145,8 +175,8 @@ export function DispatchBoard({
     return () => clearInterval(timer);
   }, [refreshSeconds, router]);
 
-  /** A drag has passed the threshold: freeze the poll and take the layout. */
-  const handleDragStart = useCallback((jobId: string) => {
+  /** Where every driver lane is, right now. */
+  const measure = useCallback(() => {
     const lanes =
       board.current?.querySelectorAll<HTMLElement>('[data-driver-id]') ?? [];
     zones.current = Array.from(lanes).map((lane) => {
@@ -159,9 +189,101 @@ export function DispatchBoard({
         right: rect.right,
       };
     });
-    setDragging(jobId);
-    setMessage(null);
   }, []);
+
+  /**
+   * A drag has passed the threshold: freeze the poll and take the layout.
+   *
+   * Note what this does *not* do any more: clear the message strip. It used
+   * to, and that was a defect — the strip sits above the board and animates
+   * its own height, so dismissing it slid every driver lane up the page by
+   * about forty pixels while a card was in the air. The measurements taken a
+   * frame earlier then pointed at the wrong rows, and a drop that landed
+   * squarely on a driver resolved to nothing at all. The board would sit
+   * there having silently ignored a completed gesture.
+   *
+   * The message is cleared when the drop resolves instead, which is when
+   * there is a new answer to replace it with.
+   */
+  const handleDragStart = useCallback(
+    (jobId: string) => {
+      measure();
+      setDragging(jobId);
+    },
+    [measure],
+  );
+
+  /**
+   * The page scrolls itself while a card is held near the top or the bottom.
+   *
+   * Without it the board only accepts a drop on the part of itself that
+   * happens to be on screen. That is not an edge case here: the first
+   * customer runs 195 owner-drivers, `all=true` gives every one of them a
+   * row, and a day's board is several screens tall. Reaching a driver who is
+   * not currently visible was simply impossible — and a gesture that cannot
+   * reach its target looks exactly like one that was refused, because in both
+   * cases nothing happens and nothing is said.
+   *
+   * Runs on its own clock rather than off pointer moves, because the pointer
+   * stops moving the moment it reaches the edge: the whole point is that
+   * *holding* it there keeps the board coming.
+   */
+  const scroll = useRef<{ frame: number; last: number; velocity: number } | null>(
+    null,
+  );
+
+  const stopScrolling = useCallback(() => {
+    if (scroll.current) {
+      cancelAnimationFrame(scroll.current.frame);
+      scroll.current = null;
+    }
+  }, []);
+
+  const pointer = useRef({ x: 0, y: 0 });
+
+  const step = useCallback(
+    (now: number) => {
+      const state = scroll.current;
+      if (!state) return;
+
+      // Seconds since the last frame, so the speed is px per second however
+      // fast the display refreshes — and clamped, because a tab that was
+      // backgrounded returns with a gap of several seconds and would jump the
+      // page to the bottom in one go.
+      const elapsed = Math.min((now - state.last) / 1000, 1 / 30);
+      state.last = now;
+
+      window.scrollBy(0, state.velocity * elapsed);
+
+      // The lanes have moved relative to the viewport, so the measurements
+      // have to move with them or the highlight lags behind the page.
+      measure();
+      setOver(zoneAt(zones.current, pointer.current.x, pointer.current.y));
+
+      state.frame = requestAnimationFrame(step);
+    },
+    [measure],
+  );
+
+  const setScrollVelocity = useCallback(
+    (velocity: number) => {
+      if (velocity === 0) {
+        stopScrolling();
+        return;
+      }
+      if (scroll.current) {
+        scroll.current.velocity = velocity;
+        return;
+      }
+      const state = { velocity, last: performance.now(), frame: 0 };
+      scroll.current = state;
+      state.frame = requestAnimationFrame(step);
+    },
+    [step, stopScrolling],
+  );
+
+  // Nothing keeps scrolling after the board has gone.
+  useEffect(() => stopScrolling, [stopScrolling]);
 
   /**
    * Continuous feedback, every frame of the gesture.
@@ -171,9 +293,14 @@ export function DispatchBoard({
    * crossed gaps between rows. Resolved centrally from one set of
    * measurements, the answer is stable.
    */
-  const handleDragMove = useCallback((x: number, y: number) => {
-    setOver(zoneAt(zones.current, x, y));
-  }, []);
+  const handleDragMove = useCallback(
+    (x: number, y: number) => {
+      pointer.current = { x, y };
+      setOver(zoneAt(zones.current, x, y));
+      setScrollVelocity(edgeScrollVelocity(y, window.innerHeight));
+    },
+    [setScrollVelocity],
+  );
 
   /**
    * Where the drag ended, and whether the board took it.
@@ -185,6 +312,13 @@ export function DispatchBoard({
    */
   const handleDrop = useCallback(
     async (jobId: string, x: number, y: number): Promise<boolean> => {
+      stopScrolling();
+
+      // Measured again, not reused from the start of the drag. The highlight
+      // can afford to be a frame stale; the decision cannot, and this is the
+      // one moment where being wrong means silently discarding a gesture
+      // somebody completed.
+      measure();
       const driverId = zoneAt(zones.current, x, y);
       setOver(null);
 
@@ -194,6 +328,7 @@ export function DispatchBoard({
       }
 
       setBusy(true);
+      setMessage(null);
       try {
         const response = await fetch('/api/dispatch/assign', {
           method: 'POST',
@@ -216,6 +351,7 @@ export function DispatchBoard({
           // operator knows the traffic and the driver; the system does not.
           setMessage(json.warning);
         }
+        setAccepted((previous) => new Set(previous).add(jobId));
         router.refresh();
         return true;
       } catch {
@@ -226,35 +362,47 @@ export function DispatchBoard({
         setDragging(null);
       }
     },
-    [router],
+    [measure, router, stopScrolling],
   );
 
   return (
     <div className="space-y-4">
-      {message ? (
-        <div
-          className="rounded-md border border-warning bg-warning/10 px-3 py-2 text-sm"
-          data-testid="dispatch-message"
-          role="status"
-        >
-          {message}
-        </div>
-      ) : null}
+      {/*
+        A refusal arrives rather than appears. The gesture that caused it has
+        just finished at the other end of the board, so the message has to
+        announce itself or it is read as part of the furniture.
+      */}
+      <AnimatePresence initial={false}>
+        {message ? (
+          <motion.div
+            key="dispatch-message"
+            initial={{ opacity: 0, height: 0, y: -8 }}
+            animate={{ opacity: 1, height: 'auto', y: 0 }}
+            exit={{ opacity: 0, height: 0, y: -8 }}
+            transition={SPRING.snappy}
+            className="rounded-md border border-warning bg-warning/10 px-3 py-2 text-sm"
+            data-testid="dispatch-message"
+            role="status"
+          >
+            {message}
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
 
       <div className="flex gap-4">
         {/* Unassigned first, on the left, because it is the pile of work
             somebody has to clear. */}
         <aside className="w-56 shrink-0" data-testid="unassigned-column">
           <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            Unassigned ({unassigned.length})
+            Unassigned ({waiting.length})
           </h2>
-          {unassigned.length === 0 ? (
+          {waiting.length === 0 ? (
             <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
               Everything has a driver.
             </p>
           ) : (
             <ul className="space-y-2">
-              {unassigned.map((block) => (
+              {waiting.map((block) => (
                 <li key={block.id}>
                   <UnassignedCard
                     block={block}
@@ -464,8 +612,17 @@ function UnassignedCard({
 
     gesture.current = {
       pointerId: event.pointerId,
-      originX: event.clientX,
-      originY: event.clientY,
+      // Page coordinates, not viewport ones.
+      //
+      // The card's translation is measured from where the gesture started,
+      // and its own layout box lives in the document — so if the board
+      // auto-scrolls, a translation computed from `clientX/Y` leaves the card
+      // behind by exactly the distance scrolled. Held at the bottom edge of a
+      // long board, it drifted several hundred pixels off the cursor and out
+      // of the window while the drop still worked, which reads as the card
+      // having been dropped somewhere by accident.
+      originX: event.pageX,
+      originY: event.pageY,
       committed: false,
       xs: [],
       ys: [],
@@ -480,10 +637,22 @@ function UnassignedCard({
     const active = gesture.current;
     if (!active || active.pointerId !== event.pointerId) return;
 
-    const point = { x: event.clientX, y: event.clientY };
+    /*
+     * Two coordinate spaces, and they are not interchangeable.
+     *
+     * `page` is where the pointer is in the document, and it is what the
+     * card's transform is measured against — so the card stays under the
+     * cursor even as the board scrolls beneath both of them.
+     *
+     * `client` is where the pointer is on the screen, which is what the drop
+     * zones are measured in (`getBoundingClientRect`) and what decides which
+     * row is under the pointer.
+     */
+    const page = { x: event.pageX, y: event.pageY };
+    const client = { x: event.clientX, y: event.clientY };
 
     if (!active.committed) {
-      if (!hasCommitted({ x: active.originX, y: active.originY }, point)) return;
+      if (!hasCommitted({ x: active.originX, y: active.originY }, page)) return;
       active.committed = true;
       swallowClick.current = true;
       onDragStart(block.id);
@@ -491,13 +660,15 @@ function UnassignedCard({
 
     // The offset from where it was grabbed, not from the card's centre. Grab
     // a card by its corner and it stays held by that corner.
-    x.set(point.x - active.originX);
-    y.set(point.y - active.originY);
+    x.set(page.x - active.originX);
+    y.set(page.y - active.originY);
 
-    active.xs = pushSample(active.xs, { position: point.x, time: event.timeStamp });
-    active.ys = pushSample(active.ys, { position: point.y, time: event.timeStamp });
+    // Sampled in the same space the spring animates in, so the velocity
+    // handed to it on release is the velocity it is about to undo.
+    active.xs = pushSample(active.xs, { position: page.x, time: event.timeStamp });
+    active.ys = pushSample(active.ys, { position: page.y, time: event.timeStamp });
 
-    onDragMove(point.x, point.y);
+    onDragMove(client.x, client.y);
   }
 
   async function handlePointerUp(event: React.PointerEvent<HTMLDivElement>) {

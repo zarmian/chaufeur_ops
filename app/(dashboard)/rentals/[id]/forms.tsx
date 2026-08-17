@@ -1,6 +1,7 @@
 'use client';
 
 import { AlertCircle } from 'lucide-react';
+import { ConfirmSubmit } from '@/components/confirm-dialog';
 import { FormField, fieldProps } from '@/components/form-field';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -90,24 +91,24 @@ export function ReturnForm({ rentalId, error }: { rentalId: string; error?: stri
  * beside ones that are not destructive.
  */
 export function CancelRentalForm({ rentalId }: { rentalId: string }) {
+  const formId = `cancel-rental-${rentalId}`;
+
   return (
-    <form
-      method="post"
-      action={`/api/rentals/${rentalId}/actions`}
-      onSubmit={(event) => {
-        if (
-          !confirm(
-            'Cancel this hire? The record stays and the car is freed for that period.',
-          )
-        ) {
-          event.preventDefault();
-        }
-      }}
-    >
+    <form id={formId} method="post" action={`/api/rentals/${rentalId}/actions`}>
       <input type="hidden" name="intent" value="cancel" />
-      <Button type="submit" variant="outline" className="w-full">
-        Cancel this hire
-      </Button>
+      {/* Both buttons here are a "cancel", which is exactly why the native
+          confirm was the wrong tool: its OK/Cancel pair asked whether to
+          cancel the cancelling. Naming them removes the knot. */}
+      <ConfirmSubmit
+        formId={formId}
+        variant="outline"
+        className="w-full"
+        label="Cancel this hire"
+        title="Call this hire off?"
+        description="The record stays and the car is freed for that period, so it can be booked to somebody else."
+        confirmLabel="Call it off"
+        cancelLabel="Leave it booked"
+      />
     </form>
   );
 }
@@ -146,20 +147,24 @@ export function DeleteRentalForm({
     );
   }
 
+  const formId = `delete-rental-${rentalId}`;
+
   return (
-    <form
-      method="post"
-      action={`/api/rentals/${rentalId}/actions`}
-      onSubmit={(event) => {
-        if (!confirm(`Delete ${reference}? It comes off every list.`)) {
-          event.preventDefault();
-        }
-      }}
-    >
+    <form id={formId} method="post" action={`/api/rentals/${rentalId}/actions`}>
       <input type="hidden" name="intent" value="delete" />
-      <Button type="submit" variant="destructive" className="w-full">
-        Delete this hire
-      </Button>
+      <ConfirmSubmit
+        formId={formId}
+        variant="destructive"
+        className="w-full"
+        label="Delete this hire"
+        // The reference, in the title, because "are you sure" on a page full
+        // of hires is not a question anybody can answer — the wrong tab is
+        // the wrong reference, and this is where that shows.
+        title={`Delete ${reference}?`}
+        description="It comes off every list. The record is archived rather than destroyed, so the car's history still reconstructs."
+        confirmLabel="Delete it"
+        cancelLabel="Keep it"
+      />
       <p className="mt-2 text-xs text-muted-foreground">
         For a booking entered in error. The record is archived rather than
         destroyed, so the car&rsquo;s history still reconstructs.

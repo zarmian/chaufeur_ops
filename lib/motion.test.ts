@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DRAG_THRESHOLD_PX,
+  edgeScrollVelocity,
   hasCommitted,
   project,
   pushSample,
@@ -206,6 +207,55 @@ describe('drop zones', () => {
 
   it('finds nothing when there is nothing', () => {
     expect(zoneAt([], 10, 10)).toBeNull();
+  });
+});
+
+describe('edge scrolling', () => {
+  const VIEWPORT = 900;
+
+  it('does nothing in the middle of the screen', () => {
+    expect(edgeScrollVelocity(450, VIEWPORT)).toBe(0);
+    expect(edgeScrollVelocity(100, VIEWPORT)).toBe(0);
+    expect(edgeScrollVelocity(800, VIEWPORT)).toBe(0);
+  });
+
+  it('scrolls back near the top and forward near the bottom', () => {
+    expect(edgeScrollVelocity(20, VIEWPORT)).toBeLessThan(0);
+    expect(edgeScrollVelocity(880, VIEWPORT)).toBeGreaterThan(0);
+  });
+
+  it('speeds up the deeper into the edge the pointer goes', () => {
+    const shallow = edgeScrollVelocity(870, VIEWPORT);
+    const deep = edgeScrollVelocity(899, VIEWPORT);
+    expect(deep).toBeGreaterThan(shallow);
+  });
+
+  it('caps at the top speed rather than accelerating off the screen', () => {
+    // Dragging above the window — a real thing to do when reaching for a row
+    // near the top of a long board.
+    expect(edgeScrollVelocity(-500, VIEWPORT)).toBe(-1200);
+    expect(edgeScrollVelocity(5000, VIEWPORT)).toBe(1200);
+  });
+
+  it('is symmetric at equal depths', () => {
+    expect(edgeScrollVelocity(10, VIEWPORT)).toBeCloseTo(
+      -edgeScrollVelocity(VIEWPORT - 10, VIEWPORT),
+      6,
+    );
+  });
+
+  it('never has both bands active at once on a short viewport', () => {
+    // A zone deeper than half the window would otherwise put every point
+    // inside both bands, and the two would fight. Capping the band at half
+    // the viewport leaves the midpoint a standstill, with one band on either
+    // side of it.
+    expect(edgeScrollVelocity(50, 100, 400)).toBe(0);
+    expect(edgeScrollVelocity(49, 100, 400)).toBeLessThan(0);
+    expect(edgeScrollVelocity(51, 100, 400)).toBeGreaterThan(0);
+  });
+
+  it('does nothing without a viewport to scroll', () => {
+    expect(edgeScrollVelocity(10, 0)).toBe(0);
   });
 });
 

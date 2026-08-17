@@ -2,6 +2,7 @@
 
 import { CalendarPlus } from 'lucide-react';
 import { useTransition } from 'react';
+import { ConfirmAction } from '@/components/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import { generateNowAction, setContractActiveAction } from '../actions';
 
@@ -34,25 +35,38 @@ export function ContractControls({
         Book the next days
       </Button>
 
-      <Button
-        type="button"
-        variant={active ? 'destructive' : 'default'}
-        className="w-full"
-        disabled={pending}
-        onClick={() => {
-          if (
-            active &&
-            !confirm(
-              'Stop this contract? No more days will be created. The ones already booked stay.',
-            )
-          ) {
-            return;
+      {/*
+        Only stopping is confirmed. Starting a contract again makes no days
+        until the next run and is undone by the button beside it, so asking
+        about it would be a confirmation with nothing to protect — and the
+        habit of clicking through those is what makes the one that matters
+        stop working.
+      */}
+      {active ? (
+        <ConfirmAction
+          className="w-full"
+          disabled={pending}
+          label="Stop this contract"
+          title="Stop this contract?"
+          description="No more days will be created. The ones already booked stay — they are bookings a client is expecting, so cancel any of them individually."
+          confirmLabel="Stop it"
+          cancelLabel="Leave it running"
+          onConfirm={() =>
+            startTransition(() => setContractActiveAction(contractId, false))
           }
-          startTransition(() => setContractActiveAction(contractId, !active));
-        }}
-      >
-        {active ? 'Stop this contract' : 'Start it again'}
-      </Button>
+        />
+      ) : (
+        <Button
+          type="button"
+          className="w-full"
+          disabled={pending}
+          onClick={() =>
+            startTransition(() => setContractActiveAction(contractId, true))
+          }
+        >
+          Start it again
+        </Button>
+      )}
 
       <p className="text-xs text-muted-foreground">
         Stopping makes no more days. The days it already created are bookings a
