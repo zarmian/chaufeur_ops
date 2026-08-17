@@ -518,7 +518,22 @@ export function buildJobWhere(
 ): Prisma.JobWhereInput {
   const where: Prisma.JobWhereInput = {};
 
-  if (filters.status) where.status = filters.status as JobStatus;
+  if (filters.status) {
+    where.status = filters.status as JobStatus;
+  } else {
+    /*
+     * Cancelled jobs are hidden unless somebody asks for them.
+     *
+     * A cancelled booking is not work: nobody is driving it, it will not be
+     * invoiced, and it cannot be chased. Left in the list it pads every page,
+     * skews the counts and buries the jobs that do need attention — which is
+     * the failure mode of the legacy Overview this list replaced.
+     *
+     * Choosing "Cancelled" in the status filter is the specific ask that
+     * brings them back, so nothing is unreachable.
+     */
+    where.status = { not: 'CANCELLED' };
+  }
   if (filters.jobType) where.jobType = filters.jobType as JobType;
   if (filters.driverId) where.driverId = filters.driverId;
   if (filters.clientId) where.clientId = filters.clientId;

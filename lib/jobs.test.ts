@@ -136,8 +136,39 @@ describe('buildJobWhere', () => {
     unpricedOnly: false,
   };
 
-  it('builds an empty clause when nothing is filtered', () => {
-    expect(buildJobWhere({ q: null }, noFilters)).toEqual({});
+  it('hides cancelled jobs when nothing is filtered', () => {
+    // A cancelled booking is not work: nobody is driving it, it will not be
+    // invoiced and it cannot be chased. Left in the list it pads every page
+    // and buries the jobs that do need attention.
+    expect(buildJobWhere({ q: null }, noFilters)).toEqual({
+      status: { not: 'CANCELLED' },
+    });
+  });
+
+  it('shows them when they are the thing being asked for', () => {
+    // Nothing is unreachable — choosing Cancelled in the status filter is the
+    // specific ask that brings them back.
+    expect(buildJobWhere({ q: null }, { ...noFilters, status: 'CANCELLED' }).status).toBe(
+      'CANCELLED',
+    );
+  });
+
+  it('does not hide anything else', () => {
+    // A no-show still happened and may still be chargeable, so it stays.
+    const where = buildJobWhere({ q: null }, { ...noFilters, status: 'NO_SHOW' });
+    expect(where.status).toBe('NO_SHOW');
+  });
+
+  it('keeps hiding them alongside a search or a date range', () => {
+    // The exclusion sits on `status`, not in the AND list, so a search term
+    // cannot displace it — which is how the unpriced count once escaped its
+    // own filter.
+    const where = buildJobWhere(
+      { q: 'heathrow' },
+      { ...noFilters, from: '2026-08-04' },
+    );
+    expect(where.status).toEqual({ not: 'CANCELLED' });
+    expect(where.AND).toBeDefined();
   });
 
   it('filters by each simple field', () => {

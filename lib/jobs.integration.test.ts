@@ -271,6 +271,34 @@ describe.skipIf(!DATABASE_AVAILABLE)('the unpriced filter', () => {
     await raw.$disconnect();
   });
 
+  it('keeps cancelled jobs out of the list until they are asked for', async () => {
+    // A cancelled booking is not work. Left in the list it pads every page,
+    // skews the counts and buries the jobs that do need attention.
+    const marker = `Cancelled Fixture ${Date.now()}`;
+    const live = await createJob(jobInput({ pickupText: marker }), audit);
+    const dropped = await createJob(jobInput({ pickupText: marker }), audit);
+    jobIds.push(live.id, dropped.id);
+    await raw!.job.update({
+      where: { id: dropped.id },
+      data: { status: 'CANCELLED' },
+    });
+
+    const listed = await listJobs({ ...listParams, q: marker }, noFilters);
+    expect(listed.total).toBe(1);
+    expect(listed.rows.map((row) => row.id)).toEqual([live.id]);
+
+    // …and the unpriced tally follows the same view, so a cancelled job with
+    // no price is not something the dashboard chases.
+    expect(listed.unpriced).toBe(1);
+
+    // Asking for them specifically brings them back.
+    const asked = await listJobs(
+      { ...listParams, q: marker },
+      { ...noFilters, status: 'CANCELLED' },
+    );
+    expect(asked.rows.map((row) => row.id)).toEqual([dropped.id]);
+  });
+
   it('counts unpriced within the current filter, not across the database', async () => {
     // The spread that used to build this count replaced the filter's own AND
     // clause, so the tally ignored the search and described the whole table.

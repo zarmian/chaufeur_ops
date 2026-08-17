@@ -153,7 +153,11 @@ export default async function JobsPage({
     <>
       <PageHeader
         title="Jobs"
-        description="Every booking, with the price captured at the point it was taken."
+        description={
+          filters.status === 'CANCELLED'
+            ? 'Cancelled bookings.'
+            : 'Every live booking, with the price captured at the point it was taken. Cancelled ones are hidden — filter by status to see them.'
+        }
         actions={
           <div className="flex flex-wrap gap-2">
             {/* Spec 6.3.7. Here rather than in the sidebar: a recurrence is a
@@ -242,8 +246,8 @@ export default async function JobsPage({
           title={isFiltered ? 'No jobs match those filters' : 'No jobs in this window'}
           description={
             isFiltered
-              ? 'Try widening the dates, or clear the filters.'
-              : 'The list shows today and the next seven days. Book a job, or widen the dates to see history.'
+              ? 'Try widening the dates, or clear the filters. Cancelled jobs are hidden unless you filter for them.'
+              : 'The list shows today and the next seven days, cancelled ones aside. Book a job, or widen the dates to see history.'
           }
           action={
             isFiltered ? (
