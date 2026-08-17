@@ -43,6 +43,8 @@ export interface RateQuery {
   toZoneId?: string | null;
   /** For `AS_DIRECTED`, the hours being booked. */
   hours?: number | null;
+  /** For `CONTRACT`, the days being booked. */
+  days?: number | null;
   waitMinutes?: number | null;
   scheduledAt: Date;
 }
@@ -138,6 +140,7 @@ export async function suggestPrice(
       fromZoneId: from?.zoneId ?? null,
       toZoneId: to?.zoneId ?? null,
       hours: query.hours ?? null,
+      days: query.days ?? null,
       waitMinutes: query.waitMinutes ?? null,
     };
 
@@ -273,6 +276,8 @@ function toRateRule(row: {
   baseFarePence: number;
   perHourPence: number;
   minimumHours: unknown;
+  perDayPence: number;
+  minimumDays: unknown;
   freeWaitMinutes: number;
   waitPerMinutePence: number;
   driverBasePence: number;
@@ -289,6 +294,8 @@ function toRateRule(row: {
     baseFarePence: row.baseFarePence,
     perHourPence: row.perHourPence,
     minimumHours: toNumber(row.minimumHours),
+    perDayPence: row.perDayPence,
+    minimumDays: toNumber(row.minimumDays),
     freeWaitMinutes: row.freeWaitMinutes,
     waitPerMinutePence: row.waitPerMinutePence,
     driverBasePence: row.driverBasePence,

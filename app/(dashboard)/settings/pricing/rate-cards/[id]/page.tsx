@@ -339,6 +339,27 @@ export default async function RateCardPage({
                     defaultValue={rule?.minimumHours ? String(rule.minimumHours) : ''}
                   />
                 </Field>
+                {/* Contract work. A day rate on any other job type is
+                    refused by `ruleProblems` — it would have nothing to
+                    multiply by. */}
+                <Field id="perDay" label="Per day">
+                  <Input
+                    id="perDay"
+                    name="perDay"
+                    inputMode="decimal"
+                    placeholder="0.00"
+                    defaultValue={major(rule?.perDayPence)}
+                  />
+                </Field>
+                <Field id="minimumDays" label="Minimum days">
+                  <Input
+                    id="minimumDays"
+                    name="minimumDays"
+                    inputMode="decimal"
+                    placeholder="3"
+                    defaultValue={rule?.minimumDays ? String(rule.minimumDays) : ''}
+                  />
+                </Field>
                 <Field id="priority" label="Priority">
                   <Input
                     id="priority"
@@ -463,12 +484,19 @@ function bySpecificity(
 function fareSummary(rule: {
   baseFarePence: number;
   perHourPence: number;
+  perDayPence: number;
   minimumHours: unknown;
+  minimumDays: unknown;
 }): string {
   const parts: string[] = [];
   if (rule.perHourPence > 0) {
     parts.push(
       `${formatGBP(rule.perHourPence)}/hr${rule.minimumHours ? ` min ${rule.minimumHours}` : ''}`,
+    );
+  }
+  if (rule.perDayPence > 0) {
+    parts.push(
+      `${formatGBP(rule.perDayPence)}/day${rule.minimumDays ? ` min ${rule.minimumDays}` : ''}`,
     );
   }
   if (rule.baseFarePence > 0) parts.push(formatGBP(rule.baseFarePence));

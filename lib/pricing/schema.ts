@@ -86,6 +86,7 @@ export const JOB_TYPE_VALUES = [
   'TRANSFER',
   'AIRPORT_TRANSFER',
   'AS_DIRECTED',
+  'CONTRACT',
 ] as const;
 
 /**
@@ -107,6 +108,10 @@ export const rateRuleSchema = z.object({
   perHour: optionalMoney,
   minimumHours: blankToNull(
     z.coerce.number().min(0).max(24, 'A minimum above 24 hours is a day rate').nullable(),
+  ),
+  perDay: optionalMoney,
+  minimumDays: blankToNull(
+    z.coerce.number().min(0).max(365, 'A minimum above a year is not a hire').nullable(),
   ),
   freeWaitMinutes: z.coerce.number().int().min(0).max(600),
   waitPerMinute: optionalMoney,

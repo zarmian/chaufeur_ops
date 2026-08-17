@@ -21,6 +21,7 @@ export interface QuoteInput {
   scheduledDate: string;
   scheduledTime: string;
   hours?: number | null;
+  days?: number | null;
 }
 
 export interface Quote {

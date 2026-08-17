@@ -37,6 +37,8 @@ const baseRule = {
   baseFare: '85.00',
   perHour: null,
   minimumHours: null,
+  perDay: null,
+  minimumDays: null,
   freeWaitMinutes: 15,
   waitPerMinute: null,
   driverBase: null,

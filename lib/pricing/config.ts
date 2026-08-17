@@ -266,6 +266,9 @@ export async function saveRateRule(
     perHourPence: penceFrom(input.perHour),
     minimumHours:
       input.minimumHours === null ? null : new Prisma.Decimal(input.minimumHours),
+    perDayPence: penceFrom(input.perDay),
+    minimumDays:
+      input.minimumDays === null ? null : new Prisma.Decimal(input.minimumDays),
     freeWaitMinutes: input.freeWaitMinutes,
     waitPerMinutePence: penceFrom(input.waitPerMinute),
 
@@ -282,9 +285,12 @@ export async function saveRateRule(
   // 4.2.5 — the cross-field rules, checked against the numbers that are about
   // to be stored rather than the text that was typed.
   const problems = ruleProblems({
+    jobType: data.jobType,
     baseFarePence: data.baseFarePence,
     perHourPence: data.perHourPence,
     minimumHours: input.minimumHours,
+    perDayPence: data.perDayPence,
+    minimumDays: input.minimumDays,
     driverBasePence: data.driverBasePence,
     driverPerHourPence: data.driverPerHourPence,
     driverPctOfFare: input.driverPctOfFare,

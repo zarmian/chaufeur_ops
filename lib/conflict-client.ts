@@ -14,6 +14,8 @@ export interface ConflictQuery {
   scheduledTime: string;
   estimatedMinutes?: number | null;
   hours?: number | null;
+  /** The last day of a contract, which holds the driver for the whole block. */
+  contractEndsOn?: string | null;
 }
 
 export interface ConflictNote {

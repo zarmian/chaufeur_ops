@@ -45,6 +45,7 @@ const schema = z.object({
   scheduledDate: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/),
   scheduledTime: z.string().trim().regex(/^\d{2}:\d{2}$/),
   hours: z.coerce.number().min(0).max(24).nullable().optional(),
+  days: z.coerce.number().min(0).max(365).nullable().optional(),
 });
 
 export const POST = withErrorHandling(async (request: Request): Promise<Response> => {
@@ -83,6 +84,7 @@ export const POST = withErrorHandling(async (request: Request): Promise<Response
     pickupPostcode: input.pickupPostcode ?? null,
     dropoffPostcode: input.dropoffPostcode ?? null,
     hours: input.hours ?? null,
+    days: input.days ?? null,
     scheduledAt,
   });
 

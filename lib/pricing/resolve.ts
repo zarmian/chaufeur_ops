@@ -34,6 +34,9 @@ export interface RateRule {
   baseFarePence: number;
   perHourPence: number;
   minimumHours: number | null;
+  /** Contract work, charged by the day. */
+  perDayPence: number;
+  minimumDays: number | null;
   freeWaitMinutes: number;
   waitPerMinutePence: number;
 
@@ -52,6 +55,8 @@ export interface RateQuery {
   toZoneId?: string | null;
   /** For `AS_DIRECTED`, the hours being booked. */
   hours?: number | null;
+  /** For `CONTRACT`, the days being booked. */
+  days?: number | null;
   /** Billable waiting beyond the free allowance, in minutes. */
   waitMinutes?: number | null;
 }
@@ -160,9 +165,27 @@ export function priceFromRule(rule: RateRule, query: RateQuery): PricedRate {
     );
   }
 
+  if (rule.perDayPence > 0) {
+    const requested = query.days ?? 0;
+    const minimum = rule.minimumDays ?? 0;
+    const billedDays = Math.max(requested, minimum);
+
+    clientPence += roundPence(rule.perDayPence * billedDays);
+
+    parts.push(
+      billedDays > requested
+        ? `${billedDays} days at the minimum (${requested} booked)`
+        : `${billedDays} days`,
+    );
+  }
+
   if (rule.baseFarePence > 0) {
     clientPence += rule.baseFarePence;
-    parts.push(rule.perHourPence > 0 ? 'plus the base fare' : 'base fare');
+    parts.push(
+      rule.perHourPence > 0 || rule.perDayPence > 0
+        ? 'plus the base fare'
+        : 'base fare',
+    );
   }
 
   const waitMinutes = query.waitMinutes ?? 0;
@@ -240,10 +263,11 @@ export function ruleProblems(rule: Partial<RateRule>): string[] {
 
   if (
     (rule.baseFarePence ?? 0) === 0 &&
-    (rule.perHourPence ?? 0) === 0
+    (rule.perHourPence ?? 0) === 0 &&
+    (rule.perDayPence ?? 0) === 0
   ) {
     problems.push(
-      'A rule with no base fare and no hourly rate prices every matching job at nothing.',
+      'A rule with no base fare, no hourly rate and no day rate prices every matching job at nothing.',
     );
   }
 
@@ -251,6 +275,16 @@ export function ruleProblems(rule: Partial<RateRule>): string[] {
     problems.push(
       'A minimum number of hours means nothing without an hourly rate.',
     );
+  }
+
+  if ((rule.minimumDays ?? 0) > 0 && (rule.perDayPence ?? 0) === 0) {
+    problems.push('A minimum number of days means nothing without a day rate.');
+  }
+
+  // A day rate on anything but a contract would silently multiply by the
+  // hours field, or by nothing at all.
+  if ((rule.perDayPence ?? 0) > 0 && rule.jobType && rule.jobType !== 'CONTRACT') {
+    problems.push('A day rate belongs to a contract rule.');
   }
 
   return problems;

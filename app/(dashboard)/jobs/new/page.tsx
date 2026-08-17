@@ -51,6 +51,12 @@ export default async function NewJobPage({
       customerHours: '',
       customerRate: '',
       minimumHours: '',
+      contractEndsOn: '',
+      customerDays: '',
+      customerDayRate: '',
+      minimumDays: '',
+      driverDays: '',
+      driverDayRate: '',
       shiftId: '',
       stops: [],
       // For a duplicate the date stays blank on purpose — see

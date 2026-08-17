@@ -59,6 +59,7 @@ export const JOB_TYPES = [
   { value: 'TRANSFER', label: 'Transfer' },
   { value: 'AIRPORT_TRANSFER', label: 'Airport transfer' },
   { value: 'AS_DIRECTED', label: 'As directed (hourly)' },
+  { value: 'CONTRACT', label: 'Contract (per day)' },
 ] as const;
 
 export const JOB_STATUSES = [

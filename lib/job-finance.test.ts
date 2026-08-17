@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   billableWaitMinutes,
+  billedDays,
   billedHours,
   calculateFinance,
+  contractDays,
   DEFAULT_FREE_WAIT_MINUTES,
   financeSchema,
   freeWaitMinutesFor,
@@ -156,8 +158,12 @@ describe('financeSchema', () => {
     driverPaymentPence: 8000,
     fuelCostPence: 0,
     otherExpensesPence: 0,
+    customerDays: '',
+    customerDayRatePence: 0,
     driverHours: '',
     driverRatePence: 0,
+    driverDays: '',
+    driverDayRatePence: 0,
     driverPayStatus: 'UNPAID' as const,
   };
 
@@ -194,11 +200,15 @@ describe('toFinanceData', () => {
     extraChargesPence: 0,
     customerHours: null,
     customerRatePence: 0,
+    customerDays: null,
+    customerDayRatePence: 0,
     driverPaymentPence: 12000,
     fuelCostPence: 0,
     otherExpensesPence: 0,
     driverHours: null,
     driverRatePence: 0,
+    driverDays: null,
+    driverDayRatePence: 0,
     driverPayStatus: 'UNPAID' as const,
   };
 
@@ -382,5 +392,91 @@ describe('billedHours', () => {
 
   it('is null when no hours were booked — not an hourly job', () => {
     expect(billedHours(null, 4)).toBeNull();
+  });
+});
+
+describe('contract work, charged by the day', () => {
+  it('bills days × day rate', () => {
+    const totals = calculateFinance({
+      customerDays: 5,
+      customerDayRatePence: 40_000,
+      driverDays: 5,
+      driverDayRatePence: 18_000,
+    });
+    expect(totals.totalClientPence).toBe(200_000);
+    expect(totals.totalCostsPence).toBe(90_000);
+    expect(totals.grossProfitPence).toBe(110_000);
+  });
+
+  it('adds hours on top of the day rate rather than choosing between them', () => {
+    // A contract with a standing day rate can still run over on one of its
+    // days. Charging the hours *instead* of the day would give the client a
+    // week of work for an evening's overtime.
+    const totals = calculateFinance({
+      customerDays: 5,
+      customerDayRatePence: 40_000,
+      customerHours: 3,
+      customerRatePence: 6000,
+    });
+    expect(totals.totalClientPence).toBe(218_000);
+  });
+
+  it('keeps extra charges out of the day rate', () => {
+    const totals = calculateFinance({
+      customerDays: 2,
+      customerDayRatePence: 40_000,
+      extraChargesPence: 1500,
+    });
+    expect(totals.totalClientPence).toBe(81_500);
+  });
+});
+
+describe('billedDays', () => {
+  it('applies the minimum, so a short booking bills the minimum', () => {
+    // A three-day booking on a five-day minimum bills five. Applying it here
+    // rather than in the form means the quote and the invoice agree.
+    expect(billedDays(3, 5)).toBe(5);
+    expect(billedDays(7, 5)).toBe(7);
+  });
+
+  it('leaves a job that is not priced by the day alone', () => {
+    expect(billedDays(null, 5)).toBeNull();
+  });
+
+  it('treats no minimum as no floor', () => {
+    expect(billedDays(2, null)).toBe(2);
+  });
+});
+
+describe('contractDays', () => {
+  const at = (iso: string) => new Date(iso);
+
+  it('counts both ends — Monday to Friday is five days', () => {
+    // Four would be wrong: the car is out on the Friday.
+    expect(
+      contractDays(at('2026-07-27T09:00:00Z'), at('2026-07-31T18:00:00Z')),
+    ).toBe(5);
+  });
+
+  it('is one day when a contract starts and ends the same day', () => {
+    expect(
+      contractDays(at('2026-07-27T09:00:00Z'), at('2026-07-27T22:00:00Z')),
+    ).toBe(1);
+  });
+
+  it('counts calendar days across a clocks change, not 24-hour blocks', () => {
+    // The clocks go back on 25 October 2026, so that week contains a 25-hour
+    // day. Dividing elapsed milliseconds would give six days for seven.
+    expect(
+      contractDays(at('2026-10-22T09:00:00Z'), at('2026-10-28T09:00:00Z')),
+    ).toBe(7);
+  });
+
+  it('never returns less than a day', () => {
+    // The form refuses the ordering separately; this must not go negative and
+    // hand a negative total to the invoice.
+    expect(
+      contractDays(at('2026-07-31T09:00:00Z'), at('2026-07-27T09:00:00Z')),
+    ).toBe(1);
   });
 });

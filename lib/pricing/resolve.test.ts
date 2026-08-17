@@ -28,6 +28,8 @@ function rule(overrides: Partial<RateRule> = {}): RateRule {
     baseFarePence: 10000,
     perHourPence: 0,
     minimumHours: null,
+    perDayPence: 0,
+    minimumDays: null,
     freeWaitMinutes: 15,
     waitPerMinutePence: 50,
     driverBasePence: 0,

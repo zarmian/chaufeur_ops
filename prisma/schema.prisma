@@ -31,6 +31,10 @@ enum JobType {
   AS_DIRECTED
   TRANSFER
   AIRPORT_TRANSFER
+  /// Contract hire: a car and driver held for a block of days at an agreed
+  /// day rate. One job covering the whole block, not one per day — that is
+  /// how the contract is agreed and how it is billed.
+  CONTRACT
 }
 
 enum RecurrenceFrequency {
@@ -669,6 +673,10 @@ model RateCardRule {
   baseFarePence      Int      @default(0)
   perHourPence       Int      @default(0)
   minimumHours       Decimal? @db.Decimal(4, 2)
+  /// Contract work. A rule with a day rate prices a CONTRACT job the way
+  /// `perHourPence` prices an as-directed one.
+  perDayPence        Int      @default(0)
+  minimumDays        Decimal? @db.Decimal(5, 2)
   freeWaitMinutes    Int      @default(15)
   waitPerMinutePence Int      @default(0)
 
@@ -702,8 +710,13 @@ model Job {
   jobType   JobType
   status    JobStatus @default(PENDING)
 
-  /// UTC. Displayed in the configured timezone.
+  /// UTC. Displayed in the configured timezone. On a contract this is when
+  /// the first day starts.
   scheduledAt      DateTime
+  /// The last instant a CONTRACT job covers — the end of its final day, in
+  /// the configured timezone. Null on every other type: one day's work ends
+  /// when it ends, and an estimate is what says when.
+  contractEndsAt   DateTime?
   estimatedMinutes Int?
 
   /// as typed
@@ -795,6 +808,7 @@ model Job {
 
   @@index([scheduledAt])
   @@index([status, scheduledAt])
+  @@index([contractEndsAt])
   @@index([driverId, scheduledAt])
   @@index([vehicleId, scheduledAt])
   @@index([clientId])
@@ -871,6 +885,12 @@ model JobFinance {
   extraChargesNotes    String?
   customerHours        Decimal?  @db.Decimal(5, 2)
   customerRatePence    Int       @default(0)
+  /// Contract work, charged by the day. Kept apart from the hourly pair
+  /// rather than reusing it: the free-wait allowance and the minimum-hours
+  /// rule are about hours, and a day rate carrying them would be wrong in a
+  /// way nobody would spot.
+  customerDays         Decimal?  @db.Decimal(6, 2)
+  customerDayRatePence Int       @default(0)
   totalClientPence     Int       @default(0)
 
   // Costs
@@ -880,6 +900,9 @@ model JobFinance {
   expenseNotes       String?
   driverHours        Decimal? @db.Decimal(5, 2)
   driverRatePence    Int      @default(0)
+  /// What the driver is paid for a contract, by the day.
+  driverDays         Decimal? @db.Decimal(6, 2)
+  driverDayRatePence Int      @default(0)
   totalCostsPence    Int      @default(0)
 
   grossProfitPence Int @default(0)

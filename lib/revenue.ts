@@ -61,6 +61,7 @@ export async function billableFor(
         invoiceLines: { select: { id: true }, take: 1 },
         // The facts the picker and the invoice line both need.
         jobType: true,
+        contractEndsAt: true,
         pickupText: true,
         dropoffText: true,
         viaText: true,

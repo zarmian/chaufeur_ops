@@ -80,6 +80,14 @@ function readJobForm(formData: FormData) {
     customerHours: formData.get('customerHours') ?? '',
     customerRatePence: formData.get('customerRate') ?? '',
     minimumHours: formData.get('minimumHours') ?? '',
+    // Contract hire, charged by the day. Only rendered for that job type, so
+    // on any other these arrive blank and the end date is cleared.
+    contractEndsOn: formData.get('contractEndsOn') ?? '',
+    customerDays: formData.get('customerDays') ?? '',
+    customerDayRatePence: formData.get('customerDayRate') ?? '',
+    minimumDays: formData.get('minimumDays') ?? '',
+    driverDays: formData.get('driverDays') ?? '',
+    driverDayRatePence: formData.get('driverDayRate') ?? '',
     shiftId: formData.get('shiftId') ?? '',
     stops: readStops(formData),
     notes: formData.get('notes') ?? '',

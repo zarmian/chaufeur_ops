@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { daysBetweenDates } from './dates';
+import { DEFAULT_TIMEZONE } from './locale';
 import { marginPct, roundPence, sumPence } from './money';
 
 /**
@@ -34,6 +36,21 @@ const hours = z.preprocess(
     .nullable(),
 );
 
+/**
+ * Days accept two decimals, matching `Decimal(6,2)`. A half day is a real
+ * arrangement; a blank is null rather than zero, for the same reason hours are
+ * — zero days would silently zero a contract's revenue.
+ */
+const days = z.preprocess(
+  (value) =>
+    value === '' || value === null || value === undefined ? null : value,
+  z.coerce
+    .number()
+    .min(0, 'Days cannot be negative')
+    .max(9999.99, 'That is more days than a contract can run')
+    .nullable(),
+);
+
 /** Money fields arrive as pounds from the form and are stored as pence. */
 const pence = z.coerce
   .number()
@@ -58,6 +75,10 @@ export const financeSchema = z.object({
   extraChargesNotes: z.string().trim().max(2000).optional().or(z.literal('')),
   customerHours: hours,
   customerRatePence: pence,
+  // Contract work. `days` rather than `hours` so the message an operator
+  // sees names what they typed.
+  customerDays: days,
+  customerDayRatePence: pence,
 
   // Costs
   driverPaymentPence: pence,
@@ -66,6 +87,8 @@ export const financeSchema = z.object({
   expenseNotes: z.string().trim().max(2000).optional().or(z.literal('')),
   driverHours: hours,
   driverRatePence: pence,
+  driverDays: days,
+  driverDayRatePence: pence,
 
   // Settlement
   driverPayStatus: z.enum(['UNPAID', 'PARTIALLY_PAID', 'FULLY_PAID']),
@@ -103,11 +126,16 @@ export interface FinanceAmounts {
   extraChargesPence?: number | null;
   customerHours?: number | null;
   customerRatePence?: number | null;
+  /** Contract work, charged by the day rather than by the hour. */
+  customerDays?: number | null;
+  customerDayRatePence?: number | null;
   driverPaymentPence?: number | null;
   fuelCostPence?: number | null;
   otherExpensesPence?: number | null;
   driverHours?: number | null;
   driverRatePence?: number | null;
+  driverDays?: number | null;
+  driverDayRatePence?: number | null;
 }
 
 /**
@@ -125,11 +153,21 @@ export function calculateFinance(amounts: FinanceAmounts): FinanceTotals {
   );
   const driverHourly = hourlyCharge(amounts.driverHours, amounts.driverRatePence);
 
+  // Contract work. Added rather than chosen between: a contract with a
+  // standing day rate can still run over on one of its days, and the extra
+  // hours are billed on top of the day — not instead of it.
+  const customerDaily = unitCharge(
+    amounts.customerDays,
+    amounts.customerDayRatePence,
+  );
+  const driverDaily = unitCharge(amounts.driverDays, amounts.driverDayRatePence);
+
   const totalClientPence = sumPence(
     amounts.baseFarePence,
     amounts.waitTimePence,
     amounts.extraChargesPence,
     customerHourly,
+    customerDaily,
   );
 
   const totalCostsPence = sumPence(
@@ -137,6 +175,7 @@ export function calculateFinance(amounts: FinanceAmounts): FinanceTotals {
     amounts.fuelCostPence,
     amounts.otherExpensesPence,
     driverHourly,
+    driverDaily,
   );
 
   const grossProfitPence = totalClientPence - totalCostsPence;
@@ -149,13 +188,29 @@ export function calculateFinance(amounts: FinanceAmounts): FinanceTotals {
   };
 }
 
-/** `hours × rate`, rounded once, at the point it becomes money. */
+/** `quantity × rate`, rounded once, at the point it becomes money. */
+export function unitCharge(
+  quantity: number | null | undefined,
+  ratePence: number | null | undefined,
+): number {
+  if (!quantity || !ratePence) return 0;
+  return roundPence(quantity * ratePence);
+}
+
+/** `hours × rate`. Named for its caller; the arithmetic is `unitCharge`. */
 export function hourlyCharge(
   hoursWorked: number | null | undefined,
   ratePence: number | null | undefined,
 ): number {
-  if (!hoursWorked || !ratePence) return 0;
-  return roundPence(hoursWorked * ratePence);
+  return unitCharge(hoursWorked, ratePence);
+}
+
+/** `days × day rate`, for contract work. */
+export function dailyCharge(
+  days: number | null | undefined,
+  dayRatePence: number | null | undefined,
+): number {
+  return unitCharge(days, dayRatePence);
 }
 
 /**
@@ -191,6 +246,8 @@ export function toFinanceData(input: FinanceInput) {
     extraChargesNotes: emptyToNull(input.extraChargesNotes),
     customerHours: input.customerHours,
     customerRatePence: input.customerRatePence,
+    customerDays: input.customerDays,
+    customerDayRatePence: input.customerDayRatePence,
 
     driverPaymentPence: input.driverPaymentPence,
     fuelCostPence: input.fuelCostPence,
@@ -198,6 +255,8 @@ export function toFinanceData(input: FinanceInput) {
     expenseNotes: emptyToNull(input.expenseNotes),
     driverHours: input.driverHours,
     driverRatePence: input.driverRatePence,
+    driverDays: input.driverDays,
+    driverDayRatePence: input.driverDayRatePence,
 
     totalClientPence: totals.totalClientPence,
     totalCostsPence: totals.totalCostsPence,
@@ -265,11 +324,15 @@ export function financeAmountsFrom(
     extraChargesPence: number;
     customerHours: { toNumber(): number } | number | null;
     customerRatePence: number;
+    customerDays?: { toNumber(): number } | number | null;
+    customerDayRatePence?: number;
     driverPaymentPence: number;
     fuelCostPence: number;
     otherExpensesPence: number;
     driverHours: { toNumber(): number } | number | null;
     driverRatePence: number;
+    driverDays?: { toNumber(): number } | number | null;
+    driverDayRatePence?: number;
   } | null,
 ): FinanceAmounts | null {
   if (!row) return null;
@@ -279,11 +342,15 @@ export function financeAmountsFrom(
     extraChargesPence: row.extraChargesPence,
     customerHours: toNumber(row.customerHours),
     customerRatePence: row.customerRatePence,
+    customerDays: toNumber(row.customerDays ?? null),
+    customerDayRatePence: row.customerDayRatePence ?? 0,
     driverPaymentPence: row.driverPaymentPence,
     fuelCostPence: row.fuelCostPence,
     otherExpensesPence: row.otherExpensesPence,
     driverHours: toNumber(row.driverHours),
     driverRatePence: row.driverRatePence,
+    driverDays: toNumber(row.driverDays ?? null),
+    driverDayRatePence: row.driverDayRatePence ?? 0,
   };
 }
 
@@ -353,6 +420,44 @@ export function billedHours(
 ): number | null {
   if (hoursBooked === null) return null;
   return Math.max(hoursBooked, minimumHours ?? 0);
+}
+
+/**
+ * Billed days for a contract.
+ *
+ * The same rule as `billedHours`, for the same reason: a three-day booking on
+ * a five-day minimum bills five, and applying that here rather than in the
+ * form means the quote, the invoice and the report cannot disagree.
+ */
+export function billedDays(
+  daysBooked: number | null,
+  minimumDays: number | null,
+): number | null {
+  if (daysBooked === null) return null;
+  return Math.max(daysBooked, minimumDays ?? 0);
+}
+
+/**
+ * How many days a contract covers, counting both ends.
+ *
+ * Monday to Friday is five days, not four — the car is out on Friday. Counted
+ * in calendar days in the operator's own timezone rather than in 24-hour
+ * blocks, because "five days at £400" is about days on the road, and a
+ * booking that starts at 9am and ends at 6pm on the fifth day is still five.
+ *
+ * The timezone matters twice over: a contract spanning a clocks-change
+ * weekend contains a 23- or 25-hour day, and dividing elapsed milliseconds
+ * would bill four days for five, or six.
+ */
+export function contractDays(
+  startAt: Date,
+  endsAt: Date,
+  timeZone: string = DEFAULT_TIMEZONE,
+): number {
+  const days = daysBetweenDates(startAt, endsAt, timeZone);
+  // A block that ends before it starts is not a negative contract; it is one
+  // day, and the form refuses the ordering separately.
+  return Math.max(1, days + 1);
 }
 
 /**

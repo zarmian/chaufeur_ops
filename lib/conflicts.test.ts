@@ -38,6 +38,31 @@ function job(
 }
 
 describe('occupiedBy', () => {
+  it('holds a driver for a contract\u2019s whole block', () => {
+    // A five-day contract that fell through to an estimate would show the
+    // driver as free from ten o'clock on the Monday, and the operator would
+    // book them onto something on the Wednesday.
+    const window = occupiedBy({
+      id: 'a',
+      scheduledAt: new Date('2026-07-27T09:00:00Z'),
+      contractEndsAt: new Date('2026-07-31T22:59:59Z'),
+      estimatedMinutes: 60,
+    });
+    expect(window.to.toISOString()).toBe('2026-07-31T22:59:59.000Z');
+  });
+
+  it('ignores a contract end that is not after the start', () => {
+    // Bad data must not produce a backwards interval, which would overlap
+    // nothing and silently disable the check.
+    const window = occupiedBy({
+      id: 'a',
+      scheduledAt: new Date('2026-07-27T09:00:00Z'),
+      contractEndsAt: new Date('2026-07-26T09:00:00Z'),
+      estimatedMinutes: 90,
+    });
+    expect(window.to.getTime() - window.from.getTime()).toBe(90 * 60_000);
+  });
+
   it('runs from the pickup for the estimated duration', () => {
     const window = occupiedBy({ id: 'a', scheduledAt: at(9), estimatedMinutes: 90 });
     expect(window.from).toEqual(at(9));

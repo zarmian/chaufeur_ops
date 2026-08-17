@@ -1,5 +1,5 @@
-import { formatDateTime } from './dates';
-import { hourlyCharge } from './job-finance';
+import { formatDate, formatDateTime } from './dates';
+import { unitCharge } from './job-finance';
 import { RATE_TYPE_UNIT } from './rentals';
 import {
   disbursementPenceOf,
@@ -40,6 +40,7 @@ const JOB_TYPE_LABELS: Record<string, string> = {
   TRANSFER: 'Transfer',
   AIRPORT_TRANSFER: 'Airport transfer',
   AS_DIRECTED: 'As directed',
+  CONTRACT: 'Contract hire',
 };
 
 export function jobTypeLabel(jobType: string): string {
@@ -57,6 +58,7 @@ export function jobLineText(job: {
   reference: string;
   jobType: string;
   scheduledAt: Date;
+  contractEndsAt?: Date | null;
   pickupText: string;
   dropoffText: string;
   viaText?: string | null;
@@ -65,7 +67,11 @@ export function jobLineText(job: {
 }): string[] {
   return [
     `${jobTypeLabel(job.jobType)} · ${job.reference}`,
-    formatDateTime(job.scheduledAt),
+    // A contract states the block it covers. One date on a five-day booking
+    // is the question the client rings up to ask.
+    job.contractEndsAt
+      ? `${formatDate(job.scheduledAt)} to ${formatDate(job.contractEndsAt)}`
+      : formatDateTime(job.scheduledAt),
     `Pick up: ${job.pickupText}`,
     ...(job.viaText ? [`Via: ${job.viaText}`] : []),
     `Drop off: ${job.dropoffText}`,
@@ -100,9 +106,12 @@ export interface JobLineInput {
     vatTreatment?: VatTreatment | null;
     account?: { vatTreatment?: VatTreatment | null } | null;
     client?: { vatTreatment?: VatTreatment | null } | null;
+    contractEndsAt?: Date | null;
     finance?: {
       customerHours?: number | null;
       customerRatePence?: number | null;
+      customerDays?: number | null;
+      customerDayRatePence?: number | null;
     } | null;
     expenses?: Array<{ kind: string; amountPence: number; borneBy: string }>;
   };
@@ -135,22 +144,34 @@ export function buildJobLine(input: JobLineInput): BuiltLine {
 
   const hours = job.finance?.customerHours ?? null;
   const rate = job.finance?.customerRatePence ?? null;
-  const hourly = hourlyCharge(hours, rate);
+  const days = job.finance?.customerDays ?? null;
+  const dayRate = job.finance?.customerDayRatePence ?? null;
 
-  // Only when the hourly figure is the whole charge. A job with hours *and*
-  // extra charges cannot honestly print "10 hrs at £140" against a larger
-  // total, so it prints the total alone.
-  const hourlyPriced =
-    job.jobType === 'AS_DIRECTED' && hours !== null && rate !== null && hourly === input.amountPence;
+  // The quantity columns are shown only when the figure multiplies out to the
+  // whole charge. A job billed for days *and* extra charges cannot honestly
+  // print "5 days at £400" beside a larger total, so it prints the total
+  // alone — the client would query the difference otherwise.
+  const priced =
+    job.jobType === 'CONTRACT' &&
+    days !== null &&
+    dayRate !== null &&
+    unitCharge(days, dayRate) === input.amountPence
+      ? { quantity: days, unit: days === 1 ? 'day' : 'days', rate: dayRate }
+      : job.jobType === 'AS_DIRECTED' &&
+          hours !== null &&
+          rate !== null &&
+          unitCharge(hours, rate) === input.amountPence
+        ? { quantity: hours, unit: 'hrs', rate }
+        : { quantity: 1, unit: 'trip', rate: input.amountPence };
 
   return {
     description: joinLineText(jobLineText(job)),
     amountPence: input.amountPence,
     disbursementPence,
     vatTreatment: treatment,
-    quantity: hourlyPriced ? hours : 1,
-    quantityUnit: hourlyPriced ? 'hrs' : 'trip',
-    unitPricePence: hourlyPriced ? rate : input.amountPence,
+    quantity: priced.quantity,
+    quantityUnit: priced.unit,
+    unitPricePence: priced.rate,
   };
 }
 

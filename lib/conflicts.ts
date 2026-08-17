@@ -30,6 +30,12 @@ export interface Occupies {
   estimatedMinutes?: number | null;
   /** Set for an as-directed hire, where the hours are the duration. */
   customerHours?: number | null;
+  /**
+   * The end of a contract's last day. A contract holds the car and the driver
+   * for the whole block, so it is the one job whose duration is stated
+   * outright rather than estimated.
+   */
+  contractEndsAt?: Date | null;
 }
 
 export interface Interval {
@@ -45,6 +51,12 @@ export interface Interval {
  * would show as free from ten o'clock when it is not.
  */
 export function occupiedBy(job: Occupies): Interval {
+  // A contract states its own end. Falling through to an estimate would show
+  // a driver on a five-day booking as free from ten o'clock on the Monday.
+  if (job.contractEndsAt && job.contractEndsAt > job.scheduledAt) {
+    return { from: job.scheduledAt, to: job.contractEndsAt };
+  }
+
   const minutes =
     job.customerHours && job.customerHours > 0
       ? Math.round(job.customerHours * 60)

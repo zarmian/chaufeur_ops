@@ -2,7 +2,7 @@ import type { JobStatus, JobType, Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { withAudit, type AuditContext } from './audit';
 import { isDriverCompliantAt } from './compliance';
-import { toUTC } from './dates';
+import { endOfZonedDay, fromDateOnlyString, toUTC } from './dates';
 import {
   canTransition,
   eventTypeForStatus,
@@ -10,7 +10,7 @@ import {
   type TransitionResult,
 } from './job-status';
 import type { ListParams } from './list-params';
-import { billedHours, calculateFinance } from './job-finance';
+import { billedDays, billedHours, calculateFinance } from './job-finance';
 import { noteLocationUse } from './pricing/config';
 import { parseMoney } from './money';
 import { vehicleAvailableAt, type RentalRefusal } from './rentals';
@@ -81,6 +81,24 @@ const optionalCount = z.preprocess(
   z.coerce.number().int().min(0).max(99).nullable(),
 );
 
+/** Hours or days, to two decimals. A blank is null, never zero. */
+const optionalQuantity = z.preprocess(
+  (value) =>
+    value === '' || value === null || value === undefined ? null : value,
+  z.coerce.number().min(0).max(9999.99).nullable(),
+);
+
+/** A date from a date picker. Blank is null. */
+const optionalDateOnly = z.preprocess(
+  (value) =>
+    value === '' || value === null || value === undefined ? null : value,
+  z
+    .string()
+    .trim()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use the date picker')
+    .nullable(),
+);
+
 /**
  * A postcode from an address lookup.
  *
@@ -148,7 +166,7 @@ export const jobSchema = z
   .object({
     clientId: optionalId,
     accountId: optionalId,
-    jobType: z.enum(['AS_DIRECTED', 'TRANSFER', 'AIRPORT_TRANSFER']),
+    jobType: z.enum(['AS_DIRECTED', 'TRANSFER', 'AIRPORT_TRANSFER', 'CONTRACT']),
 
     // Entered in the operator's local time; converted to UTC on save.
     scheduledDate: z
@@ -237,6 +255,21 @@ export const jobSchema = z
       z.coerce.number().min(0).max(999.99).nullable(),
     ),
 
+    /**
+     * Contract hire — a car and driver held for a block of days.
+     *
+     * The end is a date rather than a datetime: the contract is agreed in
+     * days ("through Friday"), and asking for a time invites somebody to
+     * guess one. It is stored as the end of that day in the configured
+     * timezone, so the block covers the whole of its last day.
+     */
+    contractEndsOn: optionalDateOnly,
+    customerDays: optionalQuantity,
+    customerDayRatePence: priceField,
+    minimumDays: optionalQuantity,
+    driverDays: optionalQuantity,
+    driverDayRatePence: priceField,
+
     stops: z.array(stopSchema).max(20, 'That is more stops than a job can have').default([]),
 
     /** Attributes the job to a hired driver's shift. */
@@ -269,9 +302,53 @@ export const jobSchema = z
         message: 'Flight numbers belong to airport transfers',
       });
     }
+
+    // A contract is a block of days. Without an end it is not a contract —
+    // it is one day, and nothing downstream could say how many days to bill
+    // or which days the car is spoken for.
+    if (input.jobType === 'CONTRACT' && !input.contractEndsOn) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['contractEndsOn'],
+        message: 'Enter the last day of the contract',
+      });
+    }
+
+    if (input.contractEndsOn && input.contractEndsOn < input.scheduledDate) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['contractEndsOn'],
+        message: 'The contract cannot end before it starts',
+      });
+    }
+
+    // Priced by the day, or priced at a fixed figure — but a day rate with no
+    // days is a job that would bill nothing, which is the silent zero this
+    // system exists to prevent.
+    if (input.customerDayRatePence && !input.customerDays) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['customerDays'],
+        message: 'Enter how many days are being charged',
+      });
+    }
   });
 
 export type JobInput = z.infer<typeof jobSchema>;
+
+/**
+ * The last instant of a day, in the operator's zone.
+ *
+ * `endOfZonedDay` returns the *start of the next* day — an exclusive bound,
+ * which is right for a range query and wrong here. Stored as an exclusive
+ * bound, a contract ending on Friday would print as ending on Saturday, and
+ * the conflict interval would spill a millisecond into a day the car is free.
+ */
+export function lastInstantOf(dateOnly: string, timeZone?: string): Date {
+  return new Date(
+    endOfZonedDay(fromDateOnlyString(dateOnly), timeZone).getTime() - 1,
+  );
+}
 
 /** Combine the two form fields into the single UTC instant the schema stores. */
 export function scheduledAtFrom(
@@ -287,6 +364,13 @@ function toData(input: JobInput, timeZone?: string) {
     accountId: input.accountId,
     jobType: input.jobType,
     scheduledAt: scheduledAtFrom(input, timeZone),
+    // The end of the contract's last day, so the block covers the whole of
+    // it. Cleared when the type is anything else: a stale end date left on a
+    // job converted to a transfer would go on holding the car for a week.
+    contractEndsAt:
+      input.jobType === 'CONTRACT' && input.contractEndsOn
+        ? lastInstantOf(input.contractEndsOn, timeZone)
+        : null,
     estimatedMinutes: input.estimatedMinutes,
 
     pickupText: tidy(input.pickupText),
@@ -382,21 +466,39 @@ function toStopData(stops: StopInput[]) {
  */
 function hourlyFinanceFor(input: JobInput) {
   const hours = billedHours(input.customerHours, input.minimumHours);
-  if (hours === null || !input.customerRatePence) return null;
+  const days = billedDays(input.customerDays, input.minimumDays);
+
+  const pricedByHour = hours !== null && Boolean(input.customerRatePence);
+  const pricedByDay = days !== null && Boolean(input.customerDayRatePence);
+  if (!pricedByHour && !pricedByDay) return null;
 
   const amounts = {
     baseFarePence: input.clientPricePence ?? 0,
-    customerHours: hours,
-    customerRatePence: input.customerRatePence,
+    customerHours: pricedByHour ? hours : null,
+    customerRatePence: input.customerRatePence ?? 0,
+    customerDays: pricedByDay ? days : null,
+    customerDayRatePence: input.customerDayRatePence ?? 0,
     driverPaymentPence: input.driverPricePence ?? 0,
+    // The driver's own day rate on a contract. Their days default to the
+    // client's, because on a contract they are there the days the car is —
+    // but the figure is written down rather than implied, so the panel shows
+    // what it charged.
+    driverDays: input.driverDayRatePence
+      ? (input.driverDays ?? days)
+      : null,
+    driverDayRatePence: input.driverDayRatePence ?? 0,
   };
   const totals = calculateFinance(amounts);
 
   return {
     baseFarePence: amounts.baseFarePence,
-    customerHours: hours,
-    customerRatePence: input.customerRatePence,
+    customerHours: amounts.customerHours,
+    customerRatePence: amounts.customerRatePence,
+    customerDays: amounts.customerDays,
+    customerDayRatePence: amounts.customerDayRatePence,
     driverPaymentPence: amounts.driverPaymentPence,
+    driverDays: amounts.driverDays,
+    driverDayRatePence: amounts.driverDayRatePence,
     totalClientPence: totals.totalClientPence,
     totalCostsPence: totals.totalCostsPence,
     grossProfitPence: totals.grossProfitPence,

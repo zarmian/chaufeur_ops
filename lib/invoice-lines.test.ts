@@ -94,6 +94,55 @@ describe('buildJobLine', () => {
     expect(line.unitPricePence).toBe(14_000);
   });
 
+  it('shows a contract as days at a day rate', () => {
+    const line = buildJobLine({
+      job: {
+        ...job,
+        jobType: 'CONTRACT',
+        contractEndsAt: at('2026-05-18T22:59:59Z'),
+        finance: { customerDays: 5, customerDayRatePence: 40_000 },
+      },
+      amountPence: 200_000,
+    });
+    expect(line.quantity).toBe(5);
+    expect(line.quantityUnit).toBe('days');
+    expect(line.unitPricePence).toBe(40_000);
+
+    // And the line states the block, not one date — a single date on a
+    // five-day booking is the question the client rings up to ask.
+    const { title, details } = splitLineText(line.description);
+    expect(title).toBe('Contract hire \u00b7 JOB-000123');
+    expect(details[0]).toBe('14 May 2026 to 18 May 2026');
+  });
+
+  it('says day, not days, for a one-day contract', () => {
+    const line = buildJobLine({
+      job: {
+        ...job,
+        jobType: 'CONTRACT',
+        contractEndsAt: at('2026-05-14T22:59:59Z'),
+        finance: { customerDays: 1, customerDayRatePence: 40_000 },
+      },
+      amountPence: 40_000,
+    });
+    expect(line.quantityUnit).toBe('day');
+  });
+
+  it('drops the day columns when they would not multiply out', () => {
+    // A contract billed for days *and* a recharged expense cannot honestly
+    // print "5 days at £400" beside a larger total.
+    const line = buildJobLine({
+      job: {
+        ...job,
+        jobType: 'CONTRACT',
+        finance: { customerDays: 5, customerDayRatePence: 40_000 },
+      },
+      amountPence: 201_500,
+    });
+    expect(line.quantityUnit).toBe('trip');
+    expect(line.unitPricePence).toBe(201_500);
+  });
+
   it('drops the hourly columns when they would not multiply out', () => {
     // A job billed for hours *and* something else cannot honestly print
     // "10 hrs at £140" beside a larger total — the client would query it.

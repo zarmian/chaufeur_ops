@@ -19,7 +19,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { JOB_TYPES } from '@/lib/enum-options';
 import { VAT_TREATMENTS } from '@/lib/vat';
 import { INITIAL_FORM_STATE, type FormState } from '@/lib/form-state';
-import { billedHours } from '@/lib/job-finance';
+import { billedDays, billedHours } from '@/lib/job-finance';
 import { DEFAULT_CURRENCY, DEFAULT_LOCALE } from '@/lib/locale';
 import {
   conflictIsWorthAsking,
@@ -77,6 +77,13 @@ export interface JobFormValues {
   customerHours: string;
   customerRate: string;
   minimumHours: string;
+  /** Contract hire. The last day of the block, and what it is charged at. */
+  contractEndsOn: string;
+  customerDays: string;
+  customerDayRate: string;
+  minimumDays: string;
+  driverDays: string;
+  driverDayRate: string;
   shiftId: string;
   stops: StopValue[];
   notes: string;
@@ -111,6 +118,12 @@ const BLANK: JobFormValues = {
   customerHours: '',
   customerRate: '',
   minimumHours: '',
+  contractEndsOn: '',
+  customerDays: '',
+  customerDayRate: '',
+  minimumDays: '',
+  driverDays: '',
+  driverDayRate: '',
   shiftId: '',
   stops: [],
   notes: '',
@@ -130,6 +143,30 @@ export interface DriverOption extends JobFormOption {
 export interface VehicleOption extends JobFormOption {
   /** The rate card matches on it, so the form has to know it. */
   vehicleClass: string;
+}
+
+/**
+ * Days from one date picker to another, counting both ends.
+ *
+ * Monday to Friday is five days — the car is out on the Friday. Done on
+ * date strings rather than `Date` arithmetic so a clocks-change weekend
+ * cannot produce four and a half.
+ */
+function daySpan(startDate: string, endDate: string): number | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(endDate)) return null;
+  const start = Date.UTC(
+    Number(startDate.slice(0, 4)),
+    Number(startDate.slice(5, 7)) - 1,
+    Number(startDate.slice(8, 10)),
+  );
+  const end = Date.UTC(
+    Number(endDate.slice(0, 4)),
+    Number(endDate.slice(5, 7)) - 1,
+    Number(endDate.slice(8, 10)),
+  );
+  if (end < start) return null;
+  return Math.round((end - start) / 86_400_000) + 1;
 }
 
 function SubmitButton({ label }: { label: string }) {
@@ -210,6 +247,12 @@ export function JobForm({
   const [customerHours, setCustomerHours] = useState(values.customerHours);
   const [customerRate, setCustomerRate] = useState(values.customerRate);
   const [minimumHours, setMinimumHours] = useState(values.minimumHours);
+  const [contractEndsOn, setContractEndsOn] = useState(values.contractEndsOn);
+  const [customerDays, setCustomerDays] = useState(values.customerDays);
+  const [customerDayRate, setCustomerDayRate] = useState(values.customerDayRate);
+  const [minimumDays, setMinimumDays] = useState(values.minimumDays);
+  const [driverDays, setDriverDays] = useState(values.driverDays);
+  const [driverDayRate, setDriverDayRate] = useState(values.driverDayRate);
 
   /**
    * The rate card's answer — spec 4.2.7.
@@ -243,6 +286,7 @@ export function JobForm({
 
   const isAirport = jobType === 'AIRPORT_TRANSFER';
   const isHourly = jobType === 'AS_DIRECTED';
+  const isContract = jobType === 'CONTRACT';
 
   const vehicleClass =
     vehicles.find((vehicle) => vehicle.id === vehicleId)?.vehicleClass ?? null;
@@ -292,6 +336,7 @@ export function JobForm({
       scheduledDate: field('scheduledDate'),
       scheduledTime: field('scheduledTime'),
       hours: customerHours.trim() === '' ? null : Number(customerHours),
+      contractEndsOn: contractEndsOn || null,
     };
 
     if (submitted.current || submitting) return;
@@ -354,6 +399,9 @@ export function JobForm({
     jobType,
     vehicleClass,
     customerHours,
+    // A contract's price follows its days, so the card is asked again when
+    // they change — the same reason hours are here.
+    customerDays,
     revision,
     submitting,
   ]);
@@ -389,6 +437,7 @@ export function JobForm({
       scheduledDate: field('scheduledDate'),
       scheduledTime: field('scheduledTime'),
       hours: customerHours.trim() === '' ? null : Number(customerHours),
+      contractEndsOn: contractEndsOn || null,
     };
 
     if (submitted.current || submitting) return;
@@ -416,7 +465,17 @@ export function JobForm({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [jobId, driverId, vehicleId, customerHours, revision, submitting]);
+  }, [
+    jobId,
+    driverId,
+    vehicleId,
+    customerHours,
+    // A contract holds the driver for its whole block, so a changed end date
+    // changes who is free.
+    contractEndsOn,
+    revision,
+    submitting,
+  ]);
 
   const clientFromCard =
     suggestedClient !== '' && clientPrice === suggestedClient;
@@ -438,6 +497,21 @@ export function JobForm({
       ? billed * rateValue
       : null;
 
+  // The same arithmetic for a contract, through the same `billedDays` the
+  // server uses so the quote on screen and the stored figure cannot disagree.
+  const daysValue = customerDays.trim() === '' ? null : Number(customerDays);
+  const minimumDaysValue =
+    minimumDays.trim() === '' ? null : Number(minimumDays);
+  const dayRateValue = customerDayRate.trim() === '' ? 0 : Number(customerDayRate);
+  const billedDayCount = billedDays(
+    Number.isFinite(daysValue as number) ? daysValue : null,
+    Number.isFinite(minimumDaysValue as number) ? minimumDaysValue : null,
+  );
+  const contractTotal =
+    billedDayCount !== null && Number.isFinite(dayRateValue) && dayRateValue > 0
+      ? billedDayCount * dayRateValue
+      : null;
+
   // The rate and the total are typed in major units, so they format straight
   // rather than round-tripping through minor ones. Currency comes from
   // settings: this used to print a hardcoded £ on every install.
@@ -449,7 +523,8 @@ export function JobForm({
   // Blank means "nobody has said", which is the state worth warning about. A
   // typed 0 is a deliberate statement and gets a zero-value reason instead.
   // An hourly job with a total is priced even when the fixed fare is blank.
-  const priceMissing = clientPrice.trim() === '' && hourlyTotal === null;
+  const priceMissing =
+    clientPrice.trim() === '' && hourlyTotal === null && contractTotal === null;
   const needsConfirmation = priceMissing && !confirmedUnpriced;
 
   /** Choosing a driver defaults the vehicle, but never locks it. */
@@ -961,6 +1036,143 @@ export function JobForm({
             <p className="text-xs text-muted-foreground">
               Waiting time and stop charges are additional to this, never
               folded into it.
+            </p>
+          </div>
+        ) : null}
+
+        {isContract ? (
+          <div className="space-y-4 rounded-md border border-dashed p-3">
+            <p className="text-sm font-medium">Contract, priced by the day</p>
+            <p className="text-sm text-muted-foreground">
+              The car and driver are held for the whole block. It appears on
+              the dispatch board every day it covers, and the driver is not
+              offered for anything else in that period.
+            </p>
+
+            <div className="grid gap-4 sm:grid-cols-3">
+              <FormField
+                name="contractEndsOn"
+                label="Last day"
+                hint="The block runs to the end of this day."
+                errors={errors.contractEndsOn}
+              >
+                <Input
+                  {...fieldProps('contractEndsOn', errors.contractEndsOn)}
+                  type="date"
+                  value={contractEndsOn}
+                  onChange={(event) => {
+                    setContractEndsOn(event.target.value);
+                    // The block is the contract, so the days follow from it.
+                    // Overwritten rather than only filled when blank: moving
+                    // the end date changes how long the car is out, and
+                    // leaving a stale count would bill the old block.
+                    const start = formRef.current
+                      ? String(
+                          new FormData(formRef.current).get('scheduledDate') ?? '',
+                        )
+                      : '';
+                    const span = daySpan(start, event.target.value);
+                    if (span !== null) setCustomerDays(String(span));
+                    setConfirmedUnpriced(false);
+                  }}
+                />
+              </FormField>
+              <FormField
+                name="customerDays"
+                label="Days charged"
+                hint="Filled in from the dates. Change it if the client is billed for fewer."
+                errors={errors.customerDays}
+              >
+                <Input
+                  {...fieldProps('customerDays', errors.customerDays)}
+                  inputMode="decimal"
+                  placeholder="5"
+                  value={customerDays}
+                  onChange={(event) => {
+                    setCustomerDays(event.target.value);
+                    setConfirmedUnpriced(false);
+                  }}
+                />
+              </FormField>
+              <FormField
+                name="minimumDays"
+                label="Minimum days"
+                hint="Billed days are the greater of the two."
+                errors={errors.minimumDays}
+              >
+                <Input
+                  {...fieldProps('minimumDays', errors.minimumDays)}
+                  inputMode="decimal"
+                  value={minimumDays}
+                  onChange={(event) => setMinimumDays(event.target.value)}
+                />
+              </FormField>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-3">
+              <FormField
+                name="customerDayRate"
+                label="Day rate"
+                errors={errors.customerDayRatePence}
+              >
+                <Input
+                  {...fieldProps('customerDayRate', errors.customerDayRatePence)}
+                  inputMode="decimal"
+                  placeholder="400.00"
+                  value={customerDayRate}
+                  onChange={(event) => {
+                    setCustomerDayRate(event.target.value);
+                    setConfirmedUnpriced(false);
+                  }}
+                />
+              </FormField>
+              <FormField
+                name="driverDayRate"
+                label="Driver day rate"
+                hint="What the driver is paid per day."
+                errors={errors.driverDayRatePence}
+              >
+                <Input
+                  {...fieldProps('driverDayRate', errors.driverDayRatePence)}
+                  inputMode="decimal"
+                  placeholder="180.00"
+                  value={driverDayRate}
+                  onChange={(event) => setDriverDayRate(event.target.value)}
+                />
+              </FormField>
+              <FormField
+                name="driverDays"
+                label="Driver days"
+                hint="Blank means the same days as the client is charged."
+                errors={errors.driverDays}
+              >
+                <Input
+                  {...fieldProps('driverDays', errors.driverDays)}
+                  inputMode="decimal"
+                  value={driverDays}
+                  onChange={(event) => setDriverDays(event.target.value)}
+                />
+              </FormField>
+            </div>
+
+            {contractTotal !== null ? (
+              <p className="text-sm" data-testid="contract-total">
+                <span className="text-muted-foreground">
+                  {billedDayCount} billed days × {money.format(dayRateValue)} ={' '}
+                </span>
+                <span className="font-semibold tabular">
+                  {money.format(contractTotal)}
+                </span>
+                {billedDayCount !== daysValue ? (
+                  <span className="ml-1 text-muted-foreground">
+                    (minimum applied)
+                  </span>
+                ) : null}
+              </p>
+            ) : null}
+            <p className="text-xs text-muted-foreground">
+              Waiting time, stop charges and recharged expenses are additional
+              to the day rate, never folded into it.
             </p>
           </div>
         ) : null}
