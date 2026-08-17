@@ -65,14 +65,16 @@ export default async function EditContractPage({
       <Alert className="mb-6">
         <AlertDescription>
           Changes apply to days created from now on. Days already booked keep
-          the driver, the price and the times they were given — change those on
-          the jobs themselves.
+          the driver and the times they were given — change those on the jobs
+          themselves. A changed <strong>rate</strong> is the exception: you can
+          apply it back over days already booked, further down.
         </AlertDescription>
       </Alert>
 
       <ContractForm
         action={updateContractAction.bind(null, contract.id)}
         submitLabel="Save changes"
+        offerReprice
         cancelHref={`/contracts/${contract.id}`}
         currency={locale.currency}
         locale={locale.locale}

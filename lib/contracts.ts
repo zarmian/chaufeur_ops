@@ -1,11 +1,17 @@
 import { z } from 'zod';
 import { withAudit, type AuditContext } from './audit';
 import { fromDateOnlyString, toDateOnlyString } from './dates';
+import {
+  calculateFinance,
+  financeAmountsFrom,
+  type FinanceAmounts,
+} from './job-finance';
 import { createJob, type JobInput } from './jobs';
 import { parseMoney } from './money';
 import { prisma } from './prisma';
 import { formatReference } from './references';
 import { emptyToNull, tidy } from './text';
+import type { RepriceScope } from './enum-options';
 
 /**
  * Standing contracts — spec 6.6.
@@ -237,6 +243,135 @@ export async function updateContract(
     },
     context,
   );
+}
+
+/**
+ * How far back a rate change reaches.
+ *
+ * The default is `none`: a rate agreed today applies to the work you have not
+ * done yet. The other two exist because a rate is often agreed *after* the
+ * month it covers — a client settles on £130 in March for a run that has been
+ * happening since January — and without them the operator reprices sixty jobs
+ * by hand or bills the old rate and writes off the difference.
+ */
+export interface RepriceResult {
+  repriced: number;
+  /** Days left alone, and why — an invoice is the usual reason. */
+  skipped: Array<{ reference: string; reason: string }>;
+}
+
+/**
+ * Apply a contract's rates to days it has already made.
+ *
+ * Off by default, because generation makes independent jobs and reaching back
+ * into them is normally exactly the wrong thing — see this module's header.
+ * But a rate settled after the fact is a real situation, and the alternative
+ * is repricing sixty jobs by hand.
+ *
+ * **An invoiced day is never touched.** The client is holding a document with
+ * a figure on it; changing the job underneath would leave the two disagreeing
+ * with nothing to say which is right. Those days are reported by reference so
+ * the operator can credit the invoice and decide, rather than being silently
+ * skipped.
+ *
+ * Everything else on a day is preserved. Waiting time, extra charges and
+ * recharged expenses were recorded against that day for their own reasons; the
+ * day rate is the only figure this replaces.
+ */
+export async function repriceContractJobs(
+  contractId: string,
+  scope: RepriceScope,
+  context: AuditContext,
+  options: { now?: Date } = {},
+): Promise<RepriceResult> {
+  if (scope === 'none') return { repriced: 0, skipped: [] };
+
+  const contract = await prisma.jobContract.findUniqueOrThrow({
+    where: { id: contractId },
+    select: { dayRatePence: true, driverDayRatePence: true },
+  });
+
+  const now = options.now ?? new Date();
+
+  const days = await prisma.job.findMany({
+    where: {
+      contractId,
+      // A cancelled day is not going to be billed, so repricing it is noise.
+      status: { not: 'CANCELLED' },
+      ...(scope === 'upcoming' ? { scheduledAt: { gte: now } } : {}),
+    },
+    select: {
+      id: true,
+      reference: true,
+      finance: true,
+      invoiceLines: {
+        where: { invoice: { status: { not: 'CANCELLED' } } },
+        select: { invoice: { select: { number: true } } },
+        take: 1,
+      },
+    },
+    orderBy: { scheduledAt: 'asc' },
+  });
+
+  const result: RepriceResult = { repriced: 0, skipped: [] };
+
+  for (const day of days) {
+    const invoice = day.invoiceLines[0]?.invoice.number;
+    if (invoice) {
+      result.skipped.push({
+        reference: day.reference,
+        reason: `on invoice ${invoice}`,
+      });
+      continue;
+    }
+
+    const existing = financeAmountsFrom(day.finance);
+
+    // The day rate replaces the day rate and nothing else. A day that ran
+    // over, or carried a car park, keeps those.
+    const amounts: FinanceAmounts = {
+      ...(existing ?? {}),
+      customerDays: existing?.customerDays ?? 1,
+      customerDayRatePence: contract.dayRatePence,
+      driverDays:
+        contract.driverDayRatePence > 0
+          ? (existing?.driverDays ?? existing?.customerDays ?? 1)
+          : null,
+      driverDayRatePence: contract.driverDayRatePence,
+    };
+    const totals = calculateFinance(amounts);
+
+    // The columns as Prisma wants them: the rates are non-null integers, the
+    // day counts are nullable decimals.
+    const written = {
+      customerDays: amounts.customerDays ?? null,
+      customerDayRatePence: amounts.customerDayRatePence ?? 0,
+      driverDays: amounts.driverDays ?? null,
+      driverDayRatePence: amounts.driverDayRatePence ?? 0,
+      totalClientPence: totals.totalClientPence,
+      totalCostsPence: totals.totalCostsPence,
+      grossProfitPence: totals.grossProfitPence,
+    };
+
+    await withAudit(
+      'JobFinance',
+      'update',
+      async (tx) => {
+        const before = await tx.jobFinance.findUnique({ where: { jobId: day.id } });
+        const after = await tx.jobFinance.upsert({
+          where: { jobId: day.id },
+          update: written,
+          create: { ...written, jobId: day.id },
+        });
+        return { entityId: after.id, before: before ?? undefined, after, result: null };
+      },
+      context,
+    );
+
+    result.repriced += 1;
+  }
+
+  return result;
 }
 
 /**

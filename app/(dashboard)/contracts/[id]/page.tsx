@@ -24,6 +24,7 @@ import {
 import { can } from '@/lib/authz';
 import { describeWeekdays, getContract } from '@/lib/contracts';
 import { formatDate, formatDateTime } from '@/lib/dates';
+import { filterValue, type SearchParams } from '@/lib/list-params';
 import { formatGBP } from '@/lib/money';
 import { pageRequireCapability } from '@/lib/page-guards';
 import { prisma } from '@/lib/prisma';
@@ -33,11 +34,14 @@ export const metadata = { title: 'Contract' };
 
 export default async function ContractDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<SearchParams>;
 }) {
   const user = await pageRequireCapability('viewJobs');
-  const { id } = await params;
+  const [{ id }, query] = await Promise.all([params, searchParams]);
+  const notice = filterValue(query, 'contractNotice');
 
   const contract = await getContract(id);
   if (!contract) notFound();
@@ -84,6 +88,15 @@ export default async function ContractDetailPage({
           </div>
         }
       />
+
+      {/* What a repricing actually did, including the days it could not
+          touch. An operator who assumed everything moved would bill the
+          difference and wonder why it did not reconcile. */}
+      {notice ? (
+        <Alert className="mb-6" data-testid="contract-notice">
+          <AlertDescription>{notice}</AlertDescription>
+        </Alert>
+      ) : null}
 
       {!contract.active ? (
         <Alert className="mb-6">

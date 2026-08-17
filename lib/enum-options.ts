@@ -101,3 +101,32 @@ export const ROLE_DESCRIPTIONS: Record<(typeof ROLES)[number], string> = {
   ACCOUNTS: 'Prices, invoices, payouts and reports. Cannot change operational job details',
   VIEWER: 'Read-only throughout',
 };
+
+/**
+ * How far back a contract's rate change reaches — see `repriceContractJobs`.
+ *
+ * Here rather than in `lib/contracts.ts` because the contract form is a Client
+ * Component and that module reaches Postgres. `lib/client-bundle.test.ts`
+ * caught it importing this list directly.
+ */
+export type RepriceScope = 'none' | 'upcoming' | 'all';
+
+export const REPRICE_SCOPES = [
+  {
+    value: 'none',
+    label: 'Only days created from now on',
+    description: 'Days already booked keep the price they were given.',
+  },
+  {
+    value: 'upcoming',
+    label: 'Also days not yet started',
+    description:
+      'Everything still to happen is repriced. Days already worked keep what they were billed at.',
+  },
+  {
+    value: 'all',
+    label: 'Also days already worked',
+    description:
+      'Every day this contract has made, back to the beginning. For a rate agreed after the fact.',
+  },
+] as const;

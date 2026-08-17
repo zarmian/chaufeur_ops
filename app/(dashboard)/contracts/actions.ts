@@ -6,9 +6,11 @@ import {
   contractSchema,
   createContract,
   generateContractJobs,
+  repriceContractJobs,
   setContractActive,
   updateContract,
 } from '@/lib/contracts';
+import type { RepriceScope } from '@/lib/enum-options';
 import { isRedirectError, toFormState, type FormState } from '@/lib/form-state';
 import { getLocaleConfig } from '@/lib/locale-store';
 import { actingUser } from '@/lib/request-context';
@@ -74,22 +76,55 @@ export async function createContractAction(
   redirect(`/contracts/${id}`);
 }
 
+/** Only the three the form offers; anything else means "leave them alone". */
+function repriceScopeFrom(value: FormDataEntryValue | null): RepriceScope {
+  const text = String(value ?? '');
+  return text === 'upcoming' || text === 'all' ? text : 'none';
+}
+
 export async function updateContractAction(
   contractId: string,
   _previous: FormState,
   formData: FormData,
 ): Promise<FormState> {
+  const query = new URLSearchParams();
+
   try {
     const { audit } = await actingUser('editJobs');
     const parsed = contractSchema.parse(readContractForm(formData));
     await updateContract(contractId, parsed, audit);
+
+    // Reaching back into days already booked, when the operator asked for it.
+    // Off by default — see `repriceContractJobs`.
+    const scope = repriceScopeFrom(formData.get('repriceScope'));
+    if (scope !== 'none') {
+      const result = await repriceContractJobs(contractId, scope, audit);
+
+      // Said out loud rather than left to be noticed. An invoiced day cannot
+      // be repriced, and an operator who assumed everything moved would bill
+      // the difference and wonder why it did not reconcile.
+      const parts = [
+        `${result.repriced} ${result.repriced === 1 ? 'day' : 'days'} repriced`,
+      ];
+      if (result.skipped.length > 0) {
+        parts.push(
+          `${result.skipped.length} left alone: ${result.skipped
+            .slice(0, 5)
+            .map((skip) => `${skip.reference} ${skip.reason}`)
+            .join(', ')}${result.skipped.length > 5 ? '…' : ''}. Credit those invoices to change them.`,
+        );
+      }
+      query.set('contractNotice', parts.join('. '));
+      revalidatePath('/jobs');
+    }
   } catch (error) {
     if (isRedirectError(error)) throw error;
     return toFormState(error);
   }
   revalidatePath('/contracts');
   revalidatePath(`/contracts/${contractId}`);
-  redirect(`/contracts/${contractId}`);
+  const search = query.toString();
+  redirect(`/contracts/${contractId}${search ? `?${search}` : ''}`);
 }
 
 /**

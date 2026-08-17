@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { REPRICE_SCOPES } from '@/lib/enum-options';
 import { INITIAL_FORM_STATE, type FormState } from '@/lib/form-state';
 import { DEFAULT_CURRENCY, DEFAULT_LOCALE } from '@/lib/locale';
 import { VAT_TREATMENTS } from '@/lib/vat';
@@ -95,6 +96,7 @@ export function ContractForm({
   accounts,
   drivers,
   vehicles,
+  offerReprice = false,
   currency = DEFAULT_CURRENCY,
   locale: localeTag = DEFAULT_LOCALE,
 }: {
@@ -106,6 +108,11 @@ export function ContractForm({
   accounts: Option[];
   drivers: Option[];
   vehicles: Option[];
+  /**
+   * Offer to apply a changed rate to days already booked. Editing only: a new
+   * contract has no past to reach into.
+   */
+  offerReprice?: boolean;
   currency?: string;
   locale?: string;
 }) {
@@ -127,6 +134,11 @@ export function ContractForm({
     Number.isFinite(client) && client > 0 && Number.isFinite(driver)
       ? client - driver
       : null;
+
+  // Only worth asking when the rate has actually moved. Offering it on every
+  // save invites somebody to tick it while changing the pickup address.
+  const rateChanged =
+    dayRate !== values.dayRate || driverDayRate !== values.driverDayRate;
 
   const toggle = (day: number) =>
     setWeekdays((current) =>
@@ -448,6 +460,39 @@ export function ContractForm({
             </Select>
           </FormField>
         </div>
+
+        {offerReprice ? (
+          <div
+            className={`space-y-3 rounded-md border p-3 ${
+              rateChanged ? 'border-dashed' : 'opacity-60'
+            }`}
+            data-testid="reprice"
+          >
+            <p className="text-sm font-medium">Days already booked</p>
+            <p className="text-sm text-muted-foreground">
+              {rateChanged
+                ? 'The rate has changed. Days already created keep their old price unless you say otherwise.'
+                : 'Change a rate above to choose what happens to days already created.'}
+            </p>
+            <Select
+              name="repriceScope"
+              aria-label="Apply the new rate to"
+              defaultValue="none"
+              disabled={!rateChanged}
+            >
+              {REPRICE_SCOPES.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              A day that has been invoiced is never repriced — the client is
+              holding that figure. Those are listed back to you so the invoice
+              can be credited first.
+            </p>
+          </div>
+        ) : null}
 
         {marginPerDay !== null ? (
           <p className="text-sm" data-testid="contract-margin">

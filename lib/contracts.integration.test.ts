@@ -6,6 +6,7 @@ import {
   createContract,
   generateAllContracts,
   generateContractJobs,
+  repriceContractJobs,
   setContractActive,
   updateContract,
 } from './contracts';
@@ -33,6 +34,7 @@ const stamp = String(Date.now()).slice(-7);
 let driverId = '';
 let accountId = '';
 const contractIds: string[] = [];
+const invoiceIds: string[] = [];
 
 /** A Monday, in summer, so a mishandled timezone shows as a day's drift. */
 const MONDAY = '2026-07-27';
@@ -65,7 +67,10 @@ async function cleanup() {
     select: { id: true },
   });
   const ids = jobs.map((job) => job.id);
+  await raw.invoiceLine.deleteMany({ where: { invoiceId: { in: invoiceIds } } });
   await raw.invoiceLine.deleteMany({ where: { jobId: { in: ids } } });
+  await raw.invoice.deleteMany({ where: { id: { in: invoiceIds } } });
+  invoiceIds.length = 0;
   await raw.jobEvent.deleteMany({ where: { jobId: { in: ids } } });
   await raw.jobFinance.deleteMany({ where: { jobId: { in: ids } } });
   await raw.job.deleteMany({ where: { id: { in: ids } } });
@@ -245,6 +250,190 @@ describe.skipIf(!DATABASE_AVAILABLE)('standing contracts', () => {
       include: { finance: true },
     });
     expect(first.finance?.totalClientPence).toBe(12_000);
+  });
+
+  describe('repricing days already booked', () => {
+    /** A contract with its days booked, then moved to a new rate. */
+    async function rerated(overrides: Record<string, unknown> = {}) {
+      const id = await start();
+      await generateContractJobs(id, audit, { today: MONDAY });
+      await updateContract(id, form({ dayRatePence: '200.00', ...overrides }), audit);
+      return id;
+    }
+
+    it('leaves everything alone by default', async () => {
+      // The default has to stay the safe one: a rate agreed today applies to
+      // work not yet done.
+      const id = await rerated();
+      const result = await repriceContractJobs(id, 'none', audit);
+      expect(result.repriced).toBe(0);
+
+      const jobs = await raw!.job.findMany({
+        where: { contractId: id },
+        include: { finance: true },
+      });
+      expect(jobs.every((job) => job.finance?.totalClientPence === 12_000)).toBe(true);
+    });
+
+    it('reprices every day when asked, back to the beginning', async () => {
+      // What this was added for: a rate settled after the fact, over a month
+      // of days that already exist.
+      const id = await rerated();
+      const result = await repriceContractJobs(id, 'all', audit, {
+        now: new Date('2026-08-31T00:00:00Z'),
+      });
+      expect(result.repriced).toBe(6);
+      expect(result.skipped).toEqual([]);
+
+      const jobs = await raw!.job.findMany({
+        where: { contractId: id },
+        include: { finance: true },
+      });
+      expect(jobs.every((job) => job.finance?.totalClientPence === 20_000)).toBe(true);
+    });
+
+    it('reprices only what has not happened yet, on the narrower scope', async () => {
+      const id = await rerated();
+      // Standing on the Wednesday: Monday and Tuesday are done.
+      const result = await repriceContractJobs(id, 'upcoming', audit, {
+        now: new Date('2026-07-29T00:00:00Z'),
+      });
+      expect(result.repriced).toBe(4);
+
+      const jobs = await raw!.job.findMany({
+        where: { contractId: id },
+        orderBy: { scheduledAt: 'asc' },
+        include: { finance: true },
+      });
+      // The Monday keeps what it was billed at.
+      expect(jobs[0]?.finance?.totalClientPence).toBe(12_000);
+      expect(jobs[5]?.finance?.totalClientPence).toBe(20_000);
+    });
+
+    it('never touches a day that has been invoiced, and says which', async () => {
+      // The rule that must not bend. The client is holding a document with a
+      // figure on it; changing the job underneath leaves the two disagreeing
+      // with nothing to say which is right.
+      const id = await rerated();
+      const first = await raw!.job.findFirstOrThrow({
+        where: { contractId: id },
+        orderBy: { scheduledAt: 'asc' },
+      });
+      const invoice = await raw!.invoice.create({
+        data: {
+          number: `CONREP${stamp}-1`,
+          issueDate: new Date('2026-08-01'),
+          dueDate: new Date('2026-08-15'),
+          netPence: 12_000,
+          vatPence: 2400,
+          grossPence: 14_400,
+          status: 'SENT',
+          lines: {
+            create: [
+              { description: 'Contract day', amountPence: 12_000, jobId: first.id },
+            ],
+          },
+        },
+      });
+      invoiceIds.push(invoice.id);
+
+      const result = await repriceContractJobs(id, 'all', audit, {
+        now: new Date('2026-08-31T00:00:00Z'),
+      });
+      expect(result.repriced).toBe(5);
+      expect(result.skipped).toEqual([
+        { reference: first.reference, reason: `on invoice ${invoice.number}` },
+      ]);
+
+      const after = await raw!.jobFinance.findUniqueOrThrow({
+        where: { jobId: first.id },
+      });
+      expect(after.totalClientPence).toBe(12_000);
+    });
+
+    it('keeps everything else a day carried', async () => {
+      // Waiting time and a car park were recorded against that day for their
+      // own reasons. The day rate is the only figure being replaced.
+      const id = await rerated();
+      const first = await raw!.job.findFirstOrThrow({
+        where: { contractId: id },
+        orderBy: { scheduledAt: 'asc' },
+      });
+      await raw!.jobFinance.update({
+        where: { jobId: first.id },
+        data: { waitTimePence: 1500, extraChargesPence: 750 },
+      });
+
+      await repriceContractJobs(id, 'all', audit, {
+        now: new Date('2026-08-31T00:00:00Z'),
+      });
+
+      const after = await raw!.jobFinance.findUniqueOrThrow({
+        where: { jobId: first.id },
+      });
+      expect(after.waitTimePence).toBe(1500);
+      expect(after.extraChargesPence).toBe(750);
+      // £200 day + £15 waiting + £7.50 extras.
+      expect(after.totalClientPence).toBe(22_250);
+    });
+
+    it('moves the driver rate too, so profit stays right', async () => {
+      const id = await start();
+      await generateContractJobs(id, audit, { today: MONDAY });
+      await updateContract(
+        id,
+        form({ dayRatePence: '200.00', driverDayRatePence: '90.00' }),
+        audit,
+      );
+
+      await repriceContractJobs(id, 'all', audit, {
+        now: new Date('2026-08-31T00:00:00Z'),
+      });
+
+      const after = await raw!.jobFinance.findFirstOrThrow({
+        where: { job: { contractId: id } },
+      });
+      expect(after.totalCostsPence).toBe(9000);
+      expect(after.grossProfitPence).toBe(11_000);
+    });
+
+    it('skips a cancelled day, which is not going to be billed', async () => {
+      const id = await rerated();
+      const first = await raw!.job.findFirstOrThrow({
+        where: { contractId: id },
+        orderBy: { scheduledAt: 'asc' },
+      });
+      await raw!.job.update({
+        where: { id: first.id },
+        data: { status: 'CANCELLED' },
+      });
+
+      const result = await repriceContractJobs(id, 'all', audit, {
+        now: new Date('2026-08-31T00:00:00Z'),
+      });
+      expect(result.repriced).toBe(5);
+    });
+
+    it('records who repriced each day', async () => {
+      const id = await rerated();
+      const first = await raw!.job.findFirstOrThrow({
+        where: { contractId: id },
+        orderBy: { scheduledAt: 'asc' },
+        include: { finance: true },
+      });
+
+      await repriceContractJobs(id, 'all', audit, {
+        now: new Date('2026-08-31T00:00:00Z'),
+      });
+
+      const entry = await raw!.auditLog.findFirst({
+        where: { entity: 'JobFinance', entityId: first.finance!.id },
+        orderBy: { createdAt: 'desc' },
+      });
+      // Before and after, so "why did January change in March" has an answer.
+      expect(JSON.stringify(entry?.before)).toContain('12000');
+      expect(JSON.stringify(entry?.after)).toContain('20000');
+    });
   });
 
   it('stops at an end date once one is set', async () => {
