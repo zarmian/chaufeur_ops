@@ -23,6 +23,12 @@ const schema = z
     complianceCriticalDays: z.coerce.number().int().min(1).max(365),
     driverConflictBufferMinutes: z.coerce.number().int().min(0).max(720),
     unpricedAlertThreshold: z.coerce.number().int().min(1).max(1000),
+    // Capped at a fortnight: the dispatch page renders every day in the
+    // range, so a board asked for a quarter would put several thousand jobs
+    // through one render.
+    dispatchDaysAhead: z.coerce.number().int().min(1).max(14),
+    dispatchUnassignedHours: z.coerce.number().int().min(1).max(72),
+    dispatchLateMinutes: z.coerce.number().int().min(1).max(240),
   })
   .superRefine((input, ctx) => {
     if (input.complianceCriticalDays > input.complianceWarningDays) {
@@ -49,6 +55,9 @@ export async function POST(request: Request) {
       driverConflictBufferMinutes:
         form.get('driverConflictBufferMinutes') ?? '90',
       unpricedAlertThreshold: form.get('unpricedAlertThreshold') ?? '5',
+      dispatchDaysAhead: form.get('dispatchDaysAhead') ?? '4',
+      dispatchUnassignedHours: form.get('dispatchUnassignedHours') ?? '4',
+      dispatchLateMinutes: form.get('dispatchLateMinutes') ?? '15',
     });
 
     const before = await getSettings();

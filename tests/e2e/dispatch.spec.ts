@@ -30,6 +30,40 @@ function dateIn(days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
+/**
+ * A date and time `hours` from now, as the operator's zone sees them.
+ *
+ * The booking form takes local wall time and the console's "is this close to
+ * its pickup" window is measured against the same clock, so a test that wants
+ * a job two hours out has to say two hours out *in London* — anywhere else
+ * and British Summer Time puts it three, which is outside the window and the
+ * flag never appears.
+ *
+ * Formatted from parts rather than by slicing a string, because a formatted
+ * date's field order belongs to the locale and not to the format.
+ */
+function londonTimeIn(hours: number): { date: string; time: string } {
+  const when = new Date(Date.now() + hours * 60 * 60 * 1000);
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Europe/London',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    })
+      .formatToParts(when)
+      .map((part) => [part.type, part.value]),
+  );
+
+  return {
+    date: `${parts.year}-${parts.month}-${parts.day}`,
+    time: `${parts.hour}:${parts.minute}`,
+  };
+}
+
 async function signIn(page: Page, email: string, password: string) {
   await page.goto('/login');
   await page.getByLabel('Email').fill(email);
@@ -233,12 +267,20 @@ test.describe('dispatch', () => {
   const pickup = `Mayfair ${RUN}`;
   let driverId = '';
 
+  /*
+   * The board is a console now, not a Gantt chart.
+   *
+   * `?timeline=<date>` opens one day's driver timeline inside its section —
+   * the view these tests exercise, and still where a job is dragged onto a
+   * driver. Without it the page shows the day as rows, which is what a
+   * dispatcher sees first but has no lanes to drop on.
+   */
   test('shows the day, with unassigned work on the left', async ({ page }) => {
     await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
     driverId = await createCompliantDriver(page, driverName);
     await unassignedJob(page, day, '09:00', pickup);
 
-    await page.goto(`/dispatch?day=${day}&all=true`);
+    await page.goto(`/dispatch?day=${day}&timeline=${day}&all=true`);
 
     await expect(page.getByTestId('unassigned-column')).toBeVisible();
     await expect(
@@ -251,7 +293,7 @@ test.describe('dispatch', () => {
 
   test('dropping a job on a driver assigns it', async ({ page }) => {
     await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
-    await page.goto(`/dispatch?day=${day}&all=true`);
+    await page.goto(`/dispatch?day=${day}&timeline=${day}&all=true`);
 
     const card = page.getByTestId('unassigned-job').filter({ hasText: pickup });
     await expect(card).toBeVisible();
@@ -309,6 +351,76 @@ test.describe('dispatch', () => {
     await expect(block).toBeVisible({ timeout: 20_000 });
   });
 
+  test('the console covers several days and flags what needs somebody', async ({
+    page,
+  }) => {
+    /*
+     * The two complaints the console was built for: one day at a time, and an
+     * unassigned job forty minutes out looking exactly like one going on
+     * Thursday. Both are answered on the landing view, with no parameters.
+     */
+    await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+
+    const soon = londonTimeIn(2);
+    await unassignedJob(page, soon.date, soon.time, `Chase ${RUN}`);
+
+    await page.goto('/dispatch');
+
+    // Several days, not one.
+    await expect(page.getByTestId('rail-day')).toHaveCount(4);
+    await expect(page.getByTestId('day-section')).toHaveCount(4);
+
+    // And the job two hours out is flagged rather than merely listed.
+    const flagged = page
+      .getByTestId('attention-item')
+      .filter({ hasText: `Chase ${RUN}` });
+    await expect(flagged).toBeVisible();
+    await expect(flagged).toContainText('Nobody on it');
+    await expect(flagged).toHaveAttribute('data-severity', 'warning');
+  });
+
+  test('assigning from the attention panel clears the flag', async ({ page }) => {
+    await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+
+    const soon = londonTimeIn(3);
+    const pick = `Panel ${RUN}`;
+    await unassignedJob(page, soon.date, soon.time, pick);
+
+    await page.goto('/dispatch');
+    const flagged = page.getByTestId('attention-item').filter({ hasText: pick });
+    await expect(flagged).toBeVisible();
+
+    // The picker is the alternative to dragging: with 195 owner-drivers,
+    // finding a lane to drop on is a scroll through several screens to reach
+    // a name the dispatcher already had in mind.
+    const picker = flagged.getByTestId('assign-picker');
+    const value = await picker
+      .locator('option', { hasText: driverName })
+      .first()
+      .getAttribute('value');
+    expect(value, `no option for ${driverName}`).toBeTruthy();
+    await picker.selectOption(value!);
+
+    /*
+     * Reloaded rather than waited on, for the reason the drag test documents:
+     * the page asks for a re-render after a successful assignment, but the
+     * guarantee it makes is the thirty-second poll. What is worth proving is
+     * that the assignment is really there, not how fast the page repaints.
+     */
+    await page.waitForTimeout(1_500);
+    await page.reload();
+    await page.waitForLoadState('networkidle');
+
+    await expect(
+      page.getByTestId('attention-item').filter({ hasText: pick }),
+    ).toHaveCount(0);
+
+    // And it now shows the driver on the day's row.
+    await expect(
+      page.getByTestId('dispatch-job-row').filter({ hasText: pick }),
+    ).toContainText(driverName);
+  });
+
   test('warns about a clash on the booking form without blocking it', async ({
     page,
   }) => {
@@ -354,7 +466,7 @@ test.describe('dispatch', () => {
 
     await unassignedJob(page, day, '15:00', `Refused ${RUN}`);
 
-    await page.goto(`/dispatch?day=${day}&all=true`);
+    await page.goto(`/dispatch?day=${day}&timeline=${day}&all=true`);
 
     const card = page
       .getByTestId('unassigned-job')

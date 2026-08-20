@@ -27,6 +27,26 @@ export interface AppSettings {
   driverConflictBufferMinutes: number;
   /** Completed-but-unpriced count at which the dashboard tile turns red. */
   unpricedAlertThreshold: number;
+
+  /**
+   * How far ahead the dispatch board looks, in days including today.
+   *
+   * Four covers a long weekend, which is the horizon most of these decisions
+   * are made over. Configurable because a corporate operator planning a fixed
+   * week and an airport operator working tomorrow's flights want different
+   * boards.
+   */
+  dispatchDaysAhead: number;
+  /**
+   * Hours before a pickup at which a job with nobody on it starts being
+   * flagged rather than merely listed.
+   */
+  dispatchUnassignedHours: number;
+  /**
+   * Minutes of grace past a pickup, or past a job's expected end, before the
+   * board calls it late. Below this it is a driver in traffic.
+   */
+  dispatchLateMinutes: number;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -34,6 +54,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   complianceCriticalDays: DEFAULT_CRITICAL_DAYS,
   driverConflictBufferMinutes: 90,
   unpricedAlertThreshold: 5,
+  dispatchDaysAhead: 4,
+  dispatchUnassignedHours: 4,
+  dispatchLateMinutes: 15,
 };
 
 const SETTING_KEYS: Record<keyof AppSettings, string> = {
@@ -41,6 +64,9 @@ const SETTING_KEYS: Record<keyof AppSettings, string> = {
   complianceCriticalDays: 'compliance.criticalDays',
   driverConflictBufferMinutes: 'jobs.driverConflictBufferMinutes',
   unpricedAlertThreshold: 'jobs.unpricedAlertThreshold',
+  dispatchDaysAhead: 'dispatch.daysAhead',
+  dispatchUnassignedHours: 'dispatch.unassignedHours',
+  dispatchLateMinutes: 'dispatch.lateMinutes',
 };
 
 function asPositiveInt(value: unknown, fallback: number): number {
@@ -82,6 +108,23 @@ export const getSettings = cache(async (): Promise<AppSettings> => {
       unpricedAlertThreshold: asPositiveInt(
         byKey.get(SETTING_KEYS.unpricedAlertThreshold),
         DEFAULT_SETTINGS.unpricedAlertThreshold,
+      ),
+      // Capped rather than trusted: a board asked for ninety days would run
+      // several thousand jobs through one page.
+      dispatchDaysAhead: Math.min(
+        14,
+        asPositiveInt(
+          byKey.get(SETTING_KEYS.dispatchDaysAhead),
+          DEFAULT_SETTINGS.dispatchDaysAhead,
+        ),
+      ),
+      dispatchUnassignedHours: asPositiveInt(
+        byKey.get(SETTING_KEYS.dispatchUnassignedHours),
+        DEFAULT_SETTINGS.dispatchUnassignedHours,
+      ),
+      dispatchLateMinutes: asPositiveInt(
+        byKey.get(SETTING_KEYS.dispatchLateMinutes),
+        DEFAULT_SETTINGS.dispatchLateMinutes,
       ),
     };
   } catch {

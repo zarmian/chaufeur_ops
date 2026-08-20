@@ -121,6 +121,70 @@ export default async function ComplianceSettingsPage({
           </FormField>
         </div>
 
+        <div className="border-t pt-6">
+          <h2 className="mb-1 text-sm font-semibold">Dispatch</h2>
+          <p className="mb-4 text-sm text-muted-foreground">
+            How far ahead the board looks, and how patient it is before it
+            starts flagging things.
+          </p>
+
+          <div className="grid gap-4 sm:grid-cols-3">
+            <FormField
+              name="dispatchDaysAhead"
+              label="Days on the board"
+              hint="Including today. Four covers a long weekend."
+              required
+            >
+              <Input
+                id="dispatchDaysAhead"
+                name="dispatchDaysAhead"
+                type="number"
+                min={1}
+                max={14}
+                defaultValue={settings.dispatchDaysAhead}
+                required
+                className="tabular"
+              />
+            </FormField>
+
+            <FormField
+              name="dispatchUnassignedHours"
+              label="Chase unassigned within (hours)"
+              hint="A job with nobody on it this close to its pickup is flagged rather than merely listed."
+              required
+            >
+              <Input
+                id="dispatchUnassignedHours"
+                name="dispatchUnassignedHours"
+                type="number"
+                min={1}
+                max={72}
+                defaultValue={settings.dispatchUnassignedHours}
+                required
+                className="tabular"
+              />
+            </FormField>
+
+            <FormField
+              name="dispatchLateMinutes"
+              label="Late after (minutes)"
+              hint="Grace past a pickup, or past a job's expected end, before the board calls it late. Below this it is a driver in traffic."
+              required
+            >
+              <Input
+                id="dispatchLateMinutes"
+                name="dispatchLateMinutes"
+                type="number"
+                min={1}
+                max={240}
+                defaultValue={settings.dispatchLateMinutes}
+                required
+                className="tabular"
+              />
+            </FormField>
+          </div>
+        </div>
+
         <div className="flex items-center gap-3 border-t pt-6">
           <Button type="submit">Save thresholds</Button>
         </div>
