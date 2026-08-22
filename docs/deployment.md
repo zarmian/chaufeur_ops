@@ -270,8 +270,19 @@ For each new install:
 - [ ] Vercel project from the same repository
 - [ ] `CRON_SECRET` generated fresh — never reused between customers, since
       one leaking would compromise the others
-- [ ] `BLOB_READ_WRITE_TOKEN` set, or accept that documents and logos cannot
-      be uploaded — everything else works without it
+- [ ] `APP_URL` set to this install's own address, no trailing slash. Only
+      messages the system *pushes* need it — a driver's Telegram job card
+      carries a link to the passenger's name board, and there is no incoming
+      request to resolve that against — but without it the link is silently
+      omitted, and the webhook check below has nothing to compare against
+- [ ] `BLOB_READ_WRITE_TOKEN` set from **a Blob store of this install's own**,
+      or accept that documents and logos cannot be uploaded — everything else
+      works without it. Two installs sharing a store never collide, because
+      object keys carry a UUID, which is exactly why it would never announce
+      itself: one customer's driver licences and insurance certificates simply
+      accumulate in another customer's bucket
+- [ ] A Telegram bot of this install's own — see below. Never the same bot as
+      another install
 - [ ] First administrator created — `npm run setup`, `/setup` or
       `npm run db:seed`
 - [ ] `/setup` returns 404 afterwards
@@ -288,18 +299,79 @@ For each new install:
 - [ ] Restore tested once into a scratch project, and the date recorded
 - [ ] `SENTRY_DSN` set, or accept log-only error capture
 
+### Telegram
+
+Each install needs **its own bot**, and this is the one mistake on the whole
+page that does real damage.
+
+A bot has exactly one webhook URL. Point two installs at the same bot and the
+second one to register wins: from that moment the first company's drivers are
+accepting jobs, tapping arrival and filing expenses into the second company's
+database. Every screen still works. Nothing logs an error. It surfaces weeks
+later as a driver swearing blind they completed a job the office has no record
+of.
+
+For each install:
+
+- [ ] A new bot from @BotFather, named for that customer
+- [ ] Its token in Settings → Telegram (stored encrypted), or
+      `TELEGRAM_BOT_TOKEN` in the deployment
+- [ ] `TELEGRAM_WEBHOOK_SECRET` generated fresh, per install
+- [ ] The webhook registered against **this install's** address:
+
+      curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" \
+        -d "url=https://<this-install>/api/telegram/webhook" \
+        -d "secret_token=<TELEGRAM_WEBHOOK_SECRET>"
+
+- [ ] `npx tsx scripts/verify-install.ts` reports *"webhook points at this
+      install"* for every configured bot. It asks Telegram directly and fails
+      if the answer is anywhere else, which is the only automated protection
+      against the mix-up above
+
+An admin bot, if used, is a second bot and gets the same treatment.
+
+### Two installs, one repository
+
+Both Vercel projects deploy from this repository. That is the point — one
+codebase, and the only difference between customers is configuration — but it
+puts two things on whoever releases.
+
+**Migrations run per database.** A deploy applies migrations to the database
+that deployment points at, and to no other. An install that has not been
+deployed since a schema change is running old tables against new code. Deploy
+both, and check `verify-install` on each afterwards — it reports how many
+migrations are applied.
+
+**A release reaches whichever install you deploy.** Vercel will build both
+automatically from the same branch if both projects are wired to it, which is
+usually what you want. If one is pinned to a different branch or paused,
+write it down somewhere the next person will look, because a customer running
+a fortnight behind is not visible from inside the application.
+
+**Nothing is shared but the code.** Separate databases, separate Blob stores,
+separate bots, separate secrets. If a change ever appears to need one install
+to read another's data, that is a product decision and not a deployment
+detail — see the note in `CLAUDE.md`.
+
 ### Standing one up end to end
 
-Roughly forty minutes, most of it waiting for Vercel.
+Roughly an hour, most of it waiting for Vercel.
 
 | Step | Where | Time |
 |---|---|---|
 | Supabase project, connection strings | Supabase | 5 min |
+| Blob store for this install | Vercel | 2 min |
 | Vercel project, environment variables | Vercel | 10 min |
 | First deploy (runs migrations) | Vercel | 5 min |
 | `npm run setup` — company, locale, admin | Terminal | 5 min |
+| Bot, webhook, secret | @BotFather + curl | 5 min |
+| `npx tsx scripts/verify-install.ts` — all green | Terminal | 2 min |
 | Branding — logos and colours | Settings → Branding | 5 min |
 | Import vehicles, drivers, clients | Settings → Import | 10 min |
+
+Run `verify-install` before anyone logs in and again after the bot is wired
+up. It is the only thing that will tell you the webhook is pointed at this
+install rather than at somebody else's.
 
 Import the vehicles first. The driver file can name a car by registration,
 which links the two in one pass — but only for vehicles already loaded.

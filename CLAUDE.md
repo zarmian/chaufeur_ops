@@ -6,9 +6,13 @@ Read this before writing any code. It defines the stack, the conventions and the
 
 A job management system for chauffeur and private hire operators. It tracks jobs, drivers, vehicles, compliance documents, per-job profitability, client invoicing and driver payouts.
 
-The first customer is a UK chauffeur company running ~195 owner-drivers, each with an assigned vehicle, doing airport transfers, point-to-point transfers and "as directed" hourly hire around London.
+The first customer is a UK chauffeur company running ~195 owner-drivers, each with an assigned vehicle, doing airport transfers, point-to-point transfers and "as directed" hourly hire around London. There is now a second customer on a second install.
 
 **This is a white-label product.** Each customer gets their **own install** — separate deployment, separate database. There is no multi-tenancy: no tenant IDs, no shared data, no cross-company logic. White label means logo, colours and company details are configuration; the functionality is identical everywhere.
+
+**More than one customer does not change that.** The question has been asked and answered once already: a second company means a second install, not a tenant column. Two customers' rows never share a table, so no query can return the wrong company's data by forgetting a `where`, and one customer's bad release cannot take the other offline. The cost is real — two deployments to release to and two databases to migrate, which `docs/deployment.md` covers — and it is much smaller than the cost of getting isolation wrong once in front of a paying customer.
+
+If shared data is ever genuinely needed — one operator subcontracting to another, a driver working for both — that is a different product decision and a far larger piece of work. It must be decided deliberately, not arrived at by adding "just one" `tenantId`.
 
 **Fresh start.** The database begins empty. There is no legacy data migration. Existing records load through CSV import (Phase 3).
 

@@ -130,6 +130,11 @@ jobs:
       # the only thing that should differ is configuration. Application code
       # must never name a customer. `docs/` and `reference/` are excluded —
       # they describe the first customer's system on purpose.
+      #
+      # One alternative per customer, separated by `|`. Add a name here as
+      # part of standing an install up — the check is only worth what the
+      # list is, and a second customer whose name is missing gets no
+      # protection at all from a rule that reports itself as clean.
       - name: Grep application code for a customer name
         run: |
           if grep -rniE 'welux' \
