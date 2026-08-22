@@ -1,4 +1,4 @@
-import { AlertTriangle, ChevronDown, ChevronUp, Plane } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronUp, Plane, Printer } from 'lucide-react';
 import Link from 'next/link';
 import { UnpricedBadge } from '@/components/unpriced-badge';
 import { Badge } from '@/components/ui/badge';
@@ -74,18 +74,40 @@ export function DaySection({
           ) : null}
         </div>
 
-        {day.counts.jobs > 0 ? (
-          <Button asChild variant="outline" size="sm">
-            <Link href={timelineHref} scroll={false} data-testid="timeline-toggle">
-              {timelineOpen ? (
-                <ChevronUp aria-hidden />
-              ) : (
-                <ChevronDown aria-hidden />
-              )}
-              {timelineOpen ? 'Hide the timeline' : 'By driver'}
-            </Link>
-          </Button>
-        ) : null}
+        <div className="flex flex-wrap items-center gap-2">
+          {/*
+            The morning print run. An office wants the day's boards as one
+            stack in the order the cars go out — the top sheet is the next
+            driver to leave — not eleven separate downloads.
+          */}
+          {day.counts.nameBoards > 0 ? (
+            <Button asChild variant="outline" size="sm">
+              <Link
+                href={`/api/dispatch/name-boards?day=${day.date}`}
+                target="_blank"
+                rel="noreferrer"
+                data-testid="print-name-boards"
+              >
+                <Printer aria-hidden />
+                {day.counts.nameBoards} name{' '}
+                {day.counts.nameBoards === 1 ? 'board' : 'boards'}
+              </Link>
+            </Button>
+          ) : null}
+
+          {day.counts.jobs > 0 ? (
+            <Button asChild variant="outline" size="sm">
+              <Link href={timelineHref} scroll={false} data-testid="timeline-toggle">
+                {timelineOpen ? (
+                  <ChevronUp aria-hidden />
+                ) : (
+                  <ChevronDown aria-hidden />
+                )}
+                {timelineOpen ? 'Hide the timeline' : 'By driver'}
+              </Link>
+            </Button>
+          ) : null}
+        </div>
       </div>
 
       {timelineOpen ? <div className="mb-4">{children}</div> : null}

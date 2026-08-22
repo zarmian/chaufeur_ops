@@ -19,6 +19,7 @@ import {
   type ProgressEvent,
 } from './job-progress';
 import { hasPriceOrReason } from './job-status';
+import { canHaveNameBoard } from './name-board';
 import { getLocaleConfig } from './locale-store';
 import { prisma } from './prisma';
 import { getSettings } from './settings';
@@ -360,6 +361,8 @@ export interface DispatchDaySummary {
     unassigned: number;
     unpriced: number;
     conflicts: number;
+    /** Airport transfers with a passenger named — what there is to print. */
+    nameBoards: number;
   };
 }
 
@@ -575,6 +578,9 @@ export async function loadDispatchRange(
         unassigned: forDay.filter((job) => !job.driverId).length,
         unpriced: forDay.filter((job) => job.unpriced).length,
         conflicts: forDay.filter((job) => job.conflictsWith.length > 0).length,
+        nameBoards: forDay.filter((job) =>
+          canHaveNameBoard({ jobType: job.jobType, passengerName: job.passengerName }),
+        ).length,
       },
     });
   }

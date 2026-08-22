@@ -744,6 +744,16 @@ model Job {
   luggageCount   Int?
   flightNumber   String?
 
+  /// Unguessable key for this job's meet-and-greet name board.
+  ///
+  /// The board is reachable without a session, because the person who holds
+  /// it up is a driver and drivers have no login — they get the link on
+  /// Telegram. So the URL is the only thing standing between a passenger's
+  /// name and anyone who tries one. A random token per job, issued the first
+  /// time a board is asked for, keeps that URL unguessable and lets a leaked
+  /// one be revoked by reissuing rather than by editing the booking.
+  nameBoardToken String? @unique
+
   /// captured at booking — the commercial agreement
   clientPricePence Int?
   driverPricePence Int?

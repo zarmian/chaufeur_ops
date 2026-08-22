@@ -1,6 +1,9 @@
 import { formatDateTime } from '../dates';
 import { getLocaleConfig } from '../locale-store';
 import { formatMoney } from '../money';
+import { absoluteUrl } from '../app-url';
+import { canHaveNameBoard, nameBoardPath } from '../name-board';
+import { issueNameBoardToken } from '../name-board-store';
 import { prisma } from '../prisma';
 import { getTelegramConfig } from './config';
 import {
@@ -40,6 +43,8 @@ async function briefFor(jobId: string) {
       dropoffText: true,
       passengerName: true,
       flightNumber: true,
+      jobType: true,
+      nameBoardToken: true,
       notes: true,
       driverPricePence: true,
       status: true,
@@ -70,6 +75,20 @@ async function briefFor(jobId: string) {
         : null,
       flightNumber: job.flightNumber,
       notes: job.notes,
+      /*
+       * The board, when there is one to link to.
+       *
+       * Read rather than issued: a driver's job card must not be the thing
+       * that mints a token, because `refreshJobMessage` runs on every status
+       * tap and a card that reissued the link each time would leave the
+       * driver holding a board that had just stopped working. The office
+       * issues it by opening the job, which is where the link is wanted
+       * anyway.
+       */
+      nameBoardUrl:
+        job.nameBoardToken && canHaveNameBoard(job)
+          ? absoluteUrl(nameBoardPath(job.nameBoardToken))
+          : null,
       driverPay:
         job.driverPricePence === null
           ? null
@@ -143,6 +162,18 @@ export function statusKeyboardOpen(
 export async function sendAssignment(jobId: string): Promise<void> {
   const config = await getTelegramConfig();
   if (!config.enabled || !config.notifyOnAssignment) return;
+
+  /*
+   * The board's link is minted here, once, when the job first goes out.
+   *
+   * Here rather than in `briefFor`, which also builds the card for every
+   * subsequent refresh: the driver is the person who needs the board, and
+   * waiting for somebody in the office to open the job first would mean the
+   * card that reaches them has no link on it. A no-op on anything that is not
+   * an airport transfer with a passenger named on it, and idempotent after
+   * the first time, so the link a driver saved this morning still works.
+   */
+  await issueNameBoardToken(jobId);
 
   const built = await briefFor(jobId);
   const driverId = built?.job.driverId;

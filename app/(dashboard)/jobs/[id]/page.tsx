@@ -19,6 +19,7 @@ import { checkAssignmentCompliance, getJob } from '@/lib/jobs';
 import { formatDate, formatDateTime } from '@/lib/dates';
 import { buildTimeline, ACTOR_LABELS } from '@/lib/job-events';
 import { allowedTransitions, hasPriceOrReason } from '@/lib/job-status';
+import { issueNameBoardToken } from '@/lib/name-board-store';
 import { JOB_TYPES } from '@/lib/enum-options';
 import { formatGBP } from '@/lib/money';
 import { filterValue, type SearchParams } from '@/lib/list-params';
@@ -27,6 +28,7 @@ import { defaultExpenseBearer, resolveEngagement } from '@/lib/engagement';
 import { financeAmountsFrom, jobEconomics } from '@/lib/job-finance';
 import { engagementPeriodsFor } from '@/lib/shift-store';
 import { ExpensesPanel } from './expenses-panel';
+import { NameBoardPanel } from './name-board-panel';
 import { StatusControl } from './status-control';
 
 export const metadata = { title: 'Job' };
@@ -61,6 +63,18 @@ export default async function JobDetailPage({
       : null;
 
   const invoice = job.invoiceLines[0]?.invoice ?? null;
+
+  /*
+   * The board's link, minted here the first time somebody looks.
+   *
+   * A write during a render, which is normally the wrong shape — but this one
+   * is get-or-create and therefore idempotent, it happens at most once in a
+   * job's life, and the alternative is a "create the link" button standing
+   * between a dispatcher and the thing they came here for. Returns null for
+   * anything that is not an airport transfer with a passenger named on it,
+   * which is how the panel knows not to appear.
+   */
+  const boardToken = await issueNameBoardToken(job.id);
 
   // The terms this job was worked under decide who bears an expense by
   // default, and whether the driver was paid per job at all.
@@ -270,6 +284,14 @@ export default async function JobDetailPage({
                   <Field label="Passenger phone">{job.passengerPhone}</Field>
                 ) : null}
               </dl>
+
+              {boardToken && job.passengerName ? (
+                <NameBoardPanel
+                  token={boardToken}
+                  jobId={job.id}
+                  passengerName={job.passengerName}
+                />
+              ) : null}
 
               {job.notes ? (
                 <div className="mt-6 border-t pt-4">

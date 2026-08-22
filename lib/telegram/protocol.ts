@@ -184,6 +184,19 @@ export function escapeMarkdown(input: string): string {
   return input.replace(/[_*[\]()~`>#+\-=|{}.!\\]/g, (char) => `\\${char}`);
 }
 
+/**
+ * A URL, safe to sit inside MarkdownV2's `(...)`.
+ *
+ * Only two characters can break a link destination — the closing bracket and
+ * the backslash — and unlike the text half, everything else is taken
+ * literally. Running a URL through `escapeMarkdown` would mangle it: every
+ * dot and hyphen in the hostname would come back with a backslash in front of
+ * it, and the link would 404.
+ */
+export function escapeMarkdownUrl(url: string): string {
+  return url.replace(/[)\\]/g, (char) => `\\${char}`);
+}
+
 export interface JobBrief {
   reference: string;
   when: string;
@@ -194,6 +207,15 @@ export interface JobBrief {
   flightNumber: string | null;
   notes: string | null;
   driverPay: string | null;
+  /**
+   * The meet-and-greet board, as a full URL.
+   *
+   * Airport transfers only, and only when a passenger is named. This is the
+   * one channel that reaches a driver — they have no login — so a board they
+   * cannot open from here is a board that does not exist as far as they are
+   * concerned.
+   */
+  nameBoardUrl?: string | null;
   /** Steps already recorded, so the brief can show progress. */
   recorded?: readonly string[];
 }
@@ -222,6 +244,19 @@ export function renderBrief(brief: JobBrief): string {
   if (brief.vehicle) lines.push(`🚗 ${escapeMarkdown(brief.vehicle)}`);
   if (brief.notes) lines.push(`📝 ${escapeMarkdown(brief.notes)}`);
   if (brief.driverPay) lines.push(`💷 ${escapeMarkdown(brief.driverPay)}`);
+
+  /*
+   * Directly under the passenger's name would be tidier and is wrong: a
+   * driver skimming this in a car park reads top to bottom and stops at the
+   * first thing they need. The board is the *last* thing they need, at the
+   * kerb, twenty minutes after everything above it.
+   *
+   * A labelled link rather than a bare URL, so it survives being forwarded
+   * and still says what it is.
+   */
+  if (brief.nameBoardUrl) {
+    lines.push(`🪧 [Name board](${escapeMarkdownUrl(brief.nameBoardUrl)})`);
+  }
 
   const done = (brief.recorded ?? []).filter((step): step is DriverStep =>
     (DRIVER_STEPS as readonly string[]).includes(step),

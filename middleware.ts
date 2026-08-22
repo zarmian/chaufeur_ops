@@ -23,6 +23,10 @@ const PUBLIC_PREFIXES = [
   '/api/health',
   '/api/cron',
   '/api/telegram',
+  // The meet-and-greet name board. Held up by a driver, and drivers have no
+  // login — the 24-byte token in the path is the credential, and the route
+  // itself refuses anything it does not recognise.
+  '/board',
 ];
 
 export function middleware(request: NextRequest) {
