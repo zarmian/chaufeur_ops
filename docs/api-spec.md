@@ -116,7 +116,8 @@ POST   /api/drivers
 PATCH  /api/drivers/:id
 GET    /api/drivers/:id/schedule    ?from&to — jobs, for conflict checks
 GET    /api/drivers/:id/earnings    ?from&to — jobs, hours, amount due, paid status
-POST   /api/drivers/:id/telegram-link   → { url: "https://t.me/WeLuxOpsBot?start=drv_xxx" }
+POST   /api/drivers/:id/telegram-link   → { url: "https://t.me/<opsBot>?start=drv_xxx" }
+POST   /api/profile/telegram             own staff link → "…?start=stf_xxx"
 
 GET    /api/vehicles
 POST   /api/vehicles
@@ -289,6 +290,24 @@ Form post: `link` issues a one-time `LinkToken` valid for seven days and
 returns the URL on the query string, shown once; `unlink` clears the binding.
 Any outstanding unused token for the same driver is spent first, so "it says
 expired" always has an answer.
+
+### `POST /api/profile/telegram`
+Form post, one's own staff link — spec 5.9.1. `link` issues a one-time
+`StaffLinkToken` valid for 48 hours and returns the URL on the query string,
+shown once; `unlink` clears the binding.
+
+**There is no id in the path and none in the form.** The account is whoever is
+signed in, so there is no parameter to tamper with and no capability check to
+get wrong: a route that accepted a target would need one to stop a VIEWER
+minting a link for an ACCOUNTS account, and that check would be one refactor
+away from being dropped. Guarded by `viewJobs`, the weakest capability every
+role holds, because the staff bot answers every role.
+
+### `POST /api/settings/users/:id/telegram`
+Form post, `unlink` only — an administrator revoking somebody else's binding,
+for the phone that has left with somebody who has not. `link` is refused with
+an explanation rather than silently ignored: minting for another person is a
+deliberate omission, not a gap. Requires `manageUsers`.
 
 ### `POST /api/settings/telegram`
 Form post. Tokens are write-only — stored encrypted, never returned. Enabling

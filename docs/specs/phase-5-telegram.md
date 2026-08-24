@@ -102,8 +102,14 @@ The highest-value feature in the phase.
 ## 5.9 Admin bot
 
 **Acceptance criteria**
-1. Staff link their own Telegram to their user account, gated by role
-2. Commands: `/today`, `/tomorrow`, `/unassigned`, `/unpriced`, `/expiring`, `/driver <name>`, `/job <reference>`
+1. Staff link their own Telegram to their user account, gated by role.
+   Self-service, on `/profile`, reachable by every role the bot serves —
+   *not* an administrator issuing links on somebody's behalf. A driver has no
+   login, which is why ops issues theirs; staff all have one, so a link never
+   has to travel and therefore never should. An administrator can revoke
+   another user's binding from their record, and deactivating an account
+   clears it.
+2. Commands: `/today`, `/tomorrow`, `/unassigned`, `/unpriced`, `/expiring`, `/driver <name>`, `/job <reference>`, `/unlink`
 3. Push alerts: job within 3 hours with no driver; accepted driver not tapping On My Way 15 minutes before pickup; job declined; invoice overdue
 4. Alert thresholds configurable in Settings
 5. Alerts go to a group chat if one is configured, otherwise to individuals

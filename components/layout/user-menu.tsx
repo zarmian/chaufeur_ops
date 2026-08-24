@@ -1,6 +1,6 @@
 'use client';
 
-import { Check, ChevronDown, LogOut, Monitor, Moon, Sun } from 'lucide-react';
+import { Check, ChevronDown, LogOut, Monitor, Moon, Sun, UserRound } from 'lucide-react';
 import * as React from 'react';
 import { applyTheme } from '@/components/theme-provider';
 import { Badge } from '@/components/ui/badge';
@@ -111,6 +111,16 @@ export function UserMenu({
             </DropdownMenuItem>
           );
         })}
+
+        <DropdownMenuSeparator />
+        {/* Every role reaches this, including VIEWER: it is the only route to
+            the staff Telegram link, and the bot serves every role. */}
+        <DropdownMenuItem asChild>
+          <a href="/profile" className="flex cursor-pointer items-center gap-2">
+            <UserRound className="size-4" aria-hidden />
+            Your profile
+          </a>
+        </DropdownMenuItem>
 
         <DropdownMenuSeparator />
         {/* The form wraps the item so the menu item *is* the submit button —

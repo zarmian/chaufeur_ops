@@ -280,6 +280,7 @@ model User {
   bulkOperations   BulkOperation[] @relation("BulkOperationCreatedBy")
   createdRentals   VehicleRental[] @relation("RentalCreatedBy")
   sessions         Session[]
+  telegramLinks    StaffLinkToken[]
 
   @@index([deletedAt])
 }
@@ -1544,6 +1545,27 @@ model LinkToken {
   driver Driver @relation(fields: [driverId], references: [id])
 
   @@index([driverId])
+}
+
+/// A staff member binding their own Telegram to the admin bot — spec 5.9.1.
+///
+/// A separate model from `LinkToken` rather than a nullable `driverId`
+/// alongside a nullable `userId`. The two bind different things to different
+/// bots, and a single table able to hold either is one missing `where` away
+/// from binding a driver's phone to a staff account — which would hand
+/// somebody the money commands. The duplication is a dozen lines; the failure
+/// it forecloses is not recoverable from a screenshot.
+model StaffLinkToken {
+  id        String    @id @default(cuid())
+  token     String    @unique
+  userId    String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
 }
 
 // ------------------------------------------------- bank reconciliation

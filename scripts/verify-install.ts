@@ -72,6 +72,29 @@ function checkEnvironment(): void {
     }
   }
 
+  /*
+   * A warning rather than a failure, and the distinction is deliberate.
+   *
+   * An install with no Telegram bot, no payment gateway and no transactional
+   * email needs no key at all, and failing such an install would be crying
+   * wolf. But the moment somebody tries to save a bot token, storing it is
+   * *refused* — never a silent downgrade to plaintext — and the first they
+   * learn of that is a red banner in Settings, mid-setup, with no shell to
+   * hand. Naming it in the preflight moves that discovery an hour earlier.
+   *
+   * Never report what the key is, or any part of it. Set or not set is the
+   * whole of what anyone needs from here.
+   */
+  if (process.env.SETTINGS_ENCRYPTION_KEY?.trim()) {
+    record('ok', 'SETTINGS_ENCRYPTION_KEY', 'set — credentials can be stored encrypted');
+  } else {
+    record(
+      'warn',
+      'SETTINGS_ENCRYPTION_KEY',
+      'not set — saving a bot token, gateway or email credential will be refused. Generate one with `openssl rand -hex 32` before setup, and keep it: changing it makes every stored credential unreadable',
+    );
+  }
+
   if (process.env.BLOB_READ_WRITE_TOKEN) {
     /*
      * Present is not the same as *this install's own*.

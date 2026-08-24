@@ -143,6 +143,24 @@ export default async function TelegramSettingsPage({
               </div>
 
               <div>
+                <label
+                  htmlFor="adminBotUsername"
+                  className="mb-1 block text-sm font-medium"
+                >
+                  Admin bot username
+                </label>
+                <Input
+                  id="adminBotUsername"
+                  name="adminBotUsername"
+                  defaultValue={config.adminBotUsername ?? ''}
+                  placeholder="YourCompanyAdminBot"
+                />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Used to build each staff member&rsquo;s link, on their profile.
+                </p>
+              </div>
+
+              <div>
                 <label htmlFor="dispatchChatId" className="mb-1 block text-sm font-medium">
                   Dispatch group chat id
                 </label>

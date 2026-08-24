@@ -4,8 +4,9 @@ import { billableClientPence } from '../job-status';
 import { UNPRICED_WHERE } from '../jobs';
 import { formatMoney } from '../money';
 import { prisma } from '../prisma';
-import { escapeMarkdown } from './protocol';
+import { escapeMarkdown, parseStartPayload } from './protocol';
 import { sendMessage } from './send';
+import { redeemStaffLinkToken, unlinkStaffChat } from './staff-linking';
 
 /**
  * The admin bot — spec 5.9.
@@ -38,13 +39,65 @@ export async function handleAdminCommand(
   chatId: bigint,
   text: string,
 ): Promise<AdminOutcome> {
+  /*
+   * `/start stf_<token>` — the only command that works before linking, and
+   * therefore the only one handled ahead of the lookup below.
+   *
+   * Spec 5.9.1. Everything under it needs a staff account to answer as; this
+   * is how a chat acquires one.
+   */
+  const start = parseStartPayload(text);
+
+  if (start?.audience === 'driver') {
+    // A driver's link opened in the staff bot. Naming it saves a call to the
+    // office: the two links differ only by the bot in the URL.
+    await reply(
+      chatId,
+      escapeMarkdown(
+        'That is a driver link, and this is the staff bot. Open it in the driver bot instead.',
+      ),
+    );
+    return { kind: 'start', outcome: 'driver token in admin bot' };
+  }
+
+  if (start) {
+    const outcome = await redeemStaffLinkToken(start.token, chatId);
+    await reply(chatId, escapeMarkdown(outcome.message));
+    return {
+      kind: 'start',
+      outcome: outcome.ok ? `linked ${outcome.userId}` : outcome.message,
+    };
+  }
+
+  if (/^\/start\b/.test(text.trim())) {
+    await reply(
+      chatId,
+      escapeMarkdown(
+        'Hello. Open your profile in the dashboard and generate a Telegram link — it will connect this chat to your staff account.',
+      ),
+    );
+    return { kind: 'start', outcome: 'no token' };
+  }
+
   const user = await userForChat(chatId);
+
+  /*
+   * `/unlink` before the guard below, so it works from a chat whose account
+   * has since been switched off. Somebody whose access was revoked can still
+   * take their own phone out of the table; leaving a stale binding in place
+   * would mean the only way to clear it is a database console.
+   */
+  if (/^\/unlink\b/.test(text.trim())) {
+    const outcome = await unlinkStaffChat(chatId);
+    await reply(chatId, escapeMarkdown(outcome.message));
+    return { kind: 'unlink', outcome: outcome.ok ? 'unlinked' : outcome.message };
+  }
 
   if (!user) {
     await sendMessage(
       chatId,
       escapeMarkdown(
-        'This chat is not linked to a staff account. Ask an administrator to link it.',
+        'This chat is not linked to a staff account. Open your profile in the dashboard and generate a Telegram link.',
       ),
       { bot: 'admin' },
     );
@@ -354,5 +407,6 @@ function adminHelp(): string {
     escapeMarkdown('/expiring — documents lapsing within 30 days'),
     escapeMarkdown('/driver Smith — a driver and their next job'),
     escapeMarkdown('/job JOB-000123 — one job and its timeline'),
+    escapeMarkdown('/unlink — stop this chat answering as your account'),
   ].join('\n');
 }

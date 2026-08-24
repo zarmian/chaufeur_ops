@@ -88,6 +88,7 @@ export async function listUsers() {
       active: true,
       mustChangePassword: true,
       lastLoginAt: true,
+      telegramLinkedAt: true,
       createdAt: true,
     },
   });
@@ -104,6 +105,7 @@ export async function getUser(id: string) {
       active: true,
       mustChangePassword: true,
       lastLoginAt: true,
+      telegramLinkedAt: true,
     },
   });
 }
@@ -333,12 +335,36 @@ export async function setUserActive(
     'User',
     active ? 'restore' : 'delete',
     async (tx) => {
-      const before = await tx.user.findUnique({ where: { id }, select: { active: true } });
+      const before = await tx.user.findUnique({
+        where: { id },
+        select: { active: true, telegramChatId: true },
+      });
       const after = await tx.user.update({
         where: { id },
-        data: { active },
-        select: { active: true },
+        data: {
+          active,
+          /*
+           * Switching somebody off unbinds their Telegram — spec 5.9.1.
+           *
+           * `userForChat` already filters on `active`, so the bot stops
+           * answering them either way. Clearing the binding as well is about
+           * what happens *later*: an account switched back on months on, for
+           * a different person or a returning one, would otherwise silently
+           * resume answering to a phone nobody remembers granting. Linking
+           * again takes ten seconds and is a decision somebody makes.
+           */
+          ...(active ? {} : { telegramChatId: null, telegramLinkedAt: null }),
+        },
+        select: { active: true, telegramChatId: true },
       });
+      if (!active) {
+        // And any link still in flight, so a message left in a chat history
+        // cannot re-bind the account after it has been switched off.
+        await tx.staffLinkToken.updateMany({
+          where: { userId: id, usedAt: null },
+          data: { usedAt: new Date() },
+        });
+      }
       return { entityId: id, before, after, result: null };
     },
     context,

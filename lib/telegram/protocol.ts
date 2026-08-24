@@ -135,19 +135,56 @@ export function decodeCallback(data: string): Callback | null {
 }
 
 /**
+ * Who a `/start` link binds.
+ *
+ * Two audiences, two bots, two prefixes. A driver's link binds a phone to
+ * their jobs and their pay; a staff link binds one to an account whose role
+ * may include seeing revenue. Telling them apart is not tidiness — redeeming
+ * one as the other is the whole failure this prefix exists to prevent.
+ */
+export type LinkAudience = 'driver' | 'staff';
+
+const PREFIXES: Record<LinkAudience, string> = {
+  driver: 'drv_',
+  staff: 'stf_',
+};
+
+/**
  * The link token in a `/start` payload.
  *
- * `drv_<token>` rather than a bare token, so a `/start` with something else
- * in it — a referral code, a stray paste — is recognised as not-a-link rather
- * than looked up and reported as expired.
+ * Prefixed rather than bare, so a `/start` with something else in it — a
+ * referral code, a stray paste — is recognised as not-a-link rather than
+ * looked up and reported as expired.
  */
-export function linkPayload(token: string): string {
-  return `drv_${token}`;
+export function linkPayload(token: string, audience: LinkAudience = 'driver'): string {
+  return `${PREFIXES[audience]}${token}`;
 }
 
-export function parseStartPayload(text: string): string | null {
-  const match = /^\/start(?:@\w+)?\s+drv_([A-Za-z0-9_-]{8,128})\s*$/.exec(text.trim());
-  return match ? match[1]! : null;
+export interface StartPayload {
+  audience: LinkAudience;
+  token: string;
+}
+
+/**
+ * A `/start` payload, and which kind of link it is.
+ *
+ * Returns the audience rather than just the token so the caller has to decide
+ * what to do with the wrong kind. Both bots receive `/start` links people
+ * paste into the wrong chat — the staff link is handed out on a screen and
+ * the driver's arrives by SMS, and neither says which bot it belongs to
+ * beyond the username in the URL. Answering "that is a link for the other
+ * bot" is a complete instruction; silently reporting it as unrecognised sends
+ * somebody back to the office for a replacement that will fail the same way.
+ */
+export function parseStartPayload(text: string): StartPayload | null {
+  const match = /^\/start(?:@\w+)?\s+(drv|stf)_([A-Za-z0-9_-]{8,128})\s*$/.exec(
+    text.trim(),
+  );
+  if (!match) return null;
+  return {
+    audience: match[1] === 'stf' ? 'staff' : 'driver',
+    token: match[2]!,
+  };
 }
 
 /**

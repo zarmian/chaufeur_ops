@@ -138,9 +138,29 @@ async function handleMessage(
   const text = (message.text ?? '').trim();
 
   // `/start drv_<token>` — the only command that works before linking.
-  const token = parseStartPayload(text);
-  if (token) {
-    const outcome = await redeemLinkToken(token, chatId);
+  const start = parseStartPayload(text);
+
+  /*
+   * A staff link opened in the driver bot.
+   *
+   * It cannot be redeemed here — this bot binds driver records, and binding
+   * an office phone to one would send that driver's jobs and pay to it. Worth
+   * naming rather than refusing as unrecognised: the two links look identical
+   * apart from the bot in the URL, and somebody who has just tapped the wrong
+   * one has no way to tell that is what they did.
+   */
+  if (start?.audience === 'staff') {
+    await sendMessage(
+      chatId,
+      escapeMarkdown(
+        'That is a staff link, and this is the driver bot. Open it in the admin bot instead.',
+      ),
+    );
+    return { kind: 'start', outcome: 'staff token in ops bot' };
+  }
+
+  if (start) {
+    const outcome = await redeemLinkToken(start.token, chatId);
     await sendMessage(chatId, escapeMarkdown(outcome.message));
     return {
       kind: 'start',

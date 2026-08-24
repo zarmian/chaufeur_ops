@@ -93,13 +93,26 @@ describe('callbacks', () => {
 });
 
 describe('parseStartPayload', () => {
-  it('reads a link token', () => {
-    expect(parseStartPayload('/start drv_abc123XYZ_-def')).toBe('abc123XYZ_-def');
+  it('reads a driver link token', () => {
+    expect(parseStartPayload('/start drv_abc123XYZ_-def')).toEqual({
+      audience: 'driver',
+      token: 'abc123XYZ_-def',
+    });
+  });
+
+  it('reads a staff link token', () => {
+    expect(parseStartPayload('/start stf_abc123XYZ_-def')).toEqual({
+      audience: 'staff',
+      token: 'abc123XYZ_-def',
+    });
   });
 
   it('reads it when the command names the bot', () => {
     // Group chats append the bot's username.
-    expect(parseStartPayload('/start@AnyOpsBot drv_abc123XYZ')).toBe('abc123XYZ');
+    expect(parseStartPayload('/start@AnyOpsBot drv_abc123XYZ')).toEqual({
+      audience: 'driver',
+      token: 'abc123XYZ',
+    });
   });
 
   it('is null for a bare start or an unrelated payload', () => {
@@ -108,12 +121,31 @@ describe('parseStartPayload', () => {
     expect(parseStartPayload('/start')).toBeNull();
     expect(parseStartPayload('/start referral_99')).toBeNull();
     expect(parseStartPayload('/start drv_short')).toBeNull();
+    expect(parseStartPayload('/start stf_short')).toBeNull();
   });
 
-  it('matches what linkPayload builds', () => {
-    expect(parseStartPayload(`/start ${linkPayload('abcdefgh12345678')}`)).toBe(
-      'abcdefgh12345678',
-    );
+  it('does not confuse the two prefixes', () => {
+    /*
+     * The distinction the whole prefix exists for. A staff token redeemed as
+     * a driver link would bind an office phone to a driver record — their
+     * jobs, and their pay. The reverse hands a driver the commands that show
+     * revenue. Neither is recoverable by the person it happens to.
+     */
+    const staff = parseStartPayload('/start stf_abcdefgh12345678');
+    const driver = parseStartPayload('/start drv_abcdefgh12345678');
+    expect(staff?.audience).toBe('staff');
+    expect(driver?.audience).toBe('driver');
+    expect(staff?.token).toBe(driver?.token);
+  });
+
+  it('matches what linkPayload builds, for either audience', () => {
+    expect(parseStartPayload(`/start ${linkPayload('abcdefgh12345678')}`)).toEqual({
+      audience: 'driver',
+      token: 'abcdefgh12345678',
+    });
+    expect(
+      parseStartPayload(`/start ${linkPayload('abcdefgh12345678', 'staff')}`),
+    ).toEqual({ audience: 'staff', token: 'abcdefgh12345678' });
   });
 });
 

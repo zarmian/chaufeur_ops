@@ -27,6 +27,8 @@ export interface TelegramConfig {
   dispatchChatId: string | null;
   /** Username without the @, used to build the driver link. */
   opsBotUsername: string | null;
+  /** The admin bot's username, used to build the staff link — spec 5.9.1. */
+  adminBotUsername: string | null;
 
   // Spec 5.11.3 — everything off by default. A bot that starts messaging
   // drivers the moment a token is pasted is a bot nobody trusts.
@@ -51,6 +53,7 @@ export const BLANK_CONFIG: TelegramConfig = {
   webhookSecretSet: false,
   dispatchChatId: null,
   opsBotUsername: null,
+  adminBotUsername: null,
   notifyOnAssignment: false,
   requireAcceptance: false,
   chaseDocuments: false,
@@ -72,6 +75,7 @@ export async function getTelegramConfig(): Promise<TelegramConfig> {
     webhookSecretSet: isSet(stored.webhookSecret) || envWebhookSecret() !== null,
     dispatchChatId: text(stored.dispatchChatId),
     opsBotUsername: text(stored.opsBotUsername),
+    adminBotUsername: text(stored.adminBotUsername),
     notifyOnAssignment: stored.notifyOnAssignment === true,
     requireAcceptance: stored.requireAcceptance === true,
     chaseDocuments: stored.chaseDocuments === true,
@@ -151,6 +155,7 @@ export interface TelegramInput {
   webhookSecret: string;
   dispatchChatId: string;
   opsBotUsername: string;
+  adminBotUsername: string;
   notifyOnAssignment: boolean;
   requireAcceptance: boolean;
   chaseDocuments: boolean;
@@ -201,6 +206,9 @@ export async function saveTelegramConfig(
     webhookSecret: keep(input.webhookSecret, stored.webhookSecret),
     dispatchChatId: input.dispatchChatId.trim() || null,
     opsBotUsername: input.opsBotUsername.trim().replace(/^@/, '') || null,
+    // The @ comes off whichever way it was typed. Somebody copying a username
+    // out of Telegram brings it with them, and `t.me/@Bot` is a 404.
+    adminBotUsername: input.adminBotUsername.trim().replace(/^@/, '') || null,
     notifyOnAssignment: input.notifyOnAssignment,
     requireAcceptance: input.requireAcceptance,
     chaseDocuments: input.chaseDocuments,

@@ -86,6 +86,14 @@ export default async function UsersPage({
                     Password not set
                   </Badge>
                 ) : null}
+                {/* Worth showing on the list rather than only on the record:
+                    the question an administrator actually has is "whose phone
+                    still answers as us", and that is a scan down a column. */}
+                {user.telegramLinkedAt ? (
+                  <Badge variant="secondary" className="ml-2">
+                    Telegram
+                  </Badge>
+                ) : null}
                 <p className="mt-1 max-w-md text-sm text-muted-foreground">
                   {ROLE_DESCRIPTIONS[user.role]}
                 </p>

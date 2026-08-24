@@ -30,6 +30,7 @@ export async function POST(request: Request) {
         webhookSecret: String(form.get('webhookSecret') ?? ''),
         dispatchChatId: String(form.get('dispatchChatId') ?? ''),
         opsBotUsername: String(form.get('opsBotUsername') ?? ''),
+        adminBotUsername: String(form.get('adminBotUsername') ?? ''),
         notifyOnAssignment: flag(form, 'notifyOnAssignment'),
         requireAcceptance: flag(form, 'requireAcceptance'),
         chaseDocuments: flag(form, 'chaseDocuments'),

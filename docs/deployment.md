@@ -316,6 +316,14 @@ For each install:
 - [ ] A new bot from @BotFather, named for that customer
 - [ ] Its token in Settings → Telegram (stored encrypted), or
       `TELEGRAM_BOT_TOKEN` in the deployment
+- [ ] `SETTINGS_ENCRYPTION_KEY` set **before** any token is saved —
+      `openssl rand -hex 32`, fresh per install. Without it, saving a
+      credential is refused rather than falling back to plaintext, and the
+      first anyone learns of it is a red banner mid-setup. Changing it later
+      makes every stored credential unreadable, so set it once and keep it
+- [ ] The ops and admin bot **usernames** in Settings → Telegram. They are
+      what the driver and staff links are built from; without them the
+      buttons that issue those links are disabled
 - [ ] `TELEGRAM_WEBHOOK_SECRET` generated fresh, per install
 - [ ] The webhook registered against **this install's** address:
 
