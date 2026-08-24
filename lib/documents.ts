@@ -101,20 +101,34 @@ export interface DocumentOwner {
  * list render — walking every document per row would be a query per driver.
  * The document remains the evidence for the date.
  */
-export async function addDocument(
+export interface StoredFile {
+  /** The object key in Blob storage. */
+  key: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+}
+
+/**
+ * Record a document that is **already in storage**.
+ *
+ * Split from the upload because documents no longer travel through the
+ * server: the browser writes to Blob storage directly, against a token this
+ * application issued for that one pathname, and then calls back here to have
+ * the row written. See `app/api/documents/upload/route.ts` for why.
+ *
+ * The caller is responsible for having verified the object — its real size
+ * and content type read back from storage rather than taken from the form.
+ * `recordDocumentAction` does that with `head()`.
+ */
+export async function recordDocument(
   owner: DocumentOwner,
   input: DocumentInput,
-  file: { buffer: Buffer; fileName: string; mimeType: string },
+  file: StoredFile,
   context: AuditContext,
 ): Promise<{ id: string }> {
-  const entityType = owner.driverId ? 'driver' : 'vehicle';
   const entityId = owner.driverId ?? owner.vehicleId;
   if (!entityId) throw new Error('A document must belong to a driver or vehicle');
-
-  const key = buildObjectKey(entityType, entityId, file.fileName);
-  // Uploaded before the transaction: a failed upload must not leave a row
-  // pointing at an object that does not exist.
-  await upload(file.buffer, key, file.mimeType);
 
   const expiresOn =
     input.expiresOn && input.expiresOn !== ''
@@ -142,7 +156,7 @@ export async function addDocument(
         if (previous.length > 0) {
           await tx.document.updateMany({
             where: { id: { in: previous.map((p) => p.id) } },
-            data: { supersededBy: key },
+            data: { supersededBy: file.key },
           });
         }
       }
@@ -152,10 +166,10 @@ export async function addDocument(
           type: input.type,
           driverId: owner.driverId ?? null,
           vehicleId: owner.vehicleId ?? null,
-          fileKey: key,
+          fileKey: file.key,
           fileName: file.fileName,
           mimeType: file.mimeType,
-          sizeBytes: file.buffer.byteLength,
+          sizeBytes: file.sizeBytes,
           issuedOn:
             input.issuedOn && input.issuedOn !== ''
               ? fromDateOnlyString(input.issuedOn)
@@ -170,6 +184,42 @@ export async function addDocument(
       }
 
       return { entityId: created.id, after: created, result: { id: created.id } };
+    },
+    context,
+  );
+}
+
+/**
+ * Upload a document from the server, then record it.
+ *
+ * Retained for callers that already hold the bytes — imports and fixtures.
+ * The dashboard does not use this: a Server Action's body is capped well
+ * below what a scanned certificate weighs, which is the whole reason the
+ * browser uploads directly.
+ */
+export async function addDocument(
+  owner: DocumentOwner,
+  input: DocumentInput,
+  file: { buffer: Buffer; fileName: string; mimeType: string },
+  context: AuditContext,
+): Promise<{ id: string }> {
+  const entityType = owner.driverId ? 'driver' : 'vehicle';
+  const entityId = owner.driverId ?? owner.vehicleId;
+  if (!entityId) throw new Error('A document must belong to a driver or vehicle');
+
+  const key = buildObjectKey(entityType, entityId, file.fileName);
+  // Uploaded before the transaction: a failed upload must not leave a row
+  // pointing at an object that does not exist.
+  await upload(file.buffer, key, file.mimeType);
+
+  return recordDocument(
+    owner,
+    input,
+    {
+      key,
+      fileName: file.fileName,
+      mimeType: file.mimeType,
+      sizeBytes: file.buffer.byteLength,
     },
     context,
   );

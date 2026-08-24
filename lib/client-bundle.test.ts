@@ -38,7 +38,19 @@ const SERVER_ONLY_PACKAGES = [
   'next/cache',
 ];
 
+/**
+ * Subpaths of an otherwise server-only package that are browser code.
+ *
+ * `@vercel/blob/client` is the browser half of the Blob SDK and exists for
+ * exactly this: uploading straight from a Client Component. It shares a
+ * package name with the server half, which must stay banned — importing
+ * `@vercel/blob` in the browser would put the read-write token's code path
+ * there. So the exception is by exact specifier, never by prefix.
+ */
+const BROWSER_SAFE_SUBPATHS = ['@vercel/blob/client'];
+
 function isServerOnlyPackage(specifier: string): boolean {
+  if (BROWSER_SAFE_SUBPATHS.includes(specifier)) return false;
   if (specifier.startsWith('node:')) return true;
   return SERVER_ONLY_PACKAGES.some(
     (pkg) => specifier === pkg || specifier.startsWith(`${pkg}/`),
@@ -164,6 +176,21 @@ describe('client bundle safety', () => {
   it('finds the Client Components to check', () => {
     // A refactor that renames directories must not silently empty this suite.
     expect(clientEntrypoints.length).toBeGreaterThan(5);
+  });
+
+  it('lets the browser half of the Blob SDK through, and nothing else of it', () => {
+    /*
+     * Guarding the exception itself, because it is the only hole in this net.
+     *
+     * `@vercel/blob/client` is browser code and documents are uploaded with
+     * it. `@vercel/blob` is not: it carries the read-write token's code path,
+     * and a prefix-shaped exception would have admitted it — along with every
+     * other subpath of the package, present and future.
+     */
+    expect(isServerOnlyPackage('@vercel/blob/client')).toBe(false);
+    expect(isServerOnlyPackage('@vercel/blob')).toBe(true);
+    expect(isServerOnlyPackage('@vercel/blob/server')).toBe(true);
+    expect(isServerOnlyPackage('@vercel/blob/client/extra')).toBe(true);
   });
 
   it.each(clientEntrypoints.map((file) => [relative(ROOT, file), file]))(

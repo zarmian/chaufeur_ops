@@ -1,5 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { del, head, issueSignedToken, presignUrl, put } from '@vercel/blob';
+import {
+  ALLOWED_MIME_TYPES,
+  BRAND_MIME_TYPES,
+  DOCUMENT_PREFIX,
+  buildObjectKey as buildKey,
+  describeUploadRefusal,
+} from './storage-keys';
 
 /**
  * File storage on Vercel Blob, private.
@@ -12,32 +19,36 @@ import { del, head, issueSignedToken, presignUrl, put } from '@vercel/blob';
  *
  * Binaries never go in Postgres. The database holds the pathname and nothing
  * else, which is what makes a document's owner obvious from its key alone.
- */
-
-export const ALLOWED_MIME_TYPES = [
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-  'application/pdf',
-] as const;
-
-export type AllowedMimeType = (typeof ALLOWED_MIME_TYPES)[number];
-
-/**
- * Branding assets accept SVG on top of the document types, because a logo
- * that has to stay crisp on a PDF letterhead is usually vector.
  *
- * An SVG is a document that can carry script, so it is never inlined into a
- * page. Branding assets are served from the Blob store's own origin behind a
- * signed URL and rendered in an `<img>`, where script inside the file does
- * not execute.
+ * Document uploads no longer pass through here on their way in — they go
+ * from the browser straight to Blob storage, because a Server Action's body
+ * is capped well below what a scanned certificate weighs. See
+ * `app/api/documents/upload/route.ts`. What remains server-side is issuing
+ * the read URLs, deleting, and the branding assets, which are small.
+ *
+ * The names, limits and key format live in `./storage-keys`, with no imports,
+ * so the browser half of an upload can share them.
  */
-export const BRAND_MIME_TYPES = [
-  ...ALLOWED_MIME_TYPES,
-  'image/svg+xml',
-] as const;
 
-export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
+export {
+  ALLOWED_MIME_TYPES,
+  BRAND_MIME_TYPES,
+  DOCUMENT_PREFIX,
+  MAX_UPLOAD_BYTES,
+  describeUploadRefusal,
+  entityIdOf,
+  entityTypeOf,
+  keyBelongsTo,
+  parseObjectKey,
+  parseUploadOwner,
+  sanitiseFileName,
+} from './storage-keys';
+export type {
+  AllowedMimeType,
+  DocumentEntityType,
+  UploadOwner,
+} from './storage-keys';
+
 export const DEFAULT_SIGNED_URL_TTL_SECONDS = 15 * 60;
 
 export class StorageValidationError extends Error {
@@ -75,57 +86,25 @@ function assertAllowed(
   sizeBytes: number,
   allowed: readonly string[] = ALLOWED_MIME_TYPES,
 ): void {
-  if (!allowed.includes(mimeType)) {
-    throw new StorageValidationError(
-      `${mimeType} is not an accepted file type. Upload a ${
-        allowed === ALLOWED_MIME_TYPES
-          ? 'JPEG, PNG, WebP or PDF'
-          : 'JPEG, PNG, WebP, SVG or PDF'
-      }.`,
-    );
-  }
-  if (sizeBytes > MAX_UPLOAD_BYTES) {
-    const mb = (sizeBytes / 1024 / 1024).toFixed(1);
-    throw new StorageValidationError(
-      `That file is ${mb} MB. The limit is ${MAX_UPLOAD_BYTES / 1024 / 1024} MB.`,
-    );
-  }
-  if (sizeBytes <= 0) {
-    throw new StorageValidationError('That file is empty.');
-  }
+  // One wording for every refusal, wherever it happens — the browser says the
+  // same thing before the upload starts.
+  const refusal = describeUploadRefusal({ type: mimeType, size: sizeBytes }, allowed);
+  if (refusal) throw new StorageValidationError(refusal);
 }
 
 /**
- * Strip anything that could confuse a path or a Content-Disposition header.
- * The original name is kept in the database for display; this is only the
- * tail of the object key.
- */
-export function sanitiseFileName(fileName: string): string {
-  const base = fileName.split(/[\\/]/).pop() ?? 'file';
-  const cleaned = base
-    .normalize('NFKD')
-    .replace(/[^\w.\- ]+/g, '')
-    .replace(/\s+/g, '-')
-    .replace(/-{2,}/g, '-')
-    .replace(/^[.-]+/, '')
-    .slice(0, 120);
-  return cleaned || 'file';
-}
-
-/**
- * `documents/driver/clx123/9f8e-phv-badge.pdf`
+ * A key for a new object, with a fresh UUID.
  *
- * Namespaced by entity so an object's owner is obvious from the key alone,
- * which matters when auditing or cleaning up orphans. The UUID makes the key
- * unguessable and lets the same filename be uploaded twice.
+ * The server-side convenience wrapper. The browser calls the shared builder
+ * directly with `crypto.randomUUID()`.
  */
 export function buildObjectKey(
   entityType: string,
   entityId: string,
   fileName: string,
-  prefix = 'documents',
+  prefix: string = DOCUMENT_PREFIX,
 ): string {
-  return `${prefix}/${entityType}/${entityId}/${randomUUID()}-${sanitiseFileName(fileName)}`;
+  return buildKey(entityType, entityId, randomUUID(), fileName, prefix);
 }
 
 export async function upload(
@@ -196,6 +175,31 @@ export async function getSignedUrl(
 export async function remove(key: string): Promise<void> {
   assertConfigured();
   await del(key);
+}
+
+/**
+ * What storage says an object actually is.
+ *
+ * The counterpart to uploading from the browser. When the row is written, the
+ * only trustworthy account of a file's size and type is the store's own — the
+ * form that reports them has been through a machine we do not control. Null
+ * when the object is not there, which is what an abandoned upload looks like.
+ */
+export async function statObject(
+  key: string,
+): Promise<{ size: number; contentType: string } | null> {
+  assertConfigured();
+  try {
+    const details = await head(key);
+    return {
+      size: details.size,
+      // Blob returns the type it was told at upload; the token restricted that
+      // to the allowlist, and the caller checks it again anyway.
+      contentType: details.contentType ?? '',
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function exists(key: string): Promise<boolean> {

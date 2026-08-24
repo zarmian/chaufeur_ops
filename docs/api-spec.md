@@ -291,6 +291,23 @@ returns the URL on the query string, shown once; `unlink` clears the binding.
 Any outstanding unused token for the same driver is spent first, so "it says
 expired" always has an answer.
 
+### `POST /api/documents/upload`
+Issues a short-lived token for **one** browser-to-Blob upload, via the Blob
+SDK's `handleUpload`. Documents do not pass through the server: a Server
+Action's body is capped at 1 MB by default and a Vercel Function's at 4.5 MB,
+either of which a scanned certificate exceeds — which is why uploads under a
+megabyte used to work and anything larger died in the framework with no
+message on it.
+
+The browser names the pathname it wants, so the route is the whole of the
+access control: the caller must hold `editDocuments`; the key must be under
+`documents/`, well-formed, and in the namespace of the driver or vehicle the
+payload names; that record must exist; and the token itself caps the content
+type and the 10 MB size, so the limits are enforced by the storage service
+rather than by the browser that asked. `onUploadCompleted` is deliberately
+unused — it never fires against localhost, so the row would exist in
+production and not in development.
+
 ### `POST /api/profile/telegram`
 Form post, one's own staff link — spec 5.9.1. `link` issues a one-time
 `StaffLinkToken` valid for 48 hours and returns the URL on the query string,

@@ -114,6 +114,12 @@ jobs:
           # So the webhook's secret-token check is exercised as a comparison
           # rather than as the blanket refusal an unconfigured install gives.
           TELEGRAM_WEBHOOK_SECRET: ci-telegram-webhook-secret
+          # Not a credential and not a store — a syntactically valid dummy.
+          # Documents upload from the browser now, and the route that decides
+          # whether to authorise one signs its token locally, so this is
+          # enough to exercise every authorisation branch above the signing.
+          # It buys nothing else: no upload can reach a store with it.
+          BLOB_READ_WRITE_TOKEN: vercel_blob_rw_citeststore_0000000000000000
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
