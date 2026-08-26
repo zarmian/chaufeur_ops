@@ -11,7 +11,12 @@ import { fromDateOnlyString } from './dates';
 import type { ListParams } from './list-params';
 import { parseMoney, tryParseMoney } from './money';
 import { prisma } from './prisma';
-import { emptyToNull, normaliseRegistration, tidy } from './text';
+import {
+  emptyToNull,
+  normaliseRegistration,
+  normalisedSearchTerm,
+  tidy,
+} from './text';
 
 /**
  * Vehicles — the fleet, and whether each car is legal to put on a job.
@@ -217,6 +222,10 @@ export async function listVehicles(
   thresholds: ComplianceThresholds,
   now = new Date(),
 ) {
+  const registrationTerm = params.q
+    ? normalisedSearchTerm(params.q, normaliseRegistration)
+    : null;
+
   const where = {
     ...(filters.archived ? { deletedAt: { not: null } } : {}),
     ...(filters.status
@@ -231,11 +240,13 @@ export async function listVehicles(
     ...(params.q
       ? {
           OR: [
-            {
-              normalisedRegistration: {
-                contains: normaliseRegistration(params.q),
-              },
-            },
+            // Only when something survives normalising — a term of pure
+            // punctuation would otherwise become `contains: ''`, which is
+            // `LIKE '%%'` and matches every vehicle. See
+            // `normalisedSearchTerm`.
+            ...(registrationTerm
+              ? [{ normalisedRegistration: { contains: registrationTerm } }]
+              : []),
             { make: { contains: params.q, mode: 'insensitive' as const } },
             { model: { contains: params.q, mode: 'insensitive' as const } },
           ],

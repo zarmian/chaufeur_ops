@@ -1,7 +1,12 @@
 import { z } from 'zod';
 import { withAudit, type AuditContext } from './audit';
 import { prisma } from './prisma';
-import { emptyToNull, normaliseName, tidy } from './text';
+import {
+  emptyToNull,
+  normaliseName,
+  normalisedSearchTerm,
+  tidy,
+} from './text';
 import type { ListParams } from './list-params';
 
 /**
@@ -105,6 +110,8 @@ export async function listClients(
 ) {
   const search = params.q;
 
+  const nameTerm = search ? normalisedSearchTerm(search, normaliseName) : null;
+
   const where = {
     // The soft-delete extension hides archived rows by default, so asking for
     // them has to be explicit.
@@ -114,12 +121,19 @@ export async function listClients(
       ? {
           OR: [
             { name: { contains: search, mode: 'insensitive' as const } },
-            {
-              normalisedName: {
-                contains: normaliseName(search),
-                mode: 'insensitive' as const,
-              },
-            },
+            // Guarded for the same reason as the driver and vehicle lists:
+            // a term that normalises to nothing would become `contains: ''`,
+            // which matches every client. See `normalisedSearchTerm`.
+            ...(nameTerm
+              ? [
+                  {
+                    normalisedName: {
+                      contains: nameTerm,
+                      mode: 'insensitive' as const,
+                    },
+                  },
+                ]
+              : []),
             { contactPhone: { contains: search } },
             { contactEmail: { contains: search, mode: 'insensitive' as const } },
           ],

@@ -91,6 +91,33 @@ export function normalisePhone(input: string): string {
   return digits.replace(/\+/g, '');
 }
 
+/**
+ * A normalised search term, or null when normalising left nothing behind.
+ *
+ * The distinction is the difference between a search that works and one that
+ * silently returns the whole table. `contains: ''` is `LIKE '%%'` in SQL — it
+ * matches **every** row, not none — and every normaliser above strips
+ * characters, so a term can normalise away to nothing while the operator has
+ * plainly typed something. `normalisePhone('Dispatch')` is `''`.
+ *
+ * That is not hypothetical. The driver list ran `phone contains
+ * normalisePhone(q)` unguarded, so searching for a name — the commonest thing
+ * anybody does on that screen — matched all 152 drivers instead of the 82 whose
+ * name contained the word. The list came back looking exactly as it had before,
+ * which reads as a search box that does nothing at all.
+ *
+ * Null is the correct answer, and callers drop the clause: a term that holds
+ * no digits cannot be a phone number, so the right number of phone matches is
+ * zero, and the other clauses in the `OR` decide the result.
+ */
+export function normalisedSearchTerm(
+  raw: string,
+  normalise: (input: string) => string,
+): string | null {
+  const value = normalise(raw);
+  return value === '' ? null : value;
+}
+
 /** Trim and collapse internal whitespace, without changing case. */
 export function tidy(input: string): string {
   return input.trim().replace(/\s+/g, ' ');

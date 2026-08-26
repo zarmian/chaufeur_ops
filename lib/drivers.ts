@@ -8,7 +8,7 @@ import { fromDateOnlyString } from './dates';
 import type { ListParams } from './list-params';
 import { prisma } from './prisma';
 import { withDriverReference } from './references';
-import { emptyToNull, normalisePhone, tidy } from './text';
+import { emptyToNull, normalisePhone, normalisedSearchTerm, tidy } from './text';
 
 /**
  * Drivers.
@@ -105,6 +105,10 @@ export async function listDrivers(
   thresholds: ComplianceThresholds,
   now = new Date(),
 ) {
+  // Null unless the term holds digits, so a name search never becomes a
+  // wildcard over every phone number in the table.
+  const phoneTerm = params.q ? normalisedSearchTerm(params.q, normalisePhone) : null;
+
   const where = {
     ...(filters.archived ? { deletedAt: { not: null } } : {}),
     ...(filters.status
@@ -115,7 +119,14 @@ export async function listDrivers(
           OR: [
             { name: { contains: params.q, mode: 'insensitive' as const } },
             { reference: { contains: params.q, mode: 'insensitive' as const } },
-            { phone: { contains: normalisePhone(params.q) } },
+            /*
+             * Only when the term actually holds digits — see
+             * `normalisedSearchTerm`. Unguarded, a search for a name
+             * normalised to `''` and `contains: ''` matched every driver in
+             * the table, so the list came back unfiltered.
+             */
+            ...(phoneTerm ? [{ phone: { contains: phoneTerm } }] : []),
+            // The number as stored, for a phone kept with its formatting.
             { phone: { contains: params.q } },
           ],
         }

@@ -3,6 +3,7 @@ import {
   emptyToNull,
   normaliseName,
   normalisePhone,
+  normalisedSearchTerm,
   normaliseRegistration,
   tidy,
 } from './text';
@@ -120,5 +121,32 @@ describe('emptyToNull', () => {
 
   it('tidies a real value', () => {
     expect(emptyToNull('  hello  world ')).toBe('hello world');
+  });
+});
+
+describe('normalisedSearchTerm', () => {
+  it('returns the normalised term when there is one', () => {
+    expect(normalisedSearchTerm('07700 900123', normalisePhone)).toBe('07700900123');
+    expect(normalisedSearchTerm('dp09 5612', normaliseRegistration)).toBe('DP095612');
+  });
+
+  it('returns null when normalising leaves nothing', () => {
+    /*
+     * The whole point, and a real defect rather than a hypothetical one.
+     *
+     * `contains: ''` is `LIKE '%%'` — it matches every row, not none. The
+     * driver list ran `phone contains normalisePhone(q)` unguarded, so
+     * searching a *name* matched all 152 drivers instead of the 82 whose name
+     * held the word: the list came back looking untouched, which reads as a
+     * search box that does nothing.
+     */
+    expect(normalisedSearchTerm('Dispatch', normalisePhone)).toBeNull();
+    expect(normalisedSearchTerm('Smith', normalisePhone)).toBeNull();
+    expect(normalisedSearchTerm('---', normaliseRegistration)).toBeNull();
+  });
+
+  it('keeps a term that is only partly strippable', () => {
+    // "DRV-0001" holds digits, so it is still worth trying as a phone.
+    expect(normalisedSearchTerm('DRV-0001', normalisePhone)).toBe('0001');
   });
 });

@@ -92,6 +92,25 @@ async function askForToken(
   );
 }
 
+/**
+ * Skip when the environment has no Blob token at all.
+ *
+ * Without one the route answers "storage is not configured" *before* it
+ * reaches any of the authorisation below, so every assertion here would fail
+ * on the wrong thing — or, worse, pass for the wrong reason. CI sets a dummy
+ * token precisely so these run; a developer who has not pulled one down gets
+ * a skip rather than a puzzle.
+ */
+async function skipWithoutStorage(page: Page, vehicleId: string) {
+  const probe = await askForToken(page, `documents/vehicle/${vehicleId}/u-probe.pdf`, {
+    vehicleId,
+  });
+  test.skip(
+    probe.body.includes('storage is not configured'),
+    'no BLOB_READ_WRITE_TOKEN in this environment',
+  );
+}
+
 test.describe.configure({ mode: 'serial' });
 
 test.describe('document upload authorisation', () => {
@@ -101,15 +120,12 @@ test.describe('document upload authorisation', () => {
     await signIn(page);
     const [vehicleId] = await twoVehicleIds(page);
 
+    await skipWithoutStorage(page, vehicleId);
+
     const attempt = await askForToken(
       page,
       `documents/vehicle/${vehicleId}/11111111-1111-4111-8111-111111111111-mot.pdf`,
       { vehicleId },
-    );
-
-    test.skip(
-      attempt.body.includes('storage is not configured'),
-      'no BLOB_READ_WRITE_TOKEN in this environment',
     );
 
     expect(attempt.status).toBe(200);
@@ -126,6 +142,7 @@ test.describe('document upload authorisation', () => {
      */
     await signIn(page);
     const [mine, theirs] = await twoVehicleIds(page);
+    await skipWithoutStorage(page, mine);
 
     const attempt = await askForToken(
       page,
@@ -143,6 +160,7 @@ test.describe('document upload authorisation', () => {
     // would otherwise be a general-purpose write into the store.
     await signIn(page);
     const [vehicleId] = await twoVehicleIds(page);
+    await skipWithoutStorage(page, vehicleId);
 
     const attempt = await askForToken(page, `branding/vehicle/${vehicleId}/logo.png`, {
       vehicleId,
@@ -155,6 +173,7 @@ test.describe('document upload authorisation', () => {
   test('refuses a payload naming both a driver and a vehicle', async ({ page }) => {
     await signIn(page);
     const [vehicleId] = await twoVehicleIds(page);
+    await skipWithoutStorage(page, vehicleId);
 
     const attempt = await askForToken(page, `documents/vehicle/${vehicleId}/u-mot.pdf`, {
       vehicleId,
@@ -167,6 +186,8 @@ test.describe('document upload authorisation', () => {
 
   test('refuses a record that does not exist', async ({ page }) => {
     await signIn(page);
+    const [vehicleId] = await twoVehicleIds(page);
+    await skipWithoutStorage(page, vehicleId);
 
     const attempt = await askForToken(page, 'documents/vehicle/not-a-real-id/u-mot.pdf', {
       vehicleId: 'not-a-real-id',
