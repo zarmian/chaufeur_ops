@@ -23,6 +23,7 @@ import { hasPriceOrReason } from '@/lib/job-status';
 import { listJobs } from '@/lib/jobs';
 import {
   filterFlag,
+  filterEnum,
   filterValue,
   parseListParams,
   type SearchParams,
@@ -95,8 +96,8 @@ export default async function JobsPage({
   const explicitTo = filterValue(params, 'to');
 
   const filters = {
-    status: filterValue(params, 'status'),
-    jobType: filterValue(params, 'jobType'),
+    status: filterEnum(params, 'status', JOB_STATUSES),
+    jobType: filterEnum(params, 'jobType', JOB_TYPES),
     driverId: filterValue(params, 'driverId'),
     clientId: filterValue(params, 'clientId'),
     accountId: filterValue(params, 'accountId'),

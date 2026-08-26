@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { MAX_PAGE_SIZE } from './api';
 import {
   buildListHref,
+  filterEnum,
   filterFlag,
   filterValue,
   paginationSummary,
@@ -133,5 +134,49 @@ describe('paginationSummary', () => {
       hasPrevious: false,
       hasNext: false,
     });
+  });
+});
+
+describe('filterEnum', () => {
+  const STATUSES = ['ACTIVE', 'INACTIVE', 'SUSPENDED'] as const;
+  const OPTIONS = [
+    { value: 'ACTIVE', label: 'Active' },
+    { value: 'INACTIVE', label: 'Inactive' },
+  ] as const;
+
+  it('accepts a value from the list', () => {
+    expect(filterEnum({ status: 'ACTIVE' }, 'status', STATUSES)).toBe('ACTIVE');
+  });
+
+  it('accepts option objects, as the toolbars use', () => {
+    // The same array that renders the <option>s, so the screen and the URL
+    // cannot disagree about what is valid.
+    expect(filterEnum({ status: 'INACTIVE' }, 'status', OPTIONS)).toBe('INACTIVE');
+  });
+
+  it('treats an unrecognised value as no filter rather than throwing', () => {
+    /*
+     * The defect this exists for. Prisma throws on a value that is not a
+     * member of the enum column, and the pages cast the query string straight
+     * in — `filters.status as DriverInput['status']` — which the type checker
+     * accepts and the runtime does not. Every list page in the application
+     * showed the error boundary for one wrong character in the URL: a stale
+     * bookmark, a renamed option, a typo in a pasted link.
+     */
+    expect(filterEnum({ status: 'NONSENSE' }, 'status', STATUSES)).toBeNull();
+    expect(filterEnum({ status: 'active' }, 'status', STATUSES)).toBeNull();
+    expect(filterEnum({ status: "'; drop table" }, 'status', STATUSES)).toBeNull();
+  });
+
+  it('is null for absent, blank and "all", like filterValue', () => {
+    expect(filterEnum({}, 'status', STATUSES)).toBeNull();
+    expect(filterEnum({ status: '' }, 'status', STATUSES)).toBeNull();
+    expect(filterEnum({ status: 'all' }, 'status', STATUSES)).toBeNull();
+  });
+
+  it('reads the first of a repeated parameter', () => {
+    expect(filterEnum({ status: ['ACTIVE', 'INACTIVE'] }, 'status', STATUSES)).toBe(
+      'ACTIVE',
+    );
   });
 });

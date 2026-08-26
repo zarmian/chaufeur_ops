@@ -20,6 +20,7 @@ import { can } from '@/lib/authz';
 import { formatDateTime } from '@/lib/dates';
 import {
   filterFlag,
+  filterEnum,
   filterValue,
   parseListParams,
   type SearchParams,
@@ -47,7 +48,7 @@ export default async function RentalsPage({
   const listParams = parseListParams(params);
 
   const filters = {
-    status: filterValue(params, 'status'),
+    status: filterEnum(params, 'status', STATUS_OPTIONS),
     vehicleId: filterValue(params, 'vehicleId'),
     driverId: filterValue(params, 'driverId'),
     arrearsOnly: filterFlag(params, 'arrears'),

@@ -20,6 +20,7 @@ import { listDrivers } from '@/lib/drivers';
 import { DRIVER_STATUSES } from '@/lib/enum-options';
 import {
   filterFlag,
+  filterEnum,
   filterValue,
   parseListParams,
   type SearchParams,
@@ -47,7 +48,7 @@ export default async function DriversPage({
 
   const listParams = parseListParams(params, { defaultSort: 'name' });
   const filters = {
-    status: filterValue(params, 'status'),
+    status: filterEnum(params, 'status', DRIVER_STATUSES),
     compliance: filterValue(params, 'compliance'),
     archived: filterFlag(params, 'archived'),
   };

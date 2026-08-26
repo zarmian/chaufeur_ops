@@ -19,6 +19,7 @@ import {
 import { can } from '@/lib/authz';
 import { formatDate } from '@/lib/dates';
 import {
+  filterEnum,
   filterValue,
   parseListParams,
   type SearchParams,
@@ -57,7 +58,7 @@ export default async function PayoutsPage({
 
   const filters = {
     driverId: filterValue(params, 'driverId'),
-    status: filterValue(params, 'status'),
+    status: filterEnum(params, 'status', STATUSES),
     from: toDate(filterValue(params, 'from')),
     to: toDate(filterValue(params, 'to')),
   };

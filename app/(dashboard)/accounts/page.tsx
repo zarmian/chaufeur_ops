@@ -19,7 +19,7 @@ import { ACCOUNT_KINDS } from '@/lib/enum-options';
 import { can } from '@/lib/authz';
 import {
   filterFlag,
-  filterValue,
+  filterEnum,
   parseListParams,
   type SearchParams,
 } from '@/lib/list-params';
@@ -38,7 +38,7 @@ export default async function AccountsPage({
 
   const listParams = parseListParams(params, { defaultSort: 'name' });
   const filters = {
-    kind: filterValue(params, 'kind'),
+    kind: filterEnum(params, 'kind', ACCOUNT_KINDS),
     archived: filterFlag(params, 'archived'),
   };
 

@@ -56,6 +56,43 @@ export function filterValue(
   return value;
 }
 
+/**
+ * A filter value that has to be one of a known set, or nothing.
+ *
+ * Every list filter ends up in a Prisma `where` against an enum column, and
+ * Prisma **throws** on a value that is not a member of that enum. The value
+ * comes from the query string, so it is whatever the URL says: the pages used
+ * `filterValue` and then cast — `filters.status as DriverInput['status']` —
+ * which satisfies the type checker and does nothing at runtime.
+ *
+ * The result was that every list page in the application returned the error
+ * boundary for a single unrecognised character in the URL. Ten of them:
+ * drivers, vehicles, jobs, invoices, payouts, rentals, accounts and the rest.
+ * A bookmark saved before an option was renamed, a link pasted with a typo, or
+ * a value that used to exist all produce "Something went wrong" on a screen
+ * that should simply have shown the list.
+ *
+ * Passing the same list the toolbar renders its `<option>`s from is the point:
+ * what the screen offers and what the URL accepts come from one place, so they
+ * cannot drift apart.
+ */
+export function filterEnum<T extends string>(
+  searchParams: SearchParams,
+  key: string,
+  allowed: readonly T[] | readonly { value: T }[],
+): T | null {
+  const value = filterValue(searchParams, key);
+  if (value === null) return null;
+
+  const values: readonly string[] = allowed.map((entry) =>
+    typeof entry === 'string' ? entry : entry.value,
+  );
+
+  // Unrecognised is "no filter", not an error. The list is still the thing the
+  // operator asked to see, and an empty result would be a lie about the data.
+  return values.includes(value) ? (value as T) : null;
+}
+
 export function filterFlag(searchParams: SearchParams, key: string): boolean {
   return first(searchParams[key]) === 'true';
 }

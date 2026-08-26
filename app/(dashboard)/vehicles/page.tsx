@@ -19,6 +19,7 @@ import { can } from '@/lib/authz';
 import { formatDate } from '@/lib/dates';
 import {
   filterFlag,
+  filterEnum,
   filterValue,
   parseListParams,
   type SearchParams,
@@ -53,10 +54,10 @@ export default async function VehiclesPage({
 
   const listParams = parseListParams(params, { defaultSort: 'registration' });
   const filters = {
-    status: filterValue(params, 'status'),
-    vehicleClass: filterValue(params, 'vehicleClass'),
+    status: filterEnum(params, 'status', VEHICLE_STATUSES),
+    vehicleClass: filterEnum(params, 'vehicleClass', VEHICLE_CLASSES),
     compliance: filterValue(params, 'compliance'),
-    ownership: filterValue(params, 'ownership'),
+    ownership: filterEnum(params, 'ownership', VEHICLE_OWNERSHIPS),
     archived: filterFlag(params, 'archived'),
   };
 

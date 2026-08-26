@@ -104,6 +104,37 @@ test.describe('list search', () => {
     await expect(rows.first()).toContainText(PLATE);
   });
 
+  test('a filter value the list does not recognise does not break the page', async ({
+    page,
+  }) => {
+    /*
+     * Every list page threw the error boundary for one wrong character in the
+     * URL. The filter went from the query string into a Prisma `where` against
+     * an enum column with a cast — which the type checker accepts and the
+     * runtime does not, because Prisma rejects a value that is not a member of
+     * the enum.
+     *
+     * A stale bookmark, a renamed option or a typo in a pasted link all land
+     * here. The list is still what the operator asked for, so an unrecognised
+     * filter is dropped rather than fatal.
+     */
+    await signIn(page);
+
+    for (const url of [
+      '/drivers?status=NONSENSE',
+      '/vehicles?ownership=NONSENSE',
+      '/vehicles?vehicleClass=NONSENSE',
+      '/jobs?status=NONSENSE',
+      '/invoices?status=NONSENSE',
+    ]) {
+      await page.goto(url, { waitUntil: 'networkidle' });
+      await expect(
+        page.getByText(/Something went wrong/i),
+        `${url} fell into the error boundary`,
+      ).toHaveCount(0);
+    }
+  });
+
   test('the term stays in the box, so it can be refined', async ({ page }) => {
     await signIn(page);
     await page.goto('/drivers');

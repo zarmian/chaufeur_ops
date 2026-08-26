@@ -21,6 +21,7 @@ import { listInvoices } from '@/lib/invoice-list';
 import { daysOverdue } from '@/lib/invoices';
 import {
   filterFlag,
+  filterEnum,
   filterValue,
   parseListParams,
   type SearchParams,
@@ -64,7 +65,7 @@ export default async function InvoicesPage({
   const listParams = parseListParams(params, { defaultSort: 'issueDate' });
   const filters = {
     q: listParams.q,
-    status: filterValue(params, 'status'),
+    status: filterEnum(params, 'status', STATUSES),
     clientId: filterValue(params, 'clientId'),
     accountId: filterValue(params, 'accountId'),
     from: toDate(filterValue(params, 'from')),
