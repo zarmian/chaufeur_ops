@@ -440,7 +440,18 @@ test.describe('jobs', () => {
 
     // And it reaches the billing screen at the figure it was quoted at.
     await page.goto(`/invoices/new?from=2020-01-01&to=${dateIn(30)}`);
-    await expect(page.getByText(pickup).first().or(page.getByText('£236.00').first())).toBeVisible();
+    /*
+     * The row is found by its pickup, which is unique to this run, and the
+     * figure is asserted *inside that row*. An earlier version matched either
+     * the pickup or the total anywhere on the page, which was two mistakes at
+     * once: `.or()` resolves to two elements when both halves match and fails
+     * strict mode outright — this assertion has been red since it was written
+     * — and even had it passed, a £236.00 belonging to somebody else's job
+     * would have satisfied it.
+     */
+    const billingRow = page.getByRole('row').filter({ hasText: pickup });
+    await expect(billingRow).toHaveCount(1);
+    await expect(billingRow).toContainText('£236.00');
   });
 
   test('an expense the driver bears is neither revenue nor cost', async ({ page }) => {

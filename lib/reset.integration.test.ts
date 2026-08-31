@@ -18,7 +18,7 @@ import { KEEP, previewReset, runReset, type RawClient } from './reset';
 const DATABASE_AVAILABLE = Boolean(process.env.TEST_DATABASE_URL);
 
 /** Its own database, created and dropped here. */
-const SCRATCH = 'welux_reset_probe';
+const SCRATCH = 'ops_reset_probe';
 const adminUrl = process.env.TEST_DATABASE_URL ?? '';
 const scratchUrl = adminUrl.replace(/\/[^/?]+(\?|$)/, `/${SCRATCH}$1`);
 

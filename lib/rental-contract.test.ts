@@ -10,8 +10,9 @@ import { renterDetails, renterName } from './rentals';
  * Two things are worth pinning. A charge nobody set must not print as zero —
  * "£0.00 excess" is a contract saying the hirer owes nothing, which is the
  * opposite of a blank. And the document must carry no operator's name of its
- * own: this is a white-label product, and a contract with WeLux baked into it
- * would go out under the next customer's logo.
+ * own: this is a white-label product, and a contract with the first
+ * customer's name baked into it would go out under the second customer's
+ * logo.
  */
 
 function contract(overrides: Partial<ContractData> = {}): ContractData {
@@ -58,8 +59,11 @@ function contract(overrides: Partial<ContractData> = {}): ContractData {
   };
 }
 
-const render = (data: ContractData) =>
-  renderRentalContract(data, { branding: DEFAULT_BRANDING, locale: DEFAULT_LOCALE_CONFIG });
+const render = (data: ContractData, tradingName?: string) =>
+  renderRentalContract(data, {
+    branding: tradingName ? { ...DEFAULT_BRANDING, tradingName } : DEFAULT_BRANDING,
+    locale: DEFAULT_LOCALE_CONFIG,
+  });
 
 describe('renderRentalContract', () => {
   it('reads as one agreement, not three stapled together', () => {
@@ -114,10 +118,31 @@ describe('renderRentalContract', () => {
   });
 
   it('names no operator of its own', () => {
-    // White label: the only company named is whatever branding says.
-    const html = render(contract());
-    expect(html).not.toMatch(/welux/i);
-    expect(html).toContain(DEFAULT_BRANDING.tradingName);
+    /*
+     * White label: the only company named is whatever branding says.
+     *
+     * Proven by rendering the same contract under two operators rather than
+     * by naming a real customer and asserting its absence. An assertion of
+     * that shape has to write the forbidden name into the source to look for
+     * it, which trips the CI grep that enforces the very same rule — the
+     * guard failing on the test for the guard.
+     *
+     * This is the stronger form anyway. A trading name that survives into a
+     * render done under a different one is a name the template holds itself,
+     * whatever that name happens to be. Together with the grep in CI, which
+     * catches a literal sitting in code no test renders, the rule is covered
+     * from both sides.
+     */
+    const first = render(contract(), 'Aardvark Carriages');
+    const second = render(contract(), 'Zenith Chauffeur Group');
+
+    expect(first).toContain('Aardvark Carriages');
+    expect(second).toContain('Zenith Chauffeur Group');
+    expect(first).not.toContain('Zenith Chauffeur Group');
+    expect(second).not.toContain('Aardvark Carriages');
+
+    // And the default is not smuggled in beside a configured name.
+    expect(second).not.toContain(DEFAULT_BRANDING.tradingName);
   });
 
   it('is signed once, at the end, by both parties', () => {
