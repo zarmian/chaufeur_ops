@@ -331,6 +331,15 @@ Form post. Tokens are write-only — stored encrypted, never returned. Enabling
 the bot without an ops token is refused: a bot that cannot send anything would
 leave every driver silently unreachable with the screen claiming otherwise.
 
+### `POST /api/settings/telegram/webhook`
+Form post. `register` points every configured bot at this install's own
+`APP_URL`; `check` only asks Telegram where each one currently delivers.
+Spec 5.1.4 — registration used to be a hand-typed `curl`, which is how two
+installs end up sharing a bot and one company's drivers start reporting into
+another's database. Both actions read the registration back afterwards,
+because "ok" from `setWebhook` means the call was accepted, not that the bot
+belongs here. Requires `manageSettings`.
+
 ### `POST /api/settings/messaging`
 Form post. Per-template opt-in for client email and SMS, all off by default,
 plus the Twilio credentials. Twilio is refused unless the SID, token and from

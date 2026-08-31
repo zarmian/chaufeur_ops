@@ -33,6 +33,7 @@ export default async function TelegramSettingsPage({
 
   const config = await getTelegramConfig();
   const canStoreSecrets = encryptionAvailable();
+  const appUrl = process.env.APP_URL?.trim() || null;
 
   const [linked, total, recent] = await Promise.all([
     prisma.driver.count({ where: { telegramChatId: { not: null } } }),
@@ -299,6 +300,54 @@ export default async function TelegramSettingsPage({
           </CardContent>
         </Card>
       </form>
+
+      {/* Spec 5.1.4. Registration used to be a `curl` pasted from the
+          deployment guide with a token and a URL in it — and a bot has
+          exactly one webhook, so getting it wrong points another company's
+          drivers at this database. Here the address comes from `APP_URL`
+          rather than from anybody's typing. */}
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle className="text-base">Where Telegram delivers</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4 text-sm">
+          <p className="text-muted-foreground">
+            Each bot has one webhook address. Registering points it at this
+            install — <span className="tabular">{appUrl ?? 'APP_URL is not set'}</span>{' '}
+            — and drops anything Telegram had queued for wherever it pointed before.
+          </p>
+
+          {!appUrl ? (
+            <Alert variant="destructive">
+              <AlertDescription>
+                <code>APP_URL</code> is not set, so there is no address to register.
+                Set it to this install&rsquo;s own URL and redeploy.
+              </AlertDescription>
+            </Alert>
+          ) : null}
+
+          <div className="flex flex-wrap gap-2">
+            <form method="post" action="/api/settings/telegram/webhook">
+              <input type="hidden" name="intent" value="check" />
+              <Button type="submit" variant="outline" size="sm">
+                Check
+              </Button>
+            </form>
+            <form method="post" action="/api/settings/telegram/webhook">
+              <input type="hidden" name="intent" value="register" />
+              <Button type="submit" size="sm" disabled={!appUrl}>
+                Register webhooks
+              </Button>
+            </form>
+          </div>
+
+          <p className="text-xs text-muted-foreground">
+            Never point two installs at one bot. The second registration wins, and
+            from that moment the first company&rsquo;s drivers report into the
+            second&rsquo;s database with nothing anywhere reporting a fault.
+          </p>
+        </CardContent>
+      </Card>
 
       {/* Spec 5.1.7. When a driver says "I pressed Arrived", this is the only
           place that can say whether the tap ever reached us. */}

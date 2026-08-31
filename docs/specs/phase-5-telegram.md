@@ -14,7 +14,9 @@
 1. Two bots via @BotFather: an ops bot for drivers and an admin bot for staff
 2. Tokens in env, never in the repo
 3. `POST /api/telegram/webhook` verifies `X-Telegram-Bot-Api-Secret-Token` against `TELEGRAM_WEBHOOK_SECRET` and rejects mismatches with 401 **before parsing the body**
-4. Webhook registered at deploy time via a setup script, not by hand
+4. Webhook registered at deploy time via a setup script, not by hand —
+   `scripts/register-webhook.ts`, or the button in Settings → Telegram. Both
+   derive the address from `APP_URL` and confirm it afterwards
 5. Always responds 200 within 5 seconds; slow work is queued
 6. grammY in webhook mode; polling is not used in production
 7. Every inbound update is logged with chat id, type and outcome

@@ -325,11 +325,15 @@ For each install:
       what the driver and staff links are built from; without them the
       buttons that issue those links are disabled
 - [ ] `TELEGRAM_WEBHOOK_SECRET` generated fresh, per install
-- [ ] The webhook registered against **this install's** address:
+- [ ] The webhook registered against **this install's** address — either
+      **Settings → Telegram → Register webhooks**, or:
 
-      curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" \
-        -d "url=https://<this-install>/api/telegram/webhook" \
-        -d "secret_token=<TELEGRAM_WEBHOOK_SECRET>"
+      npx tsx scripts/register-webhook.ts
+
+      Both read `APP_URL`, the stored bot tokens and the webhook secret, so
+      there is no address to paste and none to mistype. They also read the
+      registration back afterwards and say whose install each bot is pointed
+      at, because Telegram answering "ok" only means it accepted the call.
 
 - [ ] `npx tsx scripts/verify-install.ts` reports *"webhook points at this
       install"* for every configured bot. It asks Telegram directly and fails
@@ -372,7 +376,7 @@ Roughly an hour, most of it waiting for Vercel.
 | Vercel project, environment variables | Vercel | 10 min |
 | First deploy (runs migrations) | Vercel | 5 min |
 | `npm run setup` — company, locale, admin | Terminal | 5 min |
-| Bot, webhook, secret | @BotFather + curl | 5 min |
+| Bot, webhook, secret | @BotFather, then Settings → Telegram | 5 min |
 | `npx tsx scripts/verify-install.ts` — all green | Terminal | 2 min |
 | Branding — logos and colours | Settings → Branding | 5 min |
 | Import vehicles, drivers, clients | Settings → Import | 10 min |
