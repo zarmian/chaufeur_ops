@@ -393,6 +393,54 @@ matches on the natural key and updates rather than duplicating.
 
 ---
 
+## Dependencies
+
+`npm audit` reports **0 vulnerabilities**, and every dependency is on its
+latest release except three. All three are blocked by the ecosystem rather
+than by choice, so they are recorded here with the evidence — otherwise the
+next person checks `npm outdated`, sees three entries and spends an afternoon
+rediscovering why.
+
+**TypeScript 7.** `typescript-eslint` peer-requires `typescript >=4.8.4
+<6.1.0`, and `eslint-config-next` depends on `typescript-eslint` directly, so
+this cannot be routed around by dropping our own reference to it. Installing
+TypeScript 7 anyway means running the linter in a combination its maintainers
+do not support — and lint here is a real guardrail, not decoration: it is what
+stops a hex colour reaching component code and breaking the white-label
+promise. Revisit when `typescript-eslint` widens the range.
+
+**ESLint 10.** The peer ranges allow it and it does not work. The
+`eslint-plugin-react` bundled inside `eslint-config-next` calls an API ESLint
+10 removed, and linting dies in `getReactVersionFromContext` before reporting
+anything. Revisit when `eslint-config-next` ships a version built against
+ESLint 10.
+
+**Prisma 8.** Only a release candidate exists. Not a blocker so much as a
+date.
+
+### One pinned override
+
+`overrides.deepmerge-ts` pins `^8.0.0`. Versions below 8 carry a
+stack-exhaustion advisory (GHSA-ggr8-5vv4-36mx) and reach this tree only
+through `@prisma/config`, inside the Prisma CLI — a devDependency that never
+runs in a deployment. Prisma has no stable release carrying the fix, so the
+patched version is pinned here instead. The CLI was verified against it:
+`prisma validate`, `prisma migrate status`, `prisma generate`.
+
+Remove the override once Prisma ships a stable version that depends on
+`deepmerge-ts` 8.
+
+### Tailwind
+
+Tailwind 4 is installed and running through `@config`, which points at the
+existing `tailwind.config.ts`. Moving that configuration into CSS `@theme`
+blocks is still to do, and is deliberately its own piece of work: the type
+scale carries per-size tracking and leading, and the brand colours are the
+white-label mechanism, so it needs somebody looking at the screens rather than
+only at a passing build.
+
+---
+
 ## Troubleshooting
 
 **"The application could not start. Nothing has been changed."** — the
