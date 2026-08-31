@@ -127,7 +127,25 @@ test.describe('list search', () => {
       '/jobs?status=NONSENSE',
       '/invoices?status=NONSENSE',
     ]) {
-      await page.goto(url, { waitUntil: 'networkidle' });
+      await page.goto(url);
+
+      /*
+       * Wait for the page's own heading, not for the network to fall quiet.
+       *
+       * `waitUntil: 'networkidle'` timed out against `/invoices` under Next
+       * 16 — the framework keeps a connection open that never settles — and
+       * Playwright discourages the option for exactly that reason. It was
+       * also the weaker assertion: with nothing rendered at all, a check that
+       * the error boundary is *absent* passes for the wrong reason.
+       *
+       * Waiting for the heading proves the list actually rendered, which is
+       * what "does not break the page" was always meant to mean.
+       */
+      await expect(
+        page.getByRole('heading', { level: 1 }),
+        `${url} rendered no heading`,
+      ).toBeVisible();
+
       await expect(
         page.getByText(/Something went wrong/i),
         `${url} fell into the error boundary`,

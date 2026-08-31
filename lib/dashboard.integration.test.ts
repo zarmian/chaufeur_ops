@@ -1,6 +1,8 @@
 import { rawPrismaClient } from './raw-prisma';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { loadDashboard } from './dashboard';
+import { startOfZonedDay } from './dates';
+import { getLocaleConfig } from './locale-store';
 
 /**
  * The dashboard, against a real database — spec 6.6.
@@ -33,13 +35,31 @@ describe.skipIf(!DATABASE_AVAILABLE)('dashboard', () => {
     });
     clientId = client.id;
 
-    // Today, so it lands in every window the tiles look at.
+    /*
+     * Midday in the configured zone, not "two hours from now".
+     *
+     * `now + 2h` was inside today for most of the day and outside it for the
+     * last two hours — and the tile counts a calendar day in the install's
+     * timezone, not a rolling window. CI ran at 21:19 UTC, which is 00:19 in
+     * London under BST, so the fixture landed on *tomorrow* and the tile
+     * correctly reported nothing. The test had been passing for a year by
+     * never running late enough.
+     *
+     * Midday is inside today whatever the hour, and reusing the same
+     * `startOfZonedDay` the dashboard itself uses means the fixture and the
+     * query cannot disagree about where the day starts.
+     */
+    const { timeZone } = await getLocaleConfig();
+    const middayToday = new Date(
+      startOfZonedDay(new Date(), timeZone).getTime() + 12 * 60 * 60 * 1000,
+    );
+
     const job = await raw.job.create({
       data: {
         reference: `DBD-${stamp}`,
         jobType: 'TRANSFER',
         status: 'PENDING',
-        scheduledAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
+        scheduledAt: middayToday,
         pickupText: 'The Dorchester',
         dropoffText: 'Heathrow Terminal 5',
         clientId,
