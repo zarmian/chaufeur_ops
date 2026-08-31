@@ -1,6 +1,14 @@
 import { conflictsForDay } from '../conflict-store';
-import { daysBetweenDates, formatDate, formatDateTime } from '../dates';
+import {
+  daysBetweenDates,
+  endOfZonedDay,
+  formatDate,
+  formatDateTime,
+  startOfZonedDay,
+} from '../dates';
+import { UNPRICED_WHERE } from '../jobs';
 import { getLocaleConfig } from '../locale-store';
+import { formatMoney } from '../money';
 import { prisma } from '../prisma';
 import { getTelegramConfig } from './config';
 import { alertOps } from './dispatch';
@@ -270,4 +278,213 @@ export async function purgeStaleConversations(
     where: { expiresAt: { lt: new Date(now.getTime() - 24 * 60 * 60 * 1000) } },
   });
   return { purged: count };
+}
+
+/**
+ * Invoices past their due date — spec 5.9.3, the one alert in that list that
+ * was never built.
+ *
+ * Money that has been earned and not collected is the thing an operator can
+ * do something about today, and it is also the thing nobody looks at until
+ * somebody asks. The invoices screen shows it; the point of this is that
+ * nobody has to remember to open the invoices screen.
+ *
+ * Only what has genuinely gone past due and is genuinely still owed. A credit
+ * note reverses an invoice without money arriving, so `CREDITED` is not a
+ * debt; `PART_PAID` is, for the remainder.
+ */
+export interface OverdueInvoice {
+  number: string;
+  dueDate: Date;
+  owedPence: number;
+  daysLate: number;
+  /** The booker who gets chased, not the passenger who rode. */
+  who: string;
+}
+
+/**
+ * What is genuinely late and genuinely still owed.
+ *
+ * Separate from the alerting so it can be asked without a bot, and tested
+ * without one — the selection is where this goes wrong in a way nobody
+ * notices, because an overdue list that quietly includes a credit note is a
+ * list somebody chases a client over.
+ *
+ * `CREDITED` is not a debt: a credit note reverses an invoice without money
+ * arriving. `PART_PAID` is, for the remainder.
+ */
+export async function overdueInvoices(
+  now: Date,
+  timeZone: string,
+  take = 20,
+): Promise<OverdueInvoice[]> {
+  const invoices = await prisma.invoice.findMany({
+    where: {
+      // `dueDate` is a date column, so "overdue" means the day has passed —
+      // an invoice due today is not late until tomorrow.
+      dueDate: { lt: startOfZonedDay(now, timeZone) },
+      status: { in: ['SENT', 'PART_PAID', 'OVERDUE'] },
+    },
+    orderBy: { dueDate: 'asc' },
+    select: {
+      number: true,
+      dueDate: true,
+      grossPence: true,
+      paidPence: true,
+      client: { select: { name: true } },
+      account: { select: { name: true } },
+    },
+    take,
+  });
+
+  return invoices
+    .map((invoice) => ({
+      number: invoice.number,
+      dueDate: invoice.dueDate,
+      owedPence: invoice.grossPence - invoice.paidPence,
+      daysLate: daysBetweenDates(invoice.dueDate, now),
+      who: invoice.account?.name ?? invoice.client?.name ?? 'no recipient recorded',
+    }))
+    // An invoice marked SENT but already settled in full is not a debt,
+    // whatever its status column says.
+    .filter((invoice) => invoice.owedPence > 0);
+}
+
+/**
+ * Invoices past their due date — spec 5.9.3, the one alert in that list that
+ * was never built.
+ *
+ * Money earned and not collected is the thing an operator can act on today,
+ * and also the thing nobody looks at until somebody asks. The invoices screen
+ * shows it; the point of this is that nobody has to remember to open it.
+ */
+export async function alertOverdueInvoices(
+  now: Date = new Date(),
+): Promise<{ alerted: number; totalPence: number }> {
+  const config = await getTelegramConfig();
+  if (!config.enabled) return { alerted: 0, totalPence: 0 };
+
+  const locale = await getLocaleConfig();
+  const outstanding = await overdueInvoices(now, locale.timeZone);
+  if (outstanding.length === 0) return { alerted: 0, totalPence: 0 };
+
+  const totalPence = outstanding.reduce((sum, invoice) => sum + invoice.owedPence, 0);
+  const money = (pence: number) =>
+    formatMoney(pence, { currency: locale.currency, locale: locale.locale });
+
+  const lines = outstanding.map(
+    (invoice) =>
+      `${invoice.number} — ${invoice.who} — ${money(invoice.owedPence)}, ${invoice.daysLate} day${invoice.daysLate === 1 ? '' : 's'} late`,
+  );
+
+  await alertOps(
+    `${outstanding.length} overdue invoice${outstanding.length === 1 ? '' : 's'}, ${money(totalPence)} outstanding:\n${lines.join('\n')}`,
+  );
+
+  return { alerted: outstanding.length, totalPence };
+}
+
+/**
+ * One message at the start of the day — the state of it, in a phone.
+ *
+ * Everything in here is already answerable: `/today` lists the jobs,
+ * `/unassigned` the gaps, `/unpriced` the money not yet asked for. The
+ * difference is that this arrives without anyone asking, at the hour when
+ * acting on it is still cheap. A job with no driver at six in the morning is
+ * a phone call; the same job at nine is a client ringing to ask where the car
+ * is.
+ *
+ * Deliberately counts rather than lists, except for the gaps. A digest long
+ * enough to scroll is a digest nobody reads to the end of, and the end is
+ * where the unassigned jobs would be.
+ */
+export interface DigestFacts {
+  total: number;
+  withoutDriver: Array<{ reference: string; scheduledAt: Date; pickupText: string }>;
+  unpriced: number;
+}
+
+/** The state of today, as numbers. Asked without a bot, and tested without one. */
+export async function digestFacts(now: Date, timeZone: string): Promise<DigestFacts> {
+  const from = startOfZonedDay(now, timeZone);
+  const to = endOfZonedDay(now, timeZone);
+
+  const [jobs, unpriced] = await Promise.all([
+    prisma.job.findMany({
+      where: { scheduledAt: { gte: from, lt: to }, status: { notIn: ['CANCELLED'] } },
+      orderBy: { scheduledAt: 'asc' },
+      select: {
+        reference: true,
+        scheduledAt: true,
+        pickupText: true,
+        driverId: true,
+      },
+    }),
+    prisma.job.count({
+      where: {
+        ...UNPRICED_WHERE,
+        scheduledAt: { gte: from, lt: to },
+        status: { notIn: ['CANCELLED', 'DRAFT'] },
+      },
+    }),
+  ]);
+
+  return {
+    total: jobs.length,
+    withoutDriver: jobs
+      .filter((job) => job.driverId === null)
+      .map(({ reference, scheduledAt, pickupText }) => ({
+        reference,
+        scheduledAt,
+        pickupText,
+      })),
+    unpriced,
+  };
+}
+
+export async function morningDigest(
+  now: Date = new Date(),
+): Promise<{ sent: boolean; jobs: number; unassigned: number }> {
+  const config = await getTelegramConfig();
+  if (!config.enabled) return { sent: false, jobs: 0, unassigned: 0 };
+
+  const locale = await getLocaleConfig();
+  const facts = await digestFacts(now, locale.timeZone);
+
+  if (facts.total === 0) {
+    await alertOps(`Nothing booked for ${formatDate(now, locale)}.`);
+    return { sent: true, jobs: 0, unassigned: 0 };
+  }
+
+  // Plain text: `alertOps` escapes what it is given, so markdown added here
+  // would reach the chat as literal asterisks and backslashes.
+  const lines = [
+    `${formatDate(now, locale)} — ${facts.total} job${facts.total === 1 ? '' : 's'}`,
+  ];
+
+  if (facts.withoutDriver.length > 0) {
+    lines.push('', `⚠️ ${facts.withoutDriver.length} with no driver:`);
+    for (const job of facts.withoutDriver.slice(0, 10)) {
+      lines.push(
+        `${formatDateTime(job.scheduledAt, {
+          locale: locale.locale,
+          timeZone: locale.timeZone,
+        }).slice(-5)} ${job.reference} — ${job.pickupText}`,
+      );
+    }
+    if (facts.withoutDriver.length > 10) {
+      lines.push(`…and ${facts.withoutDriver.length - 10} more`);
+    }
+  } else {
+    lines.push('', '✅ Every job has a driver.');
+  }
+
+  if (facts.unpriced > 0) {
+    // The number this whole rebuild exists to keep at zero.
+    lines.push('', `⚠️ ${facts.unpriced} with no price.`);
+  }
+
+  await alertOps(lines.join('\n'));
+
+  return { sent: true, jobs: facts.total, unassigned: facts.withoutDriver.length };
 }

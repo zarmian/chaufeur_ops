@@ -4,7 +4,9 @@ import {
   decodeCallback,
   encodeCallback,
   escapeMarkdown,
+  DELAY_CHOICES,
   linkPayload,
+  mapLink,
   nextStep,
   parseAmountFromChat,
   parseStartPayload,
@@ -240,5 +242,74 @@ describe('renderChanges', () => {
 
   it('is empty when nothing changed', () => {
     expect(renderChanges('JOB-000123', [])).toBe('');
+  });
+});
+
+describe('the running-late buttons', () => {
+  it('round-trips a delay through the callback data', () => {
+    for (const minutes of DELAY_CHOICES) {
+      const encoded = encodeCallback({ kind: 'late-eta', jobId: 'job_1', minutes });
+      expect(encoded.length, encoded).toBeLessThanOrEqual(64);
+      expect(decodeCallback(encoded)).toEqual({
+        kind: 'late-eta',
+        jobId: 'job_1',
+        minutes,
+      });
+    }
+  });
+
+  it('round-trips the tap that opens the choices', () => {
+    expect(decodeCallback(encodeCallback({ kind: 'late', jobId: 'job_1' }))).toEqual({
+      kind: 'late',
+      jobId: 'job_1',
+    });
+  });
+
+  it('refuses a delay that was never offered', () => {
+    /*
+     * Callback data is whatever the client sends. An unoffered number would
+     * otherwise be recorded as the driver's own estimate and alerted to ops as
+     * fact — "7 hours late" from a tampered button, or from a keyboard left
+     * over from a build with different choices.
+     */
+    expect(decodeCallback('late:job_1:7')).toBeNull();
+    expect(decodeCallback('late:job_1:999')).toBeNull();
+    expect(decodeCallback('late:job_1:abc')).toBeNull();
+    expect(decodeCallback('late:job_1:-5')).toBeNull();
+  });
+
+  it('fits a real cuid inside Telegram’s 64 bytes', () => {
+    const cuid = 'cmsxky07w008e7d6lqth1kmkx';
+    expect(encodeCallback({ kind: 'late', jobId: cuid }).length).toBeLessThanOrEqual(64);
+    expect(
+      encodeCallback({ kind: 'late-eta', jobId: cuid, minutes: 45 }).length,
+    ).toBeLessThanOrEqual(64);
+  });
+});
+
+describe('the map link', () => {
+  it('prefers coordinates', () => {
+    // A postcode drops a pin at the centre of a delivery area, and an airport
+    // terminal is nowhere near where its postcode says.
+    expect(mapLink({ lat: 51.47, lng: -0.4543, postcode: 'TW6 1AP', text: 'Heathrow T5' }))
+      .toBe('https://www.google.com/maps/search/?api=1&query=51.47,-0.4543');
+  });
+
+  it('falls back to the address and postcode together', () => {
+    expect(mapLink({ text: 'The Dorchester', postcode: 'W1K 1QA' })).toBe(
+      'https://www.google.com/maps/search/?api=1&query=The%20Dorchester%20W1K%201QA',
+    );
+  });
+
+  it('ignores half a coordinate pair', () => {
+    // A latitude with no longitude is not a place.
+    expect(mapLink({ lat: 51.47, lng: null, text: 'Heathrow' })).toBe(
+      'https://www.google.com/maps/search/?api=1&query=Heathrow',
+    );
+  });
+
+  it('is null when there is nowhere to point at', () => {
+    expect(mapLink({})).toBeNull();
+    expect(mapLink({ text: '   ' })).toBeNull();
   });
 });

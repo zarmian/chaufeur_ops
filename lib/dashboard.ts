@@ -82,13 +82,13 @@ export async function loadDashboard(options: {
   ] = await Promise.all([
     prisma.job.count({
       where: {
-        scheduledAt: { gte: todayFrom, lte: todayTo },
+        scheduledAt: { gte: todayFrom, lt: todayTo },
         status: { notIn: ['CANCELLED'] },
       },
     }),
     prisma.job.count({
       where: {
-        scheduledAt: { gte: todayFrom, lte: weekTo },
+        scheduledAt: { gte: todayFrom, lt: weekTo },
         status: { notIn: ['CANCELLED'] },
       },
     }),

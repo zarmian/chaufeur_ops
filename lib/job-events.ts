@@ -26,6 +26,7 @@ export const EVENT_LABELS: Record<JobEventType, string> = {
   NO_SHOW: 'Recorded as a no-show',
   EDITED: 'Details edited',
   PRICE_SET: 'Price set',
+  DELAYED: 'Driver reported a delay',
 };
 
 export interface JobEventRecord {

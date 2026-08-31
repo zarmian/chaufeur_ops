@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { apiError, isAuthorisedCronRequest } from '@/lib/api';
 import {
+  alertOverdueInvoices,
   alertUnansweredAssignments,
   alertUnassignedJobs,
   chaseExpiringDocuments,
@@ -12,9 +13,10 @@ import {
 /**
  * `GET /api/cron/telegram` — the bot's scheduled work.
  *
- * One route rather than four, because all four are cheap, none of them
+ * One route rather than several, because each step is cheap, none of them
  * matters to the minute, and a single Vercel Cron entry is one less thing to
- * get wrong at deploy time.
+ * get wrong at deploy time. The morning digest is the exception and has its
+ * own entry: the whole point of it is the hour it arrives.
  *
  * Each step is independent and none may stop the others: a failure to chase
  * documents must not leave position pings unpurged, which is a privacy
@@ -28,15 +30,23 @@ export async function GET(request: Request) {
     return apiError('UNAUTHENTICATED', 'Missing or invalid cron credentials');
   }
 
-  const [documents, unassigned, unanswered, clashes, positions, conversations] =
-    await Promise.allSettled([
-      chaseExpiringDocuments(),
-      alertUnassignedJobs(),
-      alertUnansweredAssignments(),
-      digestTomorrowsConflicts(),
-      purgeOldPositions(),
-      purgeStaleConversations(),
-    ]);
+  const [
+    documents,
+    unassigned,
+    unanswered,
+    clashes,
+    overdue,
+    positions,
+    conversations,
+  ] = await Promise.allSettled([
+    chaseExpiringDocuments(),
+    alertUnassignedJobs(),
+    alertUnansweredAssignments(),
+    digestTomorrowsConflicts(),
+    alertOverdueInvoices(),
+    purgeOldPositions(),
+    purgeStaleConversations(),
+  ]);
 
   return NextResponse.json({
     ok: true,
@@ -44,6 +54,7 @@ export async function GET(request: Request) {
     unassigned: settled(unassigned),
     unanswered: settled(unanswered),
     clashes: settled(clashes),
+    overdue: settled(overdue),
     positions: settled(positions),
     conversations: settled(conversations),
     ranAt: new Date().toISOString(),

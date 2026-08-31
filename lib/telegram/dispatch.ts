@@ -7,9 +7,11 @@ import { issueNameBoardToken } from '../name-board-store';
 import { prisma } from '../prisma';
 import { getTelegramConfig } from './config';
 import {
+  DELAY_CHOICES,
   DRIVER_STEPS,
   encodeCallback,
   escapeMarkdown,
+  mapLink,
   nextStep,
   renderBrief,
   renderChanges,
@@ -40,8 +42,12 @@ async function briefFor(jobId: string) {
       reference: true,
       scheduledAt: true,
       pickupText: true,
+      pickupPostcode: true,
+      pickupLat: true,
+      pickupLng: true,
       dropoffText: true,
       passengerName: true,
+      passengerPhone: true,
       flightNumber: true,
       jobType: true,
       nameBoardToken: true,
@@ -70,6 +76,18 @@ async function briefFor(jobId: string) {
       dropoff: job.dropoffText,
       // The passenger, not the client: the name that matters at the kerb.
       passenger: job.passengerName ?? job.client?.name ?? null,
+      /*
+       * The passenger's number, when the job carries one.
+       *
+       * Plain text rather than a button: Telegram makes a phone number in
+       * message text tappable by itself, and an inline keyboard cannot hold a
+       * `tel:` URL — it rejects the whole keyboard, so the card would fail to
+       * send rather than arrive one button short.
+       *
+       * The alternative is the driver ringing the office to be given a number
+       * the office reads off the same screen this message came from.
+       */
+      passengerPhone: job.passengerPhone,
       vehicle: job.vehicle
         ? `${job.vehicle.registration} — ${job.vehicle.make} ${job.vehicle.model}`
         : null,
@@ -112,7 +130,12 @@ async function briefFor(jobId: string) {
 export function keyboardFor(
   jobId: string,
   recorded: readonly string[],
-  options: { awaitingAcceptance: boolean; statusOpen: boolean },
+  options: {
+    awaitingAcceptance: boolean;
+    statusOpen: boolean;
+    /** Opens the pickup in the driver's maps app, when the job has a where. */
+    navigateUrl?: string | null;
+  },
 ): InlineButton[][] {
   if (options.awaitingAcceptance) {
     return [
@@ -125,17 +148,70 @@ export function keyboardFor(
 
   if (!options.statusOpen) return [];
 
+  const rows: InlineButton[][] = [];
   const step = nextStep(recorded);
-  if (!step) return [];
 
-  return [
-    [
+  if (step) {
+    rows.push([
       {
         text: STEP_LABELS[step],
         callbackData: encodeCallback({ kind: 'step', jobId, step }),
       },
-    ],
-  ];
+    ]);
+  }
+
+  /*
+   * Navigate and Running late, on their own row under the status button.
+   *
+   * Not beside it: the status button is the one that must never be hit by
+   * accident, because the sequence is what makes the wait-time arithmetic
+   * mean anything, and a thumb reaching for "Navigate" on a phone in a
+   * cradle should not be able to land on "Passenger on board".
+   *
+   * Running late is offered only while the job is still running. Once the
+   * passenger is aboard, lateness is a fact about a journey in progress and
+   * there is nobody left waiting to be told.
+   */
+  const secondary: InlineButton[] = [];
+  if (options.navigateUrl) {
+    secondary.push({ text: '🧭 Navigate', url: options.navigateUrl });
+  }
+  if (step && !recorded.includes('POB')) {
+    secondary.push({
+      text: '⏱ Running late',
+      callbackData: encodeCallback({ kind: 'late', jobId }),
+    });
+  }
+  if (secondary.length > 0) rows.push(secondary);
+
+  return rows;
+}
+
+/** Where the pickup is, for the maps button. */
+function navigateUrlFor(job: {
+  pickupLat: number | null;
+  pickupLng: number | null;
+  pickupPostcode: string | null;
+  pickupText: string;
+}): string | null {
+  return mapLink({
+    lat: job.pickupLat,
+    lng: job.pickupLng,
+    postcode: job.pickupPostcode,
+    text: job.pickupText,
+  });
+}
+
+/** The delay choices, as a keyboard. */
+export function delayKeyboard(jobId: string): InlineButton[][] {
+  const buttons = DELAY_CHOICES.map((minutes) => ({
+    text: `${minutes} min`,
+    callbackData: encodeCallback({ kind: 'late-eta', jobId, minutes }),
+  }));
+
+  // Three to a row: six in a line is unreadable on a phone, and one per row
+  // is a scroll.
+  return [buttons.slice(0, 3), buttons.slice(3)];
 }
 
 /**
@@ -186,6 +262,7 @@ export async function sendAssignment(jobId: string): Promise<void> {
     buttons: keyboardFor(jobId, recorded, {
       awaitingAcceptance: config.requireAcceptance && !recorded.includes('ACCEPTED'),
       statusOpen: statusKeyboardOpen(job.scheduledAt),
+      navigateUrl: navigateUrlFor(job),
     }),
   });
 
@@ -226,6 +303,7 @@ export async function refreshJobMessage(jobId: string): Promise<void> {
       : keyboardFor(jobId, recorded, {
           awaitingAcceptance: false,
           statusOpen: statusKeyboardOpen(job.scheduledAt),
+          navigateUrl: navigateUrlFor(job),
         }),
   });
 }

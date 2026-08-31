@@ -7,7 +7,8 @@ import {
   handleReceiptPhoto,
   setExpenseKind,
 } from './expenses';
-import { alertOps, refreshJobMessage } from './dispatch';
+import { alertOps, delayKeyboard, refreshJobMessage } from './dispatch';
+import { reportDelay } from './delays';
 import { applyStep } from './driver-steps';
 import { driverForChat, redeemLinkToken, unlinkChat } from './linking';
 import {
@@ -285,6 +286,30 @@ async function handleCallback(
     };
   }
 
+  if (callback.kind === 'late') {
+    /*
+     * A second keyboard rather than a question.
+     *
+     * Sent as its own message, not an edit of the job card: the card is the
+     * thing the driver navigates from, and replacing its buttons with six
+     * delay choices takes the status button away at the moment they most
+     * need it.
+     */
+    await answerCallback(queryId, 'How far behind?');
+    await sendMessage(
+      chatId,
+      escapeMarkdown('How late do you expect to be?'),
+      { buttons: delayKeyboard(callback.jobId) },
+    );
+    return { kind: 'late', outcome: 'asked how late' };
+  }
+
+  if (callback.kind === 'late-eta') {
+    const outcome = await reportDelay(callback.jobId, driver.id, callback.minutes);
+    await answerCallback(queryId, outcome.message, { alert: !outcome.recorded });
+    return { kind: 'late-eta', outcome: outcome.outcome };
+  }
+
   if (callback.kind === 'expense-kind') {
     const result = await setExpenseKind(
       chatId,
@@ -450,6 +475,8 @@ function helpText(): string {
     escapeMarkdown('/unlink — disconnect this chat'),
     '',
     escapeMarkdown('Tap the buttons on a job to report where you are.'),
+    escapeMarkdown('Running late opens a set of times — two taps and the office knows.'),
+    escapeMarkdown('Navigate opens the pickup in your maps app.'),
     escapeMarkdown('Send a photo of a receipt and I will attach it to the job.'),
     escapeMarkdown('Anything else you type goes straight to the office.'),
   ].join('\n');

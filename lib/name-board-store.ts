@@ -127,7 +127,7 @@ export async function nameBoardsForDay(day: Date): Promise<NameBoard[]> {
       jobType: 'AIRPORT_TRANSFER',
       scheduledAt: {
         gte: startOfZonedDay(day, timeZone),
-        lte: endOfZonedDay(day, timeZone),
+        lt: endOfZonedDay(day, timeZone),
       },
       status: { notIn: ['CANCELLED'] },
       // A board is the name. Without one there is nothing to print, and a

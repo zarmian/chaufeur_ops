@@ -25,10 +25,17 @@ export interface SendResult {
   error?: string;
 }
 
-export interface InlineButton {
-  text: string;
-  callbackData: string;
-}
+/**
+ * A button under a message.
+ *
+ * Either a callback — a tap that comes back to the webhook — or a link that
+ * opens in the driver's phone. Never both: Telegram rejects the entire
+ * keyboard if a button carries both, and a rejected keyboard means the job
+ * card fails to send rather than arriving with one button missing.
+ */
+export type InlineButton =
+  | { text: string; callbackData: string; url?: undefined }
+  | { text: string; url: string; callbackData?: undefined };
 
 export interface SendOptions {
   bot?: BotName;
@@ -70,10 +77,11 @@ export async function sendMessage(
       ? {
           reply_markup: {
             inline_keyboard: options.buttons.map((row) =>
-              row.map((button) => ({
-                text: button.text,
-                callback_data: button.callbackData,
-              })),
+              row.map((button) =>
+                button.url
+                  ? { text: button.text, url: button.url }
+                  : { text: button.text, callback_data: button.callbackData },
+              ),
             ),
           },
         }

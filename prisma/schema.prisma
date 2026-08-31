@@ -66,6 +66,13 @@ enum JobEventType {
   NO_SHOW
   EDITED
   PRICE_SET
+  /// The driver said they would be late, and by how long.
+  ///
+  /// An event rather than a chat message, for the same reason wait time is
+  /// computed from ARRIVED and POB rather than typed: a message scrolls away
+  /// and cannot answer "when did we know?" three weeks later, when a client
+  /// is disputing a late arrival.
+  DELAYED
 }
 
 enum ActorType {

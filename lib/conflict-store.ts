@@ -204,7 +204,7 @@ export async function conflictsForDay(
       status: { notIn: ['CANCELLED', 'COMPLETED', 'NO_SHOW'] },
       scheduledAt: {
         gte: new Date(from.getTime() - LOOKBACK_HOURS * 60 * 60 * 1000),
-        lte: to,
+        lt: to,
       },
       OR: [{ driverId: { not: null } }, { vehicleId: { not: null } }],
     },

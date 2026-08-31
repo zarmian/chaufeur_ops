@@ -154,7 +154,7 @@ export async function loadDispatchDay(
       where: {
         scheduledAt: {
           gte: new Date(from.getTime() - 12 * 60 * 60 * 1000),
-          lte: to,
+          lt: to,
         },
         status: { notIn: ['CANCELLED'] },
       },
@@ -416,7 +416,7 @@ export async function loadDispatchRange(
         // of thing this board exists to surface.
         scheduledAt: {
           gte: new Date(from.getTime() - 12 * 60 * 60 * 1000),
-          lte: to,
+          lt: to,
         },
         status: { notIn: ['CANCELLED'] },
       },

@@ -90,8 +90,19 @@ export type Callback =
   | { kind: 'accept'; jobId: string }
   | { kind: 'decline'; jobId: string }
   | { kind: 'step'; jobId: string; step: DriverStep }
+  | { kind: 'late'; jobId: string }
+  | { kind: 'late-eta'; jobId: string; minutes: number }
   | { kind: 'expense-kind'; expenseId: string; expenseKind: string }
   | { kind: 'expense-cancel'; expenseId: string };
+
+/**
+ * How late, offered as buttons rather than asked as a question.
+ *
+ * A driver reporting a delay is a driver in traffic. Anything that needs
+ * typing gets done at the next red light or not at all, and "I'll do it in a
+ * minute" is how the office finds out from the client instead.
+ */
+export const DELAY_CHOICES = [5, 10, 15, 20, 30, 45] as const;
 
 export function encodeCallback(callback: Callback): string {
   switch (callback.kind) {
@@ -101,6 +112,10 @@ export function encodeCallback(callback: Callback): string {
       return `job:${callback.jobId}:decline`;
     case 'step':
       return `job:${callback.jobId}:${callback.step.toLowerCase()}`;
+    case 'late':
+      return `job:${callback.jobId}:late`;
+    case 'late-eta':
+      return `late:${callback.jobId}:${callback.minutes}`;
     case 'expense-kind':
       return `exp:${callback.expenseId}:${callback.expenseKind.toLowerCase()}`;
     case 'expense-cancel':
@@ -122,8 +137,18 @@ export function decodeCallback(data: string): Callback | null {
   if (prefix === 'job') {
     if (verb === 'accept') return { kind: 'accept', jobId: id };
     if (verb === 'decline') return { kind: 'decline', jobId: id };
+    if (verb === 'late') return { kind: 'late', jobId: id };
     const step = STEP_BY_VERB.get(verb);
     return step ? { kind: 'step', jobId: id, step } : null;
+  }
+
+  if (prefix === 'late') {
+    // Only the offered choices. A tap carrying anything else is a button from
+    // a build that no longer exists, or somebody editing callback data.
+    const minutes = Number(verb);
+    return (DELAY_CHOICES as readonly number[]).includes(minutes)
+      ? { kind: 'late-eta', jobId: id, minutes }
+      : null;
   }
 
   if (prefix === 'exp') {
@@ -234,12 +259,50 @@ export function escapeMarkdownUrl(url: string): string {
   return url.replace(/[)\\]/g, (char) => `\\${char}`);
 }
 
+/**
+ * A link that opens the pickup in whatever maps app the driver has.
+ *
+ * Coordinates when the job has them, because a postcode alone drops a pin at
+ * the centre of a delivery area and an airport terminal is not where its
+ * postcode says it is. Falling back to the text is still better than nothing:
+ * the driver otherwise copies the address out of the chat and pastes it into
+ * another app, at the kerb, one-handed.
+ *
+ * `google.com/maps/search` rather than a native scheme — it opens the maps
+ * app on Android and iOS alike, and a browser on anything else, which is the
+ * only behaviour that never dead-ends.
+ */
+export function mapLink(place: {
+  lat?: number | null;
+  lng?: number | null;
+  postcode?: string | null;
+  text?: string | null;
+}): string | null {
+  const { lat, lng } = place;
+  if (typeof lat === 'number' && typeof lng === 'number' && Number.isFinite(lat) && Number.isFinite(lng)) {
+    return `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+  }
+
+  const query = [place.text, place.postcode].filter(Boolean).join(' ').trim();
+  if (query === '') return null;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+}
+
 export interface JobBrief {
   reference: string;
   when: string;
   pickup: string;
   dropoff: string;
   passenger: string | null;
+  /**
+   * Rendered as plain text, not a link.
+   *
+   * Telegram turns a phone number in message text into a tap-to-call on both
+   * platforms by itself. An inline keyboard button cannot carry a `tel:` URL
+   * — Telegram rejects the whole keyboard — so a button here would mean the
+   * job card failing to send at all.
+   */
+  passengerPhone?: string | null;
   vehicle: string | null;
   flightNumber: string | null;
   notes: string | null;
@@ -278,6 +341,7 @@ export function renderBrief(brief: JobBrief): string {
 
   if (brief.flightNumber) lines.push(`✈️ ${escapeMarkdown(brief.flightNumber)}`);
   if (brief.passenger) lines.push(`👤 ${escapeMarkdown(brief.passenger)}`);
+  if (brief.passengerPhone) lines.push(`📞 ${escapeMarkdown(brief.passengerPhone)}`);
   if (brief.vehicle) lines.push(`🚗 ${escapeMarkdown(brief.vehicle)}`);
   if (brief.notes) lines.push(`📝 ${escapeMarkdown(brief.notes)}`);
   if (brief.driverPay) lines.push(`💷 ${escapeMarkdown(brief.driverPay)}`);

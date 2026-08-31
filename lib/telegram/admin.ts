@@ -156,7 +156,7 @@ async function dayView(offset: number): Promise<string> {
 
   const jobs = await prisma.job.findMany({
     where: {
-      scheduledAt: { gte: from, lte: to },
+      scheduledAt: { gte: from, lt: to },
       status: { notIn: ['CANCELLED'] },
     },
     orderBy: { scheduledAt: 'asc' },
