@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { rawPrismaClient } from './raw-prisma';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createCreditNote, createInvoice, markSent, recordPayment } from './invoice-store';
 import { listInvoices } from './invoice-list';
@@ -24,9 +24,7 @@ import { statusFor } from './invoices';
 const DATABASE_AVAILABLE = Boolean(process.env.TEST_DATABASE_URL);
 
 const raw = DATABASE_AVAILABLE
-  ? new PrismaClient({
-      datasources: { db: { url: process.env.TEST_DATABASE_URL } },
-    })
+  ? rawPrismaClient(process.env.TEST_DATABASE_URL)
   : null;
 
 const stamp = String(Date.now()).slice(-7);

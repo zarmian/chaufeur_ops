@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { rawPrismaClient } from './raw-prisma';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { hashPassword } from './password';
 import { createUser, resetPassword, setUserActive, updateUser } from './users';
@@ -15,7 +15,7 @@ import { createUser, resetPassword, setUserActive, updateUser } from './users';
 const DATABASE_AVAILABLE = Boolean(process.env.TEST_DATABASE_URL);
 
 const raw = DATABASE_AVAILABLE
-  ? new PrismaClient({ datasources: { db: { url: process.env.TEST_DATABASE_URL } } })
+  ? rawPrismaClient(process.env.TEST_DATABASE_URL)
   : null;
 
 const stamp = String(Date.now()).slice(-7);

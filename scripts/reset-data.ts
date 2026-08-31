@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { rawPrismaClient } from '../lib/raw-prisma';
 import { previewReset, runReset, type RawClient } from '../lib/reset';
 
 /**
@@ -27,7 +27,7 @@ async function main(): Promise<void> {
     throw new Error('Set DIRECT_URL (preferred) or DATABASE_URL to the database to reset.');
   }
 
-  const prisma = new PrismaClient({ datasources: { db: { url } } });
+  const prisma = rawPrismaClient(url);
   const client = prisma as unknown as RawClient;
 
   try {

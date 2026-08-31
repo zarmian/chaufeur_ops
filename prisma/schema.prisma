@@ -13,10 +13,12 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+  provider = "postgresql"
 }
+
+// The connection strings live in `prisma.config.ts` — Prisma 7 no longer
+// accepts them here. The schema describes the shape of the data; how to reach
+// it is per-install configuration and does not belong in a checked-in file.
 
 // ---------------------------------------------------------------- enums
 

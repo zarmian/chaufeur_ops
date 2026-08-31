@@ -1,4 +1,5 @@
-import { PrismaClient } from '@prisma/client';
+import type { PrismaClient } from '@prisma/client';
+import { rawPrismaClient } from './raw-prisma';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { KEEP, previewReset, runReset, type RawClient } from './reset';
 
@@ -31,11 +32,11 @@ describe.skipIf(!DATABASE_AVAILABLE)('runReset', () => {
   beforeAll(async () => {
     if (!DATABASE_AVAILABLE) return;
 
-    admin = new PrismaClient({ datasources: { db: { url: adminUrl } } });
+    admin = rawPrismaClient(adminUrl);
     await admin.$executeRawUnsafe(`DROP DATABASE IF EXISTS "${SCRATCH}"`);
     await admin.$executeRawUnsafe(`CREATE DATABASE "${SCRATCH}"`);
 
-    scratch = new PrismaClient({ datasources: { db: { url: scratchUrl } } });
+    scratch = rawPrismaClient(scratchUrl);
 
     // Two tables are enough to prove the rule: one named in KEEP and one not.
     // The real schema is not needed and would make this a migration test.

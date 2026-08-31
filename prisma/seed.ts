@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { PrismaClient } from '@prisma/client';
+import { rawPrismaClient } from '../lib/raw-prisma';
 import { INSTALL_COMPLETE_KEY, seedBaseline, ZONES } from '../lib/install';
 import { hashPassword } from '../lib/password';
 import { seedFleet } from './seed-fleet';
@@ -22,7 +22,13 @@ import { seedSampleData } from './seed-phase1';
 
 // The seed client is intentionally unextended: it must be able to see and
 // repair soft-deleted rows.
-const prisma = new PrismaClient();
+/*
+ * Prisma 7 needs a driver adapter; a bare client throws at construction.
+ * `DIRECT_URL` first because these scripts do administrative work — seeding,
+ * first-run setup, preflight checks — and a pooled connection in transaction
+ * mode cannot run all of it.
+ */
+const prisma = rawPrismaClient(process.env.DIRECT_URL || process.env.DATABASE_URL);
 
 async function seedAdmin(): Promise<void> {
   const email = (process.env.SEED_ADMIN_EMAIL ?? 'admin@example.com')

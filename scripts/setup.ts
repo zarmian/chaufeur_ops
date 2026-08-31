@@ -1,6 +1,6 @@
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
-import { PrismaClient } from '@prisma/client';
+import { rawPrismaClient } from '../lib/raw-prisma';
 import { brandingSchema } from '../lib/branding';
 import { completeInstall, isInstallComplete, MIN_PASSWORD_LENGTH } from '../lib/install';
 import { localeSchema } from '../lib/locale-store';
@@ -23,7 +23,13 @@ import { DEFAULT_LOCALE_CONFIG } from '../lib/locale';
 
 // Unextended on purpose: setup must see the database as it really is, before
 // any soft-delete filtering is meaningful.
-const prisma = new PrismaClient();
+/*
+ * Prisma 7 needs a driver adapter; a bare client throws at construction.
+ * `DIRECT_URL` first because these scripts do administrative work — seeding,
+ * first-run setup, preflight checks — and a pooled connection in transaction
+ * mode cannot run all of it.
+ */
+const prisma = rawPrismaClient(process.env.DIRECT_URL || process.env.DATABASE_URL);
 
 /**
  * Interactive at a terminal, scriptable from a pipe.

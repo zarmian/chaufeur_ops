@@ -1,4 +1,5 @@
-import { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { rawPrismaClient } from './raw-prisma';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   DRIVER_REFERENCE_PREFIX,
@@ -23,9 +24,7 @@ import {
 const DATABASE_AVAILABLE = Boolean(process.env.TEST_DATABASE_URL);
 
 const raw = DATABASE_AVAILABLE
-  ? new PrismaClient({
-      datasources: { db: { url: process.env.TEST_DATABASE_URL } },
-    })
+  ? rawPrismaClient(process.env.TEST_DATABASE_URL)
   : null;
 
 describe.skipIf(!DATABASE_AVAILABLE)('driver reference allocation', () => {

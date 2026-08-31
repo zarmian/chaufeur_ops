@@ -169,10 +169,19 @@ export async function renderPdf(
      */
     await page.setJavaScriptEnabled(false);
 
-    // `networkidle0` rather than `load`: the logo is a signed-URL redirect,
-    // and printing before it settles produces an invoice with a broken image
-    // where the letterhead should be.
-    await page.setContent(html, { waitUntil: 'networkidle0', timeout });
+    /*
+     * `load`, which is the event that waits for images.
+     *
+     * This was `networkidle0` until Puppeteer 25 removed that option from
+     * `setContent`. The reason for it still stands — the letterhead logo is a
+     * signed-URL redirect, and printing before it settles produces an invoice
+     * with a broken image where the branding should be — but `load` is the
+     * right answer to that and always was: it fires once every subresource
+     * has finished, images included. `networkidle0` additionally waited half
+     * a second for the network to go quiet, which bought nothing here because
+     * these documents make no requests of their own.
+     */
+    await page.setContent(html, { waitUntil: 'load', timeout });
 
     const pdf = await page.pdf({
       format: 'a4',

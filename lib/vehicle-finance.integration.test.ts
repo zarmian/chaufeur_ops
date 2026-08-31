@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { rawPrismaClient } from './raw-prisma';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { createVehicle, updateVehicle, vehicleSchema } from './vehicles';
 
@@ -19,7 +19,7 @@ import { createVehicle, updateVehicle, vehicleSchema } from './vehicles';
 const DATABASE_AVAILABLE = Boolean(process.env.TEST_DATABASE_URL);
 
 const raw = DATABASE_AVAILABLE
-  ? new PrismaClient({ datasources: { db: { url: process.env.TEST_DATABASE_URL } } })
+  ? rawPrismaClient(process.env.TEST_DATABASE_URL)
   : null;
 
 const audit = { userId: null, ip: null };

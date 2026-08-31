@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { rawPrismaClient } from './raw-prisma';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
 /**
@@ -30,9 +30,7 @@ const { BACKGROUND_THRESHOLD, describeOutcome, getBulkOperation, runBulk } =
 const DATABASE_AVAILABLE = Boolean(process.env.TEST_DATABASE_URL);
 
 const raw = DATABASE_AVAILABLE
-  ? new PrismaClient({
-      datasources: { db: { url: process.env.TEST_DATABASE_URL } },
-    })
+  ? rawPrismaClient(process.env.TEST_DATABASE_URL)
   : null;
 
 const ids = (count: number) =>

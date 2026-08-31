@@ -1,3 +1,4 @@
+import { PrismaPg } from '@prisma/adapter-pg';
 import { Prisma, PrismaClient } from '@prisma/client';
 
 /**
@@ -92,7 +93,17 @@ function modelDelegate(
 }
 
 function buildClient() {
+  /*
+   * Prisma 7 talks to Postgres through a driver adapter rather than its own
+   * bundled query engine, so the connection string is handed to `pg` here
+   * instead of being read from the schema.
+   *
+   * `DATABASE_URL` and not `DIRECT_URL`: the application wants the pooled
+   * endpoint. `DIRECT_URL` exists for migrations, which need a connection
+   * that can run DDL, and `prisma.config.ts` is where that preference lives.
+   */
   const base = new PrismaClient({
+    adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
     log:
       process.env.NODE_ENV === 'development'
         ? ['warn', 'error']

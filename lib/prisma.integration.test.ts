@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { rawPrismaClient } from './raw-prisma';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { includeDeleted, prisma } from './prisma';
 
@@ -17,9 +17,7 @@ const DATABASE_AVAILABLE = Boolean(process.env.TEST_DATABASE_URL);
 
 /** An unextended client, so the tests can see what the extension is hiding. */
 const raw = DATABASE_AVAILABLE
-  ? new PrismaClient({
-      datasources: { db: { url: process.env.TEST_DATABASE_URL } },
-    })
+  ? rawPrismaClient(process.env.TEST_DATABASE_URL)
   : null;
 
 describe.skipIf(!DATABASE_AVAILABLE)('soft delete', () => {

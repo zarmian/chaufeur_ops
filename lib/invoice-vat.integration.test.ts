@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { rawPrismaClient } from './raw-prisma';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { addJobLine, createInvoice, editLines } from './invoice-store';
 import { invoiceDocumentHtml } from './invoice-pdf';
@@ -17,7 +17,7 @@ import { invoiceDocumentHtml } from './invoice-pdf';
 const DATABASE_AVAILABLE = Boolean(process.env.TEST_DATABASE_URL);
 
 const raw = DATABASE_AVAILABLE
-  ? new PrismaClient({ datasources: { db: { url: process.env.TEST_DATABASE_URL } } })
+  ? rawPrismaClient(process.env.TEST_DATABASE_URL)
   : null;
 
 const audit = { userId: null, ip: null };

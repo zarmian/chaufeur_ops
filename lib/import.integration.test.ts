@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { rawPrismaClient } from './raw-prisma';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { normaliseHeader, parseCsv } from './csv';
 import { ENTITY_DEFS, IMPORT_ENTITIES } from './import-schema';
@@ -18,9 +18,7 @@ import { buildErrorReport, buildTemplate, dryRun, runImport } from './import';
 const DATABASE_AVAILABLE = Boolean(process.env.TEST_DATABASE_URL);
 
 const raw = DATABASE_AVAILABLE
-  ? new PrismaClient({
-      datasources: { db: { url: process.env.TEST_DATABASE_URL } },
-    })
+  ? rawPrismaClient(process.env.TEST_DATABASE_URL)
   : null;
 
 const audit = { userId: null, ip: null };

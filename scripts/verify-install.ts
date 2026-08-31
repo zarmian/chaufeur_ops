@@ -11,11 +11,17 @@
  * Exits non-zero if anything is wrong, so it can gate a deploy.
  */
 
-import { PrismaClient } from '@prisma/client';
+import { rawPrismaClient } from '../lib/raw-prisma';
 import { botToken } from '../lib/telegram/config';
 import { webhookOwnership } from '../lib/telegram/webhook-owner';
 
-const prisma = new PrismaClient();
+/*
+ * Prisma 7 needs a driver adapter; a bare client throws at construction.
+ * `DIRECT_URL` first because these scripts do administrative work — seeding,
+ * first-run setup, preflight checks — and a pooled connection in transaction
+ * mode cannot run all of it.
+ */
+const prisma = rawPrismaClient(process.env.DIRECT_URL || process.env.DATABASE_URL);
 
 type Level = 'ok' | 'warn' | 'fail';
 
