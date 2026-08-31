@@ -1,6 +1,17 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/*
+ * Tailwind 4 replaced the three `@tailwind` directives with one import, and
+ * moved configuration into CSS.
+ *
+ * `@config` keeps `tailwind.config.ts` as the source of the theme rather than
+ * translating 181 lines of it into `@theme` blocks in the same change that
+ * upgrades the engine. The type scale in there is not decoration — every size
+ * carries its own tracking and leading — and rewriting it by hand while also
+ * swapping the compiler would leave no way to tell which of the two changed a
+ * screen. Moving it into CSS is worth doing, on its own, with the screens in
+ * front of somebody.
+ */
+@import 'tailwindcss';
+@config '../tailwind.config.ts';
 
 /**
  * The neutral default theme.

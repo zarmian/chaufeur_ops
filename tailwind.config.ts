@@ -9,7 +9,10 @@ import type { Config } from 'tailwindcss';
  * or in component code.
  */
 const config: Config = {
-  darkMode: ['class'],
+  // Tailwind 4 narrowed this: the array form is gone and the strategy is a
+  // plain string. Same behaviour — dark styles apply under a `.dark` class,
+  // which is what `ThemeProvider` toggles.
+  darkMode: 'class',
   content: [
     './app/**/*.{ts,tsx}',
     './components/**/*.{ts,tsx}',
