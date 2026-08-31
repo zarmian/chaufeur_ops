@@ -90,8 +90,28 @@ export function middleware(request: NextRequest) {
     );
   }
 
+  /*
+   * Whether this request actually arrived over TLS.
+   *
+   * `x-forwarded-proto` first, because behind Vercel or any proxy the
+   * connection Next sees is plain HTTP even when the visitor's is not.
+   * Falling back to the URL's own protocol covers running without a proxy.
+   *
+   * Two directives hang off this — `upgrade-insecure-requests` and HSTS — and
+   * both are wrong on an HTTP deployment. Keying them on `NODE_ENV` instead
+   * is what broke CI: a production build served over http upgraded every
+   * `fetch` to https and they all failed to connect.
+   */
+  const secure =
+    (request.headers.get('x-forwarded-proto') ?? request.nextUrl.protocol).startsWith(
+      'https',
+    );
+
   const nonce = createNonce();
-  const csp = contentSecurityPolicy(nonce, { development: isDevelopment });
+  const csp = contentSecurityPolicy(nonce, {
+    development: isDevelopment,
+    secure,
+  });
 
   /*
    * The nonce reaches Next through the *request* headers.
@@ -103,9 +123,7 @@ export function middleware(request: NextRequest) {
    */
   function decorate(response: NextResponse): NextResponse {
     response.headers.set('Content-Security-Policy', csp);
-    for (const [header, value] of Object.entries(
-      staticSecurityHeaders({ development: isDevelopment }),
-    )) {
+    for (const [header, value] of Object.entries(staticSecurityHeaders({ secure }))) {
       response.headers.set(header, value);
     }
     return response;

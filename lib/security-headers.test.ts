@@ -55,11 +55,24 @@ describe('the content security policy', () => {
     expect(policy).toContain("object-src 'none'");
   });
 
-  it('upgrades insecure requests in production only', () => {
-    expect(policy).toContain('upgrade-insecure-requests');
-    expect(contentSecurityPolicy(nonce, { development: true })).not.toContain(
+  it('upgrades insecure requests only when the request came over TLS', () => {
+    /*
+     * Keyed on the request, never on the build. CI caught this within the
+     * hour of the first attempt, which keyed it on `NODE_ENV`: the E2E job
+     * builds for production and serves over `http://127.0.0.1:3000`, so the
+     * directive told the browser to rewrite every `fetch` to `https://`,
+     * where nothing was listening. Four tests died with
+     * `TypeError: Failed to fetch` and 108 passed — the exact shape of a
+     * mistake that reaches an HTTP-only install and reads as a network fault.
+     */
+    expect(contentSecurityPolicy(nonce, { secure: true })).toContain(
       'upgrade-insecure-requests',
     );
+    // A production build served over plain HTTP must not carry it.
+    expect(contentSecurityPolicy(nonce, { secure: false })).not.toContain(
+      'upgrade-insecure-requests',
+    );
+    expect(policy).not.toContain('upgrade-insecure-requests');
   });
 });
 
@@ -93,11 +106,21 @@ describe('the static headers', () => {
     expect(headers['Referrer-Policy']).toBe('strict-origin-when-cross-origin');
   });
 
-  it('sets HSTS in production and not in development', () => {
-    expect(headers['Strict-Transport-Security']).toContain('max-age=31536000');
-    // A stray HSTS entry for localhost is remarkably annoying to clear.
+  it('sets HSTS only on a request that arrived over TLS', () => {
     expect(
-      staticSecurityHeaders({ development: true })['Strict-Transport-Security'],
-    ).toBeUndefined();
+      staticSecurityHeaders({ secure: true })['Strict-Transport-Security'],
+    ).toContain('max-age=31536000');
+    // Browsers ignore it on a plain HTTP response anyway, and a stray HSTS
+    // entry for localhost is remarkably annoying to clear.
+    expect(headers['Strict-Transport-Security']).toBeUndefined();
+  });
+
+  it('sets the framing and sniffing defences regardless of scheme', () => {
+    // These do not depend on TLS, and an http-only install needs them just as
+    // much — more, if anything.
+    for (const set of [staticSecurityHeaders({ secure: true }), headers]) {
+      expect(set['X-Frame-Options']).toBe('DENY');
+      expect(set['X-Content-Type-Options']).toBe('nosniff');
+    }
   });
 });

@@ -48,7 +48,26 @@ export function createNonce(): string {
  */
 export function contentSecurityPolicy(
   nonce: string,
-  { development = false }: { development?: boolean } = {},
+  {
+    development = false,
+    /**
+     * Whether this request actually arrived over HTTPS.
+     *
+     * Decides `upgrade-insecure-requests`, and it has to be the request rather
+     * than the build. That directive tells the browser to rewrite every
+     * `http://` subresource to `https://` — which is right for a deployment
+     * behind TLS and catastrophic for one served over plain HTTP, because the
+     * upgraded request goes to a port with nothing listening on it.
+     *
+     * Keyed on `NODE_ENV` first, and CI caught it within the hour: the E2E
+     * job builds for production and serves over `http://127.0.0.1:3000`, so
+     * every `fetch` from a page turned into `TypeError: Failed to fetch`.
+     * Four tests failed and 108 passed, which is exactly the shape of a
+     * mistake that reaches an http-only install and looks like a network
+     * fault.
+     */
+    secure = false,
+  }: { development?: boolean; secure?: boolean } = {},
 ): string {
   return [
     `default-src 'self'`,
@@ -68,7 +87,7 @@ export function contentSecurityPolicy(
     // The modern half of the clickjacking defence. `X-Frame-Options` below is
     // the half that older browsers understand.
     `frame-ancestors 'none'`,
-    ...(development ? [] : ['upgrade-insecure-requests']),
+    ...(secure ? ['upgrade-insecure-requests'] : []),
   ].join('; ');
 }
 
@@ -80,8 +99,8 @@ export function contentSecurityPolicy(
  * whichever the operator happens to be running.
  */
 export function staticSecurityHeaders({
-  development = false,
-}: { development?: boolean } = {}): Record<string, string> {
+  secure = false,
+}: { secure?: boolean } = {}): Record<string, string> {
   return {
     /*
      * The finding this file exists for.
@@ -110,11 +129,19 @@ export function staticSecurityHeaders({
     // able to reach for them either.
     'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=()',
 
-    // A year, subdomains included. Omitted in development, where the whole
-    // point is that it is not HTTPS — a stray HSTS entry for localhost is
-    // remarkably annoying to clear.
-    ...(development
-      ? {}
-      : { 'Strict-Transport-Security': 'max-age=31536000; includeSubDomains' }),
+    /*
+     * A year, subdomains included — and only on a request that arrived over
+     * HTTPS.
+     *
+     * A browser ignores this header on a plain HTTP response anyway, so
+     * sending it there would be noise rather than danger. Keyed on the
+     * request rather than the build for the same reason as
+     * `upgrade-insecure-requests` above: what matters is how this particular
+     * response is travelling, not how it was compiled. A stray HSTS entry for
+     * localhost is also remarkably annoying to clear.
+     */
+    ...(secure
+      ? { 'Strict-Transport-Security': 'max-age=31536000; includeSubDomains' }
+      : {}),
   };
 }
