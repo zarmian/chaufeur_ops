@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import { Fira_Code, Fira_Sans } from 'next/font/google';
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { ThemeProvider } from '@/components/theme-provider';
 import { brandAssetSrc } from '@/lib/branding';
 import { SURFACE_DARK, SURFACE_LIGHT } from '@/lib/colour';
@@ -89,11 +89,23 @@ export const viewport: Viewport = {
 export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  const [branding, locale, cookieStore] = await Promise.all([
+  const [branding, locale, cookieStore, headerList] = await Promise.all([
     getBranding(),
     getLocaleConfig(),
     cookies(),
+    headers(),
   ]);
+
+  /*
+   * The nonce middleware minted for this response.
+   *
+   * Next stamps its own bootstrap scripts automatically, having read the
+   * policy off the request — but the theme script below is ours, and an
+   * unnonced inline script under `strict-dynamic` does not run. When it does
+   * not run the page still renders, so nothing looks broken until somebody
+   * on `system` gets a white flash on every load.
+   */
+  const nonce = headerList.get('x-nonce') ?? undefined;
 
   // Resolved here so an explicit choice is already on `<html>` in the markup
   // the server sends — there is nothing to correct after hydration, so no
@@ -123,7 +135,23 @@ export default async function RootLayout({
           inline, because a deferred script runs after the first paint and the
           page would flash the wrong theme on every single load.
         */}
-        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+        {/*
+          `suppressHydrationWarning` for the nonce, not for the script.
+
+          Browsers deliberately hide the `nonce` content attribute from the
+          DOM — `getAttribute('nonce')` comes back empty — because otherwise a
+          CSS attribute selector could read it out and an injected script
+          could then wear it. React compares the server's markup against that
+          emptied attribute, sees a difference and warns on every page load.
+
+          The mismatch is the defence working. Suppressed here, on this one
+          element, rather than papered over somewhere broader.
+        */}
+        <script
+          nonce={nonce}
+          suppressHydrationWarning
+          dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }}
+        />
         {themeCss ? (
           <style
             id="brand-theme"

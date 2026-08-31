@@ -67,6 +67,22 @@ export const CAPABILITIES = {
 
   viewJobs: ['ADMIN', 'OPS', 'ACCOUNTS', 'VIEWER'],
   viewInvoices: ['ADMIN', 'OPS', 'ACCOUNTS', 'VIEWER'],
+
+  /**
+   * Opening a driver's identity documents — licence, PHV badge, DBS check.
+   *
+   * Separate from `viewJobs`, which every role holds, because these are a
+   * different kind of thing from a pickup address. A DBS certificate carries
+   * a criminal-records disclosure; a DVLA licence carries a date of birth and
+   * an address. "Read-only throughout" was never meant to mean a temporary
+   * account for an outside bookkeeper can download two hundred drivers'
+   * personal papers.
+   *
+   * Vehicle paperwork — MOT, insurance, V5 — stays on `viewJobs`. It is
+   * commercial information about a car, not personal information about a
+   * person, and dispatch reads it constantly.
+   */
+  viewDriverDocuments: ['ADMIN', 'OPS', 'ACCOUNTS'],
 } as const satisfies Record<string, readonly UserRole[]>;
 
 export type Capability = keyof typeof CAPABILITIES;

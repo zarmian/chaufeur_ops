@@ -4,6 +4,7 @@ import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { signInWithCredentials, signOut } from '@/lib/auth';
+import { safeInternalPath } from '@/lib/safe-path';
 import {
   clientIpFrom,
   LOGIN_MAX_ATTEMPTS,
@@ -66,11 +67,4 @@ export async function loginAction(
 export async function signOutAction(): Promise<void> {
   await signOut();
   redirect('/login');
-}
-
-function safeInternalPath(candidate: string | undefined): string {
-  if (!candidate) return '/';
-  if (!candidate.startsWith('/')) return '/';
-  if (candidate.startsWith('//')) return '/';
-  return candidate;
 }

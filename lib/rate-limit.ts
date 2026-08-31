@@ -13,6 +13,23 @@ import { prisma } from './prisma';
 export const LOGIN_MAX_ATTEMPTS = 5;
 export const LOGIN_WINDOW_MINUTES = 15;
 
+/**
+ * The same budget again, per account rather than per address.
+ *
+ * The per-IP limit alone was demonstrably not a limit. Rotating the
+ * `X-Forwarded-For` header — which a client sends and this process cannot
+ * verify — produced a fresh budget on every request: seven attempts against
+ * one account, never once throttled. A botnet gets the same for free without
+ * forging anything.
+ *
+ * Higher than the per-IP figure on purpose. A whole office signs in from one
+ * address, so five failures per IP is generous for one person and tight for
+ * twenty; five failures against **one account** is already somebody guessing.
+ * Ten is the compromise: an operator who has genuinely forgotten their
+ * password gets several honest tries, and a spray does not.
+ */
+export const ACCOUNT_MAX_ATTEMPTS = 10;
+
 export interface RateLimitResult {
   allowed: boolean;
   remaining: number;
@@ -23,12 +40,49 @@ function windowStart(): Date {
   return new Date(Date.now() - LOGIN_WINDOW_MINUTES * 60_000);
 }
 
-/** Read the client IP from proxy headers, falling back to a stable unknown key. */
+/**
+ * How many proxies sit between the internet and this process.
+ *
+ * One by default, which is Vercel and most single-proxy deployments. Raise it
+ * only to match a topology you actually run — every extra hop is one more
+ * entry an attacker gets to write.
+ */
+function trustedProxyHops(): number {
+  const configured = Number(process.env.TRUSTED_PROXY_HOPS ?? 1);
+  return Number.isFinite(configured) && configured >= 1 ? Math.floor(configured) : 1;
+}
+
+/**
+ * The client's address, taken from the end of the chain rather than the start.
+ *
+ * `X-Forwarded-For` is appended left to right, so the **rightmost** entry is
+ * the one the nearest trusted proxy wrote and the leftmost is whatever the
+ * client claimed. Reading the first entry — which this did — meant the value
+ * the throttle keyed on was chosen by the person being throttled. That was
+ * not theoretical: rotating it defeated the login limit completely in
+ * testing.
+ *
+ * With one trusted proxy the last entry is the real peer address and a client
+ * cannot influence it, because anything they send gets another entry appended
+ * after it.
+ *
+ * `x-real-ip` is a fallback, not a preference: nginx sets it deliberately,
+ * but so can anybody when no proxy overwrites it.
+ */
 export function clientIpFrom(headers: Headers): string {
   const forwarded = headers.get('x-forwarded-for');
   if (forwarded) {
-    const first = forwarded.split(',')[0]?.trim();
-    if (first) return first;
+    const chain = forwarded
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry !== '');
+
+    if (chain.length > 0) {
+      // Counting back from the end: hop 1 is the last entry.
+      const index = Math.max(0, chain.length - trustedProxyHops());
+      const address = chain[index];
+      if (address) return address;
+    }
   }
   return headers.get('x-real-ip')?.trim() || 'unknown';
 }
@@ -60,6 +114,43 @@ export async function checkLoginRateLimit(ip: string): Promise<RateLimitResult> 
   };
 }
 
+/**
+ * The same window, counted against one account.
+ *
+ * Keyed on the email as typed-and-lowercased, so it applies to accounts that
+ * do not exist too. Not doing that would turn the limiter into the
+ * enumeration oracle the login page is carefully not: "throttled after ten"
+ * would mean the address is real, "never throttled" would mean it is not.
+ */
+export async function checkAccountRateLimit(
+  email: string,
+): Promise<RateLimitResult> {
+  const since = windowStart();
+
+  const failures = await prisma.loginAttempt.findMany({
+    where: { email: email.toLowerCase(), successful: false, attemptedAt: { gte: since } },
+    orderBy: { attemptedAt: 'asc' },
+    select: { attemptedAt: true },
+    take: ACCOUNT_MAX_ATTEMPTS + 1,
+  });
+
+  if (failures.length < ACCOUNT_MAX_ATTEMPTS) {
+    return {
+      allowed: true,
+      remaining: ACCOUNT_MAX_ATTEMPTS - failures.length,
+      retryAfterSeconds: 0,
+    };
+  }
+
+  const oldest = failures[0]!.attemptedAt;
+  const unlocksAt = oldest.getTime() + LOGIN_WINDOW_MINUTES * 60_000;
+  return {
+    allowed: false,
+    remaining: 0,
+    retryAfterSeconds: Math.max(1, Math.ceil((unlocksAt - Date.now()) / 1000)),
+  };
+}
+
 export async function recordLoginAttempt(
   ip: string,
   email: string | null,
@@ -70,9 +161,25 @@ export async function recordLoginAttempt(
   });
 }
 
-/** A successful login clears the IP's failure history. */
-export async function clearLoginFailures(ip: string): Promise<void> {
-  await prisma.loginAttempt.deleteMany({ where: { ip, successful: false } });
+/**
+ * A successful login clears that person's failures, and only theirs.
+ *
+ * It used to clear every failure recorded against the IP, which handed anyone
+ * with a working password a reset button for the whole office: four guesses
+ * at the administrator, one sign-in as themselves, repeat indefinitely. An
+ * insider attack, but the exact insider this system's audit trail exists to
+ * catch.
+ *
+ * Scoped to the address *and* the account, so the operator who mistyped twice
+ * before getting in is still forgiven — which is the behaviour worth keeping.
+ */
+export async function clearLoginFailures(
+  ip: string,
+  email: string,
+): Promise<void> {
+  await prisma.loginAttempt.deleteMany({
+    where: { ip, email: email.toLowerCase(), successful: false },
+  });
 }
 
 /** Housekeeping: drop attempts far outside any window. Called by cron. */

@@ -176,10 +176,42 @@ export function parseCsv(text: string): ParsedCsv {
   return { headers: headers.filter((h) => h !== ''), rows, lineNumbers };
 }
 
-/** Quote a cell only when it needs it, so a plain file stays readable. */
+/**
+ * Characters that make a spreadsheet treat a cell as a formula.
+ *
+ * `=` and `+` are the obvious two. `-` because `-1+1` parses as an
+ * expression. `@` because Excel accepts it as a legacy function prefix. Tab
+ * and carriage return because Excel strips leading whitespace before deciding,
+ * so ` =cmd` is still a formula.
+ */
+const FORMULA_LEAD = /^[=+\-@\t\r]/;
+
+/**
+ * Quote a cell only when it needs it, so a plain file stays readable.
+ *
+ * And defuse anything a spreadsheet would run.
+ *
+ * A CSV is not just data — Excel, LibreOffice and Sheets evaluate a cell
+ * beginning `=`, `+`, `-` or `@` as a formula the moment the file is opened.
+ * Since values here are typed by people (a client name, a job note, an
+ * import error quoting the row that caused it), a name like
+ * `=HYPERLINK("http://…","Click")` becomes a live link in the operator's
+ * spreadsheet, and the DDE variants go further than that.
+ *
+ * The defusing is a leading apostrophe, which every spreadsheet reads as
+ * "treat what follows as text" and does not display. Not stripping the
+ * character: a genuine negative number or an address beginning with a dash is
+ * data somebody needs to see, and quietly editing it would be its own bug.
+ */
 export function toCsvCell(value: string | number | null | undefined): string {
   if (value === null || value === undefined) return '';
-  const text = String(value);
+
+  // Numbers come from the application, not from a text field, and prefixing
+  // them would turn every amount into a string in the operator's spreadsheet.
+  if (typeof value === 'number') return String(value);
+
+  const text = FORMULA_LEAD.test(value) ? `'${value}` : value;
+
   if (/[",\r\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
   return text;
 }

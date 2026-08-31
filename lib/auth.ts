@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { hashPassword, verifyPassword } from './password';
 import { prisma } from './prisma';
 import {
+  checkAccountRateLimit,
   checkLoginRateLimit,
   clearLoginFailures,
   recordLoginAttempt,
@@ -73,6 +74,30 @@ export async function signInWithCredentials(
 
   const { email, password } = parsed.data;
 
+  /*
+   * And again, against the account.
+   *
+   * After parsing, because the email is the key — and before the password is
+   * verified, so a throttled account costs an attacker an argon2id hash they
+   * do not get to make us compute.
+   *
+   * This is the half that survives a rotated `X-Forwarded-For` or a botnet.
+   * The per-IP check above is still worth having: it catches the same person
+   * working through a list of accounts, which the per-account check would
+   * never see.
+   */
+  const accountLimit = await checkAccountRateLimit(email);
+  if (!accountLimit.allowed) {
+    // Recorded, so a sustained spray is visible in the attempt log rather
+    // than silently absorbed.
+    await recordLoginAttempt(context.ip, email, false);
+    return {
+      ok: false,
+      reason: 'rate_limited',
+      retryAfterSeconds: accountLimit.retryAfterSeconds,
+    };
+  }
+
   const user = await prisma.user.findUnique({
     where: { email },
     select: {
@@ -102,7 +127,7 @@ export async function signInWithCredentials(
       data: { lastLoginAt: new Date() },
     }),
     recordLoginAttempt(context.ip, email, true),
-    clearLoginFailures(context.ip),
+    clearLoginFailures(context.ip, email),
   ]);
 
   return {

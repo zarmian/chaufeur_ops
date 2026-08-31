@@ -100,7 +100,9 @@ export async function setupAction(
     };
   }
 
-  await clearLoginFailures(ip);
+  // Scoped to the account just created, now that a success no longer wipes
+  // every failure recorded against the address.
+  await clearLoginFailures(ip, parsed.data.email);
 
   // Sign the new administrator straight in — they have just proved both the
   // token and the password, so a login form here would be ceremony.
