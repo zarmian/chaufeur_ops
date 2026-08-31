@@ -92,6 +92,7 @@ export type Callback =
   | { kind: 'step'; jobId: string; step: DriverStep }
   | { kind: 'late'; jobId: string }
   | { kind: 'late-eta'; jobId: string; minutes: number }
+  | { kind: 'document-type'; documentType: string }
   | { kind: 'expense-kind'; expenseId: string; expenseKind: string }
   | { kind: 'expense-cancel'; expenseId: string };
 
@@ -116,6 +117,10 @@ export function encodeCallback(callback: Callback): string {
       return `job:${callback.jobId}:late`;
     case 'late-eta':
       return `late:${callback.jobId}:${callback.minutes}`;
+    case 'document-type':
+      // The file being filed is held in the conversation, not in the button:
+      // an object key does not fit in 64 bytes beside anything else.
+      return `doc:${callback.documentType}:set`;
     case 'expense-kind':
       return `exp:${callback.expenseId}:${callback.expenseKind.toLowerCase()}`;
     case 'expense-cancel':
@@ -149,6 +154,10 @@ export function decodeCallback(data: string): Callback | null {
     return (DELAY_CHOICES as readonly number[]).includes(minutes)
       ? { kind: 'late-eta', jobId: id, minutes }
       : null;
+  }
+
+  if (prefix === 'doc') {
+    return verb === 'set' ? { kind: 'document-type', documentType: id } : null;
   }
 
   if (prefix === 'exp') {

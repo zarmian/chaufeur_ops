@@ -312,7 +312,14 @@ export async function endConversation(chatId: bigint): Promise<void> {
 }
 
 /** The job a driver is currently on, if any. */
-async function activeJobFor(driverId: string) {
+/**
+ * The job a receipt would belong to.
+ *
+ * Exported so the handler can ask the same question before deciding whether a
+ * photo is a receipt or a compliance document — two flows disagreeing about
+ * what counts as "live" is how a receipt gets filed as a licence.
+ */
+export async function activeJobFor(driverId: string) {
   return prisma.job.findFirst({
     where: { driverId, status: { in: ['ACCEPTED', 'IN_PROGRESS'] } },
     orderBy: { scheduledAt: 'asc' },

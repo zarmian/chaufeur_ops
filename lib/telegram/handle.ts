@@ -1,6 +1,8 @@
 import { prisma } from '../prisma';
 import { getTelegramConfig } from './config';
 import {
+  activeJobFor,
+  beginConversation,
   cancelExpense,
   currentConversation,
   handleExpenseAmount,
@@ -9,6 +11,11 @@ import {
 } from './expenses';
 import { alertOps, delayKeyboard, refreshJobMessage } from './dispatch';
 import { reportDelay } from './delays';
+import {
+  beginDocumentFiling,
+  handleDocumentExpiry,
+  setDocumentType,
+} from './documents';
 import { applyStep } from './driver-steps';
 import { driverForChat, redeemLinkToken, unlinkChat } from './linking';
 import {
@@ -206,6 +213,17 @@ async function handleMessage(
     return { kind: 'jobs', outcome: 'listed' };
   }
 
+  if (/^\/document\b/.test(text) || /^\/documents\b/.test(text)) {
+    await beginConversation(chatId, 'document_photo', {});
+    await sendMessage(
+      chatId,
+      escapeMarkdown(
+        'Send me a photo of the document — licence, badge, insurance, MOT or V5 — and I will file it.',
+      ),
+    );
+    return { kind: 'document', outcome: 'awaiting photo' };
+  }
+
   if (/^\/help\b/.test(text)) {
     await sendMessage(chatId, helpText());
     return { kind: 'help', outcome: 'sent' };
@@ -216,18 +234,57 @@ async function handleMessage(
   }
 
   if (message.photo && message.photo.length > 0) {
-    return handleReceiptPhoto(
-      chatId,
-      driver.id,
-      message.photo,
-      message.caption ?? null,
-    );
+    const waiting = await currentConversation(chatId);
+
+    /*
+     * Three ways a photo arrives, and only one of them is ambiguous.
+     *
+     * Asked for by `/document` — it is a document. Sent during a live job
+     * with nothing pending — it is a receipt, which is what the expense flow
+     * has always assumed and what drivers do most. Sent with no live job —
+     * it used to be refused outright, and that refusal is precisely the dead
+     * end the chasing messages walked drivers into: "send a photo of your
+     * new badge" answered with "I have no live job for you".
+     */
+    if (waiting?.step === 'document_photo') {
+      return beginDocumentFiling(chatId, driver.id, message.photo);
+    }
+
+    if (await activeJobFor(driver.id)) {
+      return handleReceiptPhoto(
+        chatId,
+        driver.id,
+        message.photo,
+        message.caption ?? null,
+      );
+    }
+
+    return beginDocumentFiling(chatId, driver.id, message.photo);
   }
 
   // Mid-conversation: a bare number after a receipt is the amount, not
   // chatter for ops. Checked before the relay, or every answer would be
   // forwarded to the office as well as recorded.
   const conversation = await currentConversation(chatId);
+
+  if (conversation?.step === 'document_expiry' && text !== '') {
+    const { fileKey, sizeBytes, type } = conversation.context as {
+      fileKey?: string;
+      sizeBytes?: number;
+      type?: string;
+    };
+    if (typeof fileKey === 'string' && typeof type === 'string') {
+      return handleDocumentExpiry(
+        chatId,
+        driver.id,
+        fileKey,
+        typeof sizeBytes === 'number' ? sizeBytes : 0,
+        type,
+        text,
+      );
+    }
+  }
+
   if (conversation?.step === 'expense_amount' && text !== '') {
     const expenseId = conversation.context.expenseId;
     if (typeof expenseId === 'string') {
@@ -308,6 +365,33 @@ async function handleCallback(
     const outcome = await reportDelay(callback.jobId, driver.id, callback.minutes);
     await answerCallback(queryId, outcome.message, { alert: !outcome.recorded });
     return { kind: 'late-eta', outcome: outcome.outcome };
+  }
+
+  if (callback.kind === 'document-type') {
+    const waiting = await currentConversation(chatId);
+    const { fileKey, sizeBytes } = (waiting?.context ?? {}) as {
+      fileKey?: string;
+      sizeBytes?: number;
+    };
+
+    if (typeof fileKey !== 'string') {
+      // The conversation expired, so the photo is stored but orphaned. Say so
+      // rather than filing it against a guess.
+      await answerCallback(queryId, 'That has timed out — send the photo again.', {
+        alert: true,
+      });
+      return { kind: 'document-type', outcome: 'no pending document' };
+    }
+
+    const result = await setDocumentType(
+      chatId,
+      driver.id,
+      fileKey,
+      typeof sizeBytes === 'number' ? sizeBytes : 0,
+      callback.documentType,
+    );
+    await answerCallback(queryId, 'Noted.');
+    return result;
   }
 
   if (callback.kind === 'expense-kind') {
@@ -478,6 +562,7 @@ function helpText(): string {
     escapeMarkdown('Running late opens a set of times — two taps and the office knows.'),
     escapeMarkdown('Navigate opens the pickup in your maps app.'),
     escapeMarkdown('Send a photo of a receipt and I will attach it to the job.'),
+    escapeMarkdown('/document — file a licence, badge, insurance, MOT or V5.'),
     escapeMarkdown('Anything else you type goes straight to the office.'),
   ].join('\n');
 }
