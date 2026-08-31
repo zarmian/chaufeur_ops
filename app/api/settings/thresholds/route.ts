@@ -83,7 +83,7 @@ export async function POST(request: Request) {
     query.set(
       'settingsError',
       error instanceof z.ZodError
-        ? (error.errors[0]?.message ?? 'Those values were not accepted')
+        ? (error.issues[0]?.message ?? 'Those values were not accepted')
         : error instanceof Error
           ? error.message.slice(0, 300)
           : 'That could not be saved',

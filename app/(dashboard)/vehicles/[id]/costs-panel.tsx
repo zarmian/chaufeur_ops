@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
-import { formatDate } from '@/lib/dates';
+import { formatDate, toDateOnlyString } from '@/lib/dates';
 import { formatGBP } from '@/lib/money';
 import { COST_KIND_LABELS, STANDING_COST_KINDS } from '@/lib/vehicle-costs';
 
@@ -87,6 +87,18 @@ export function CostsPanel({
   today: string;
 }) {
   const action = `/api/vehicles/${vehicleId}/costs`;
+
+  /*
+   * "Ended" is judged against the day the page was built, not against a clock
+   * read while rendering.
+   *
+   * `today` already arrives as a prop, resolved by the server page in the
+   * install's configured timezone — which is the right authority, since a
+   * standing cost ends on a *date* rather than at an instant. Reading
+   * `Date.now()` here instead compared each row against a slightly later
+   * moment than the one before it, and did it in the browser's zone rather
+   * than the operator's.
+   */
 
   // Not a permission problem and not an error — this car's costs belong to
   // somebody else, so there is nothing to enter and saying why is more use
@@ -303,7 +315,7 @@ export function CostsPanel({
                     {cost.endsOn ? ` to ${formatDate(cost.endsOn)}` : ' · ongoing'}
                   </p>
                 </div>
-                {cost.endsOn && cost.endsOn.getTime() < Date.now() ? (
+                {cost.endsOn && toDateOnlyString(cost.endsOn) < today ? (
                   <Badge variant="secondary">Ended</Badge>
                 ) : null}
                 <span className="tabular whitespace-nowrap text-sm">

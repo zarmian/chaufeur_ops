@@ -165,7 +165,19 @@ export function DispatchBoard({
    * somebody's hand loses the drag and looks like a bug.
    */
   const draggingRef = useRef(false);
-  draggingRef.current = dragging !== null || busy;
+
+  /*
+   * Written in an effect, not during render.
+   *
+   * It used to be assigned inline in the component body, which is a real
+   * violation of React's rules rather than a stylistic preference — a render
+   * may be thrown away or replayed, and a write that happened during one is
+   * not undone. The poll below reads this on a thirty-second timer, so
+   * settling one commit later than the drag starts costs nothing.
+   */
+  useEffect(() => {
+    draggingRef.current = dragging !== null || busy;
+  }, [dragging, busy]);
 
   useEffect(() => {
     if (refreshSeconds <= 0) return;

@@ -94,13 +94,19 @@ function useSettledDelay(active: boolean, delay: number): boolean {
   const [settled, setSettled] = React.useState(false);
 
   React.useEffect(() => {
-    if (!active) {
-      setSettled(false);
-      return;
-    }
+    if (!active) return;
     const timer = window.setTimeout(() => setSettled(true), delay);
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(timer);
+      // Reset on the way out rather than on the way in. Setting state at the
+      // top of an effect makes the reset a second render pass every time the
+      // button goes idle; doing it in cleanup ties it to the transition that
+      // actually ended, which is also when it means something.
+      setSettled(false);
+    };
   }, [active, delay]);
 
-  return settled;
+  // Guarded as well as reset, so a stale `true` cannot show a spinner on a
+  // button that is no longer doing anything.
+  return active && settled;
 }

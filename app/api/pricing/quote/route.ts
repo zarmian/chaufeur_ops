@@ -57,7 +57,7 @@ export const POST = withErrorHandling(async (request: Request): Promise<Response
   if (!parsed.success) {
     return apiError(
       'VALIDATION_FAILED',
-      parsed.error.errors[0]?.message ?? 'That is not a booking',
+      parsed.error.issues[0]?.message ?? 'That is not a booking',
     );
   }
 

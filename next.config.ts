@@ -7,9 +7,14 @@ const nextConfig: NextConfig = {
     // Type errors fail the build. Never set this to true.
     ignoreBuildErrors: false,
   },
-  eslint: {
-    ignoreDuringBuilds: false,
-  },
+  /*
+   * There was an `eslint: { ignoreDuringBuilds: false }` here.
+   *
+   * Next 16 dropped the key — `next build` no longer runs ESLint at all, so
+   * there is nothing left to tell it not to skip. Nothing is lost: CI runs
+   * `npm run lint` as its own step and has since the workflow was written,
+   * which is where a lint failure has always actually stopped a merge.
+   */
   /**
    * Packages Next must not bundle.
    *
