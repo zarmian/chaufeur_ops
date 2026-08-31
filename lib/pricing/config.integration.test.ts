@@ -50,6 +50,20 @@ describe.skipIf(!DATABASE_AVAILABLE)('pricing configuration', () => {
   const zoneIds: string[] = [];
   const locationIds: string[] = [];
 
+  /**
+   * Whichever card held the default before this file promoted one of its own.
+   *
+   * The same trap as `rate-card.integration.test.ts`: creating a default card
+   * demotes the existing one — that is the rule being tested — and `afterAll`
+   * then deletes the card it created, so the database is left with no default
+   * at all. The next run of the suite fails in `telegram.integration.test.ts`,
+   * which needs one, and the failure reads as a Telegram bug.
+   *
+   * Invisible in CI, which seeds fresh every run. It only bites the second
+   * time somebody runs the suite locally.
+   */
+  const displacedDefaults = new Set<string>();
+
   afterAll(async () => {
     if (!raw) return;
     await raw.job.updateMany({
@@ -60,10 +74,29 @@ describe.skipIf(!DATABASE_AVAILABLE)('pricing configuration', () => {
     await raw.rateCard.deleteMany({ where: { id: { in: cardIds } } });
     await raw.location.deleteMany({ where: { id: { in: locationIds } } });
     await raw.zone.deleteMany({ where: { id: { in: zoneIds } } });
+
+    // After this file's own cards are gone, so the restored default is not
+    // demoted again by one of them.
+    if (displacedDefaults.size > 0) {
+      await raw.rateCard.updateMany({
+        where: { id: { in: [...displacedDefaults] } },
+        data: { isDefault: true },
+      });
+    }
+
     await raw.$disconnect();
   });
 
   async function makeCard(name: string, isDefault = false) {
+    if (isDefault) {
+      // Note who is about to be demoted, before it happens.
+      const displaced = await raw!.rateCard.findMany({
+        where: { isDefault: true, id: { notIn: cardIds } },
+        select: { id: true },
+      });
+      for (const card of displaced) displacedDefaults.add(card.id);
+    }
+
     const result = await saveRateCard(
       null,
       {

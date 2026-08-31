@@ -132,6 +132,9 @@ describe.skipIf(!DATABASE_AVAILABLE)('rate card resolution', () => {
     accountId = account.id;
   });
 
+  /** Cards this file took the default flag away from, so it can hand it back. */
+  const displacedDefaults = new Set<string>();
+
   afterAll(async () => {
     if (!raw) return;
     await raw.account.deleteMany({ where: { id: accountId } });
@@ -144,6 +147,16 @@ describe.skipIf(!DATABASE_AVAILABLE)('rate card resolution', () => {
     await raw.setting.deleteMany({
       where: { key: { startsWith: 'pricing.unmatched.' } },
     });
+
+    // After this file's own cards are deleted, not before — otherwise the
+    // restored default would be demoted again on the way out.
+    if (displacedDefaults.size > 0) {
+      await raw.rateCard.updateMany({
+        where: { id: { in: [...displacedDefaults] } },
+        data: { isDefault: true },
+      });
+    }
+
     await raw.$disconnect();
   });
 
@@ -151,15 +164,35 @@ describe.skipIf(!DATABASE_AVAILABLE)('rate card resolution', () => {
   async function suggestOnTestCard(
     query: Parameters<typeof suggestPrice>[0],
   ) {
+    /*
+     * Remember whose default this was, so `afterAll` can give it back.
+     *
+     * It used to read the displaced cards into `previousDefaults` and then
+     * `void` them — the intent was there and the restore was never written.
+     * The effect: this file promoted its own card, demoted the seeded one,
+     * and then deleted its own card on the way out, leaving the database with
+     * **no default rate card at all**. Every later run of the suite then
+     * failed in `telegram.integration.test.ts`, which needs one — a failure
+     * that looks like a Telegram bug and is nothing of the sort.
+     *
+     * CI never saw it because CI seeds a fresh database for every run. It
+     * only bites the second time anybody runs the suite locally, which is
+     * exactly when it is least welcome.
+     */
+    const displaced = await raw!.rateCard.findMany({
+      where: { isDefault: true, id: { not: cardId } },
+      select: { id: true },
+    });
+    for (const card of displaced) displacedDefaults.add(card.id);
+
     await raw!.rateCard.update({
       where: { id: cardId },
       data: { isDefault: true },
     });
-    const previousDefaults = await raw!.rateCard.updateMany({
+    await raw!.rateCard.updateMany({
       where: { isDefault: true, id: { not: cardId } },
       data: { isDefault: false },
     });
-    void previousDefaults;
     return suggestPrice(query);
   }
 
