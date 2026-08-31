@@ -486,6 +486,7 @@ model Driver {
   payouts         DriverPayout[]
   bankTxns        BankTransaction[]
   linkTokens      LinkToken[]
+  jobOffers       JobOffer[]
   engagements     DriverEngagement[]
   shifts          DriverShift[]
   rentals         VehicleRental[]
@@ -823,6 +824,7 @@ model Job {
 
   finance      JobFinance?
   events       JobEvent[]
+  offers       JobOffer[]
   positions    DriverPosition[]
   expenses     JobExpense[]
   stops        JobStop[]
@@ -1539,6 +1541,34 @@ model Setting {
   key       String   @id
   value     Json
   updatedAt DateTime @updatedAt
+}
+
+/// One job put to several drivers at once, first to accept takes it.
+///
+/// A row per driver offered, rather than a list on the job, because each
+/// offer is its own message in its own chat and has to be edited when the job
+/// goes — a driver left holding a live-looking Accept button for a job
+/// somebody else is already driving will tap it.
+model JobOffer {
+  id        String    @id @default(cuid())
+  jobId     String
+  driverId  String
+  /// The message in that driver's chat, so it can be edited when the job goes.
+  messageId Int?
+  sentAt    DateTime  @default(now())
+  /// When this driver's offer stopped being live.
+  closedAt  DateTime?
+  /// `accepted` | `taken` | `declined` | `withdrawn`
+  outcome   String?
+
+  job    Job    @relation(fields: [jobId], references: [id])
+  driver Driver @relation(fields: [driverId], references: [id])
+
+  /// One offer per driver per job. A second send would put two Accept buttons
+  /// in the same chat for the same work.
+  @@unique([jobId, driverId])
+  @@index([jobId])
+  @@index([driverId, closedAt])
 }
 
 model LinkToken {

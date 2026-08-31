@@ -9,8 +9,9 @@ import {
   handleReceiptPhoto,
   setExpenseKind,
 } from './expenses';
-import { alertOps, delayKeyboard, refreshJobMessage } from './dispatch';
+import { alertOps, delayKeyboard, refreshJobMessage, sendAssignment } from './dispatch';
 import { reportDelay } from './delays';
+import { claimJob, closeOtherOffers } from './offers';
 import {
   beginDocumentFiling,
   handleDocumentExpiry,
@@ -343,6 +344,44 @@ async function handleCallback(
     };
   }
 
+  if (callback.kind === 'offer-accept') {
+    const outcome = await claimJob(callback.jobId, driver.id);
+
+    // An alert, not a toast, when it did not work. A driver who has just been
+    // told they have a job at 5am and in fact has not must read that, not
+    // catch it out of the corner of their eye.
+    await answerCallback(queryId, outcome.message, { alert: !outcome.ok });
+
+    /*
+     * The offer message stops being an offer either way.
+     *
+     * A live "I'll take it" button under a job that has gone will be tapped
+     * again — by this driver, next time they scroll past it — and the second
+     * tap turns into a phone call to the office. Editing it away costs one
+     * API call and removes the whole class of confusion.
+     */
+    const messageId = query.message?.message_id;
+    if (messageId) {
+      await sendMessage(chatId, escapeMarkdown(outcome.message), {
+        editMessageId: messageId,
+      });
+    }
+
+    if (outcome.ok) {
+      // The others first: they are holding a button for work that is now
+      // being driven, and the winner can wait a beat for their brief.
+      await closeOtherOffers(callback.jobId, driver.id);
+      // The full brief — passenger, phone, flight, board — which the offer
+      // deliberately did not carry, because it went to twenty phones.
+      await sendAssignment(callback.jobId);
+    }
+
+    return {
+      kind: 'offer-accept',
+      outcome: outcome.ok ? 'claimed' : outcome.reason,
+    };
+  }
+
   if (callback.kind === 'late') {
     /*
      * A second keyboard rather than a question.
@@ -561,6 +600,9 @@ function helpText(): string {
     escapeMarkdown('Tap the buttons on a job to report where you are.'),
     escapeMarkdown('Running late opens a set of times — two taps and the office knows.'),
     escapeMarkdown('Navigate opens the pickup in your maps app.'),
+    escapeMarkdown(
+      'A job marked “first to accept takes it” has gone to several drivers — tap quickly, and I will tell you if somebody beat you to it.',
+    ),
     escapeMarkdown('Send a photo of a receipt and I will attach it to the job.'),
     escapeMarkdown('/document — file a licence, badge, insurance, MOT or V5.'),
     escapeMarkdown('Anything else you type goes straight to the office.'),

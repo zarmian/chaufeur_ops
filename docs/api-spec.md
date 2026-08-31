@@ -79,6 +79,15 @@ Partial update. Writes an `EDITED` event and an audit entry.
 ```
 Validates the transition, appends a `JobEvent`, updates the cached `jobs.status`. `409 PRICE_REQUIRED` when completing an unpriced job without a reason.
 
+### `POST /api/jobs/:id/offer`
+Form post. `editJobs`. Broadcasts an unassigned `PENDING`/`DRAFT` job to every
+linked, active, compliant driver and answers `303` back to the job page with
+the outcome in the query string. `intent=withdraw` closes every live offer
+instead.
+
+Drivers claim it from Telegram, not over HTTP — the first `updateMany` that
+still finds the job unassigned wins, and the rest are told it has gone.
+
 ### `DELETE /api/jobs/:id`
 Soft delete. `ADMIN` only. Refuses if the job appears on a non-draft invoice.
 

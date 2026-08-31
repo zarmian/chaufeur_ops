@@ -29,6 +29,8 @@ import { financeAmountsFrom, jobEconomics } from '@/lib/job-finance';
 import { engagementPeriodsFor } from '@/lib/shift-store';
 import { ExpensesPanel } from './expenses-panel';
 import { NameBoardPanel } from './name-board-panel';
+import { liveOfferCount } from '@/lib/telegram/offers';
+import { OfferPanel } from './offer-panel';
 import { StatusControl } from './status-control';
 
 export const metadata = { title: 'Job' };
@@ -47,6 +49,8 @@ export default async function JobDetailPage({
   // navigation and can be linked to.
   const statusError = filterValue(query, 'statusError');
   const expenseError = filterValue(query, 'expenseError');
+  const offerError = filterValue(query, 'offerError');
+  const offerMessage = filterValue(query, 'offer');
 
   const job = await getJob(id);
   if (!job) notFound();
@@ -63,6 +67,16 @@ export default async function JobDetailPage({
       : null;
 
   const invoice = job.invoiceLines[0]?.invoice ?? null;
+
+  /*
+   * Whether a broadcast is already out.
+   *
+   * Only asked while the job could still be offered, so a completed job from
+   * last March does not pay for a count on every render.
+   */
+  const offerable =
+    mayEdit && !job.driverId && ['PENDING', 'DRAFT'].includes(job.status);
+  const liveOffers = offerable ? await liveOfferCount(job.id) : 0;
 
   /*
    * The board's link, minted here the first time somebody looks.
@@ -443,6 +457,22 @@ export default async function JobDetailPage({
               )}
             </CardContent>
           </Card>
+
+          {offerable ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Offer to drivers</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <OfferPanel
+                  jobId={job.id}
+                  live={liveOffers}
+                  message={offerMessage}
+                  error={offerError}
+                />
+              </CardContent>
+            </Card>
+          ) : null}
 
           {maySeeFinance ? (
             <Card>

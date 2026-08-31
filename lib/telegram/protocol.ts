@@ -92,6 +92,15 @@ export type Callback =
   | { kind: 'step'; jobId: string; step: DriverStep }
   | { kind: 'late'; jobId: string }
   | { kind: 'late-eta'; jobId: string; minutes: number }
+  /**
+   * One of several drivers taking a job that was offered to all of them.
+   *
+   * Carries only the job id, deliberately. Which driver tapped is decided by
+   * the chat the tap arrived from, never by the button — callback data is
+   * sent by the client, and a button that named its own driver would let one
+   * driver claim a job in another's name by editing it.
+   */
+  | { kind: 'offer-accept'; jobId: string }
   | { kind: 'document-type'; documentType: string }
   | { kind: 'expense-kind'; expenseId: string; expenseKind: string }
   | { kind: 'expense-cancel'; expenseId: string };
@@ -117,6 +126,8 @@ export function encodeCallback(callback: Callback): string {
       return `job:${callback.jobId}:late`;
     case 'late-eta':
       return `late:${callback.jobId}:${callback.minutes}`;
+    case 'offer-accept':
+      return `job:${callback.jobId}:offer`;
     case 'document-type':
       // The file being filed is held in the conversation, not in the button:
       // an object key does not fit in 64 bytes beside anything else.
@@ -143,6 +154,7 @@ export function decodeCallback(data: string): Callback | null {
     if (verb === 'accept') return { kind: 'accept', jobId: id };
     if (verb === 'decline') return { kind: 'decline', jobId: id };
     if (verb === 'late') return { kind: 'late', jobId: id };
+    if (verb === 'offer') return { kind: 'offer-accept', jobId: id };
     const step = STEP_BY_VERB.get(verb);
     return step ? { kind: 'step', jobId: id, step } : null;
   }

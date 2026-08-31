@@ -16,6 +16,7 @@ import {
   refreshJobMessage,
   sendAssignment,
 } from './dispatch';
+import { withdrawOffers } from './offers';
 
 /**
  * Where the job lifecycle meets the bot.
@@ -40,6 +41,22 @@ async function quietly(work: () => Promise<void>): Promise<void> {
 }
 
 export async function onJobAssigned(jobId: string): Promise<void> {
+  /*
+   * Any offer still out is dead the moment somebody is assigned by hand.
+   *
+   * The office broadcasting a job and then giving it to a named driver a
+   * minute later is not an edge case — it is what happens when the phone
+   * rings before anybody taps. Leaving the offers live means a driver accepts
+   * work that is already somebody else's and is told so, which reads as the
+   * system having taken it back off them.
+   *
+   * A no-op when the job was never offered, so it is safe on every
+   * assignment. Withdrawn first, so the broadcast is closed before the
+   * assigned driver's brief goes out.
+   */
+  await quietly(async () => {
+    await withdrawOffers(jobId);
+  });
   await quietly(() => sendAssignment(jobId));
   await quietly(() => tellClient(jobId, 'driver_assigned'));
 }
@@ -112,6 +129,11 @@ async function tellClient(
 }
 
 export async function onJobCancelled(jobId: string): Promise<void> {
+  // Same reasoning as an assignment, more urgently: an Accept button on a
+  // cancelled job is an invitation to drive to a pickup nobody is waiting at.
+  await quietly(async () => {
+    await withdrawOffers(jobId);
+  });
   await quietly(() => notifyCancelled(jobId));
 }
 

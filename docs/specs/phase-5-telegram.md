@@ -135,6 +135,29 @@ The highest-value feature in the phase.
 3. Automation toggles: notify driver on assignment, require acceptance, chase document expiry, send weekly statements, alert on unassigned jobs, request live location
 4. Tokens are write-only in the UI — displayed masked, never returned by the API
 
+## 5.12 Offering a job to several drivers
+
+Built after the phase, on the same reasoning as the rest of it: dispatch for a
+195-driver fleet is mostly phone calls, and the calls that cost most are the
+ones made at 5am to find anybody at all.
+
+Assignment stays one driver at a time by default — a repeat client's regular
+booking goes to their regular driver, and always should. This is the other
+case: a job that has to be covered soon, by somebody.
+
+**Acceptance criteria**
+1. An unassigned job in `PENDING` or `DRAFT` can be offered from the job screen to every linked, active, compliant driver, up to a limit (default 20)
+2. Compliance is judged at the job's own pickup time, not at now — a badge valid today and expired by Friday does not qualify somebody for Friday
+3. The offer carries only what a decision needs — reference, time, pickup, dropoff, driver pay — and never the passenger's name or number, because it goes to twenty phones
+4. The first driver to accept gets the job: `driverId` set, status `ACCEPTED`, `ASSIGNED` and `ACCEPTED` events written against the driver
+5. **A second driver accepting a moment later is refused, and the job keeps its first driver.** The claim is one conditional update, so the database decides once rather than two reads racing to a write
+6. Compliance is re-checked at the moment of accepting, not only when the offer went out — an offer can sit unanswered overnight
+7. Everybody else's offer message is edited to say it has gone, so no live Accept button survives
+8. Assigning by hand, or cancelling, withdraws every live offer
+9. The winner then receives the full job brief, with the passenger details the offer withheld
+10. The claim is written to `audit_log` with a null user — no member of staff made it
+11. The job screen shows how many drivers are still holding an offer, and can withdraw it
+
 ---
 
 ## Definition of done
