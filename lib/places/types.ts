@@ -88,6 +88,39 @@ export function worthAsking(query: string): boolean {
 }
 
 /**
+ * What the address box should read after a suggestion is chosen.
+ *
+ * **A lookup may add to what the operator typed. It may never replace it with
+ * less.** Choosing a suggestion used to overwrite the field with the
+ * provider's label unconditionally, which is an improvement when the label is
+ * richer — somebody types "dorchester" and gets "The Dorchester" — and
+ * destructive when it is not. On the default postcode provider the label *is*
+ * the postcode, so pasting "10 Downing Street, London SW1A 2AA" and picking
+ * the match rewrote the box to "SW1A 2AA": the building, the street and the
+ * number all gone, and gone from the driver's job card too, since `pickupText`
+ * is what they are sent.
+ *
+ * The test is containment. If everything typed survives inside the label, the
+ * label is strictly more information and wins. If anything typed is missing
+ * from it, the operator knew something the provider does not, and their words
+ * stand.
+ *
+ * Compared with letters and digits only, so spacing, case and punctuation
+ * cannot make two spellings of one postcode look like different places.
+ */
+export function preferredAddressText(typed: string, label: string): string {
+  const trimmed = typed.trim();
+  if (!trimmed) return label;
+  if (!label.trim()) return trimmed;
+
+  return squash(label).includes(squash(trimmed)) ? label : trimmed;
+}
+
+function squash(value: string): string {
+  return value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+/**
  * A session token.
  *
  * Any opaque unique string will do; Google only uses it to group requests.

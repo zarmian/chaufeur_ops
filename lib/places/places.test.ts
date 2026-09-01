@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { googleProvider } from './google';
 import { postcodesProvider } from './postcodes';
-import { extractPostcode, newSessionToken, worthAsking } from './types';
+import {
+  extractPostcode,
+  newSessionToken,
+  preferredAddressText,
+  worthAsking,
+} from './types';
 
 /**
  * Address lookup.
@@ -16,11 +21,12 @@ import { extractPostcode, newSessionToken, worthAsking } from './types';
  */
 
 function respondWith(body: unknown, ok = true) {
-  return vi.fn(async () =>
-    new Response(JSON.stringify(body), {
-      status: ok ? 200 : 400,
-      headers: { 'Content-Type': 'application/json' },
-    }),
+  return vi.fn(
+    async () =>
+      new Response(JSON.stringify(body), {
+        status: ok ? 200 : 400,
+        headers: { 'Content-Type': 'application/json' },
+      }),
   ) as unknown as typeof fetch;
 }
 
@@ -77,7 +83,8 @@ describe('googleProvider', () => {
 
     await provider.suggest('dorchester', { sessionToken: 'session-1' });
 
-    const [, init] = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    const [, init] = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock
+      .calls[0]!;
     const body = JSON.parse(String((init as RequestInit).body));
     expect(body.sessionToken).toBe('session-1');
   });
@@ -88,7 +95,8 @@ describe('googleProvider', () => {
 
     await provider.suggest('victoria', {});
 
-    const [, init] = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    const [, init] = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock
+      .calls[0]!;
     const body = JSON.parse(String((init as RequestInit).body));
     expect(body.includedRegionCodes).toEqual(['gb']);
   });
@@ -101,7 +109,8 @@ describe('googleProvider', () => {
 
     await provider.suggest('dorchester', {});
 
-    const [url, init] = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    const [url, init] = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock
+      .calls[0]!;
     expect(String(url)).not.toContain('secret-key');
     expect((init as RequestInit).headers).toMatchObject({
       'X-Goog-Api-Key': 'secret-key',
@@ -170,7 +179,12 @@ describe('googleProvider', () => {
     const provider = googleProvider({
       apiKey: 'k',
       fetchImpl: respondWith(
-        { error: { message: 'This API project is not authorized', status: 'PERMISSION_DENIED' } },
+        {
+          error: {
+            message: 'This API project is not authorized',
+            status: 'PERMISSION_DENIED',
+          },
+        },
         false,
       ),
     });
@@ -196,7 +210,8 @@ describe('postcodesProvider', () => {
 
     await provider.suggest('53 Park Lane W1K 1QA', {});
 
-    const [url] = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    const [url] = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock
+      .calls[0]!;
     expect(String(url)).toContain('W1K%201QA');
   });
 
@@ -225,6 +240,11 @@ describe('postcodesProvider', () => {
     expect(detail?.address).toBe('West End, Westminster, London, W1K 1QA');
     expect(detail?.postcode).toBe('W1K 1QA');
     expect(detail?.lat).toBeCloseTo(51.5074);
+
+    // The label is what reaches the pickup box and the driver's job card, so
+    // it is the area rather than the bare code. A driver cannot navigate by
+    // "W1K 1QA" without typing it into something else first.
+    expect(detail?.label).toBe('West End, Westminster, London, W1K 1QA');
   });
 
   it('does not repeat a district that is also the region', async () => {
@@ -242,5 +262,70 @@ describe('postcodesProvider', () => {
     expect((await provider.detail('M1 1AE', {}))?.address).toBe(
       'Piccadilly, Manchester, M1 1AE',
     );
+  });
+});
+
+/**
+ * The rule that stopped a pasted address becoming a postcode.
+ *
+ * Choosing a suggestion used to overwrite the box with the provider's label,
+ * whatever it was. On the default postcode provider that label was the bare
+ * code, so an operator who pasted a full street address and picked the
+ * matching postcode watched the building, the street and the number vanish —
+ * and vanish from the driver's job card with it, since `pickupText` is what
+ * the driver is sent.
+ */
+describe('preferredAddressText', () => {
+  it('keeps a pasted address when the lookup only knows the postcode', () => {
+    // The report, exactly.
+    expect(
+      preferredAddressText('10 Downing Street, London SW1A 2AA', 'SW1A 2AA'),
+    ).toBe('10 Downing Street, London SW1A 2AA');
+  });
+
+  it('keeps the typed address even when the label is longer but different', () => {
+    // The postcode provider's richer label still does not know the building.
+    expect(
+      preferredAddressText(
+        'Flat 4, 22 Mount Street, W1K 1QA',
+        'West End, Westminster, London, W1K 1QA',
+      ),
+    ).toBe('Flat 4, 22 Mount Street, W1K 1QA');
+  });
+
+  it('takes the label when it contains everything that was typed', () => {
+    // The case the overwrite was written for, and it still works.
+    expect(preferredAddressText('dorchester', 'The Dorchester')).toBe(
+      'The Dorchester',
+    );
+    expect(preferredAddressText('heathrow t', 'Heathrow Terminal 5')).toBe(
+      'Heathrow Terminal 5',
+    );
+  });
+
+  it('upgrades a bare postcode to the area the lookup names', () => {
+    expect(
+      preferredAddressText('w1k1qa', 'West End, Westminster, London, W1K 1QA'),
+    ).toBe('West End, Westminster, London, W1K 1QA');
+  });
+
+  it('ignores spacing, case and punctuation when comparing', () => {
+    // Two spellings of one postcode must not read as two different places.
+    expect(preferredAddressText('sw1a 2aa', 'SW1A 2AA')).toBe('SW1A 2AA');
+    expect(preferredAddressText('THE  DORCHESTER', 'The Dorchester')).toBe(
+      'The Dorchester',
+    );
+  });
+
+  it('takes the label when nothing was typed', () => {
+    // Picking from the saved list without typing.
+    expect(preferredAddressText('', 'The Dorchester')).toBe('The Dorchester');
+    expect(preferredAddressText('   ', 'The Dorchester')).toBe(
+      'The Dorchester',
+    );
+  });
+
+  it('keeps what was typed when the lookup has no label at all', () => {
+    expect(preferredAddressText('The Dorchester', '')).toBe('The Dorchester');
   });
 });

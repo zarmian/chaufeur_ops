@@ -3,7 +3,12 @@
 import { Loader2, MapPin } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import { Input } from '@/components/ui/input';
-import { newSessionToken, worthAsking, type PlaceSuggestion } from '@/lib/places/types';
+import {
+  newSessionToken,
+  preferredAddressText,
+  worthAsking,
+  type PlaceSuggestion,
+} from '@/lib/places/types';
 import { cn } from '@/lib/utils';
 
 /**
@@ -179,7 +184,9 @@ export function AddressField({
         );
         if (!response.ok) throw new Error('lookup failed');
 
-        const json = (await response.json()) as { suggestions: PlaceSuggestion[] };
+        const json = (await response.json()) as {
+          suggestions: PlaceSuggestion[];
+        };
         if (submitted.current || abort.signal.aborted) return;
 
         setSuggestions(json.suggestions);
@@ -204,10 +211,21 @@ export function AddressField({
     if (timer.current) clearTimeout(timer.current);
     controller.current?.abort();
 
+    /*
+     * What the operator actually typed, captured before anything overwrites
+     * it. The optimistic write below replaces the box with the suggestion's
+     * headline, so by the time the detail lookup returns the original is gone
+     * from the DOM and there is nothing left to compare the label against.
+     */
+    const typedBefore = inputRef.current?.value.trim() ?? '';
+
     choosing.current = true;
-    // Optimistic: the text is what was picked, whether or not the detail
-    // lookup succeeds.
-    setInputValue(inputRef.current, suggestion.primary);
+    // Optimistic: show what was picked while the detail lookup runs, but never
+    // less than was typed — the same rule the resolved value is held to.
+    setInputValue(
+      inputRef.current,
+      preferredAddressText(typedBefore, suggestion.primary),
+    );
 
     try {
       const response = await fetch('/api/places/resolve', {
@@ -226,11 +244,15 @@ export function AddressField({
         locationId: string | null;
       };
 
-      // The label is what the operator recognises — "The Dorchester" — and
-      // the address is what the postcode and coordinates describe. Both are
-      // kept: the label in the box, the rest hidden alongside it.
+      /*
+       * The postcode and coordinates always ride along — they are what makes
+       * choosing a suggestion worth anything, and they are what prices the
+       * job. The *text* is the operator's unless the lookup genuinely knows
+       * more; see `preferredAddressText`. Overwriting it unconditionally is
+       * what turned a pasted street address into a bare postcode.
+       */
       const value: AddressValue = {
-        text: detail.label || detail.address,
+        text: preferredAddressText(typedBefore, detail.label || detail.address),
         postcode: detail.postcode,
         lat: detail.lat,
         lng: detail.lng,
@@ -297,9 +319,24 @@ export function AddressField({
         onBlur={() => setTimeout(() => setOpen(false), 150)}
       />
 
-      <input type="hidden" name={`${name}Postcode`} value={resolved?.postcode ?? ''} readOnly />
-      <input type="hidden" name={`${name}Lat`} value={text(resolved?.lat)} readOnly />
-      <input type="hidden" name={`${name}Lng`} value={text(resolved?.lng)} readOnly />
+      <input
+        type="hidden"
+        name={`${name}Postcode`}
+        value={resolved?.postcode ?? ''}
+        readOnly
+      />
+      <input
+        type="hidden"
+        name={`${name}Lat`}
+        value={text(resolved?.lat)}
+        readOnly
+      />
+      <input
+        type="hidden"
+        name={`${name}Lng`}
+        value={text(resolved?.lng)}
+        readOnly
+      />
       <input
         type="hidden"
         name={`${name}LocationId`}
@@ -309,7 +346,7 @@ export function AddressField({
 
       {busy ? (
         <Loader2
-          className="absolute right-2 top-2.5 size-4 animate-spin text-muted-foreground"
+          className="text-muted-foreground absolute top-2.5 right-2 size-4 animate-spin"
           aria-hidden
         />
       ) : null}
@@ -319,7 +356,7 @@ export function AddressField({
           id={listId}
           role="listbox"
           data-testid={`${name}-suggestions`}
-          className="absolute z-50 mt-1 max-h-72 w-full overflow-auto rounded-md border bg-popover p-1 shadow-md"
+          className="bg-popover absolute z-50 mt-1 max-h-72 w-full overflow-auto rounded-md border p-1 shadow-md"
         >
           {suggestions.map((suggestion, index) => (
             <li key={suggestion.id}>
@@ -335,20 +372,27 @@ export function AddressField({
                 }}
                 className={cn(
                   'flex w-full items-start gap-2 rounded px-2 py-1.5 text-left text-sm',
-                  index === active ? 'bg-accent text-accent-foreground' : 'hover:bg-accent',
+                  index === active
+                    ? 'bg-accent text-accent-foreground'
+                    : 'hover:bg-accent',
                 )}
               >
-                <MapPin className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                <MapPin
+                  className="text-muted-foreground mt-0.5 size-3.5 shrink-0"
+                  aria-hidden
+                />
                 <span className="min-w-0">
-                  <span className="block truncate font-medium">{suggestion.primary}</span>
+                  <span className="block truncate font-medium">
+                    {suggestion.primary}
+                  </span>
                   {suggestion.secondary ? (
-                    <span className="block truncate text-xs text-muted-foreground">
+                    <span className="text-muted-foreground block truncate text-xs">
                       {suggestion.secondary}
                     </span>
                   ) : null}
                 </span>
                 {suggestion.source === 'saved' ? (
-                  <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                  <span className="text-muted-foreground ml-auto shrink-0 text-xs">
                     saved
                   </span>
                 ) : null}

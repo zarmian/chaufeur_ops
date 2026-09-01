@@ -34,7 +34,9 @@ interface Autocomplete {
   result?: string[] | null;
 }
 
-export function postcodesProvider(options: PostcodesOptions = {}): PlaceProvider {
+export function postcodesProvider(
+  options: PostcodesOptions = {},
+): PlaceProvider {
   const call = options.fetchImpl ?? fetch;
 
   return {
@@ -81,9 +83,21 @@ export function postcodesProvider(options: PostcodesOptions = {}): PlaceProvider
         .filter((part): part is string => Boolean(part))
         .filter((part, index, all) => all.indexOf(part) === index);
 
+      const address = [...parts, result.postcode].join(', ');
+
       return {
-        label: result.postcode,
-        address: [...parts, result.postcode].join(', '),
+        /*
+         * The area, not the bare code.
+         *
+         * This label is what lands in the pickup box, and from there on the
+         * driver's job card. "W1K 1QA" tells them nothing they can navigate by
+         * until they have typed it into something else; "Mayfair, Westminster,
+         * London, W1K 1QA" at least says where they are going. The postcode is
+         * still carried separately, so pricing and zone resolution are
+         * unaffected either way.
+         */
+        label: address,
+        address,
         postcode: result.postcode,
         lat: result.latitude ?? null,
         lng: result.longitude ?? null,
