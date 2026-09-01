@@ -23,6 +23,7 @@
     "db:seed": "tsx prisma/seed.ts",
     "setup": "tsx scripts/setup.ts",
     "verify": "tsx scripts/verify-install.ts",
+    "check:payments": "tsx scripts/check-missed-payments.ts",
     "perf:jobs": "tsx scripts/perf-jobs.ts",
     "perf:phase6": "tsx scripts/perf-phase6.ts",
     "postinstall": "prisma generate"

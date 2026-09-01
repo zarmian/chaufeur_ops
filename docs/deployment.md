@@ -404,6 +404,41 @@ matches on the natural key and updates rather than duplicating.
 
 ---
 
+## Releasing to an install that is already running
+
+Two things reach production only if somebody sends them, and neither shows up
+as a broken page — the install simply goes on behaving as it did yesterday.
+
+**Migrations.** The Vercel build runs `prisma migrate deploy`, so a deploy
+carries them. What that does not cover is an install that has not been
+deployed since the migration landed. `npm run verify` reads
+`_prisma_migrations` and fails on anything missing or unfinished, so running
+it against each install is the check — not remembering which release added a
+table.
+
+**Environment variables.** A new one has to be set on the Vercel project by
+hand before the deploy that needs it, and a missing one is silent: `APP_URL`
+absent means a driver's Telegram card carries no name-board link, and nothing
+anywhere reports a fault. `verify` treats the required set as fail-level for
+that reason. Set the variable, then redeploy — Vercel does not apply a new
+variable to a build that has already happened.
+
+### After a release that changed how something reaches the outside world
+
+`npm run check:payments` answers one specific question: did any gateway
+payment go unrecorded while `/api/payments/webhooks` was unreachable? It reads
+only, and it stops early on the common case — an install with no gateway
+configured records every payment by hand and cannot have missed one.
+
+Where a gateway *is* enabled, it prints the invoices issued before the fix
+that are still owed, for reading against the merchant account. It is a list to
+compare rather than a verdict: only the provider knows what it actually
+received, and most of any such list is clients who have simply not paid yet.
+Credit-noted invoices are excluded — a credit note is not a debt, and chasing
+one is a letter no client should receive.
+
+---
+
 ## Dependencies
 
 `npm audit` reports **0 vulnerabilities**, and every dependency is on its
