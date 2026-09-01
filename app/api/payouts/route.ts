@@ -2,7 +2,8 @@ import { headers } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { apiError } from '@/lib/api';
 import { requireCapability } from '@/lib/authz';
-import { fromDateOnlyString } from '@/lib/dates';
+import { zonedDayRange } from '@/lib/dates';
+import { getLocaleConfig } from '@/lib/locale-store';
 import { ForbiddenError, UnauthenticatedError } from '@/lib/permissions';
 import { createPayout } from '@/lib/payout-store';
 import { clientIpFrom } from '@/lib/rate-limit';
@@ -29,18 +30,30 @@ export async function POST(request: Request) {
     const form = await request.formData();
 
     const driverId = String(form.get('driverId') ?? '').trim();
-    const from = dateField(form.get('from'));
-    const to = dateField(form.get('to'));
+    const fromValue = dateField(form.get('from'));
+    const toValue = dateField(form.get('to'));
 
-    if (from) query.set('from', String(form.get('from')));
-    if (to) query.set('to', String(form.get('to')));
+    if (fromValue) query.set('from', fromValue);
+    if (toValue) query.set('to', toValue);
 
-    if (!driverId || !from || !to) {
+    if (!driverId || !fromValue || !toValue) {
       return refuse(query, destination, 'That period was not understood.');
     }
 
-    // The end of the day, so work at 6pm on the last day is inside it.
-    to.setUTCHours(23, 59, 59, 999);
+    /*
+     * Local days, not UTC ones — the same reading the screen previewed.
+     *
+     * These dates were typed by an operator into a date input, so "the 31st"
+     * is their 31st. Read as UTC, an hour of summer work slid out of one end
+     * of the period and into the next payout: the preview and the money
+     * disagreed, which is the one thing a payout screen must never do.
+     */
+    const { timeZone } = await getLocaleConfig();
+    const from = zonedDayRange(fromValue, timeZone).start;
+    // Inclusive, so work at 6pm on the last day is inside it.
+    const to = new Date(
+      zonedDayRange(toValue, timeZone).endExclusive.getTime() - 1,
+    );
 
     const result = await createPayout(
       driverId,
@@ -75,10 +88,11 @@ export async function POST(request: Request) {
   return seeOther(destination, query);
 }
 
-function dateField(value: FormDataEntryValue | null): Date | null {
+/** The `YYYY-MM-DD` a date input posts, or nothing if it is not one. */
+function dateField(value: FormDataEntryValue | null): string | null {
   const text = String(value ?? '').trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
-  return fromDateOnlyString(text);
+  return text;
 }
 
 function refuse(

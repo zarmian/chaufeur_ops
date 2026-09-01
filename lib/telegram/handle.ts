@@ -9,7 +9,12 @@ import {
   handleReceiptPhoto,
   setExpenseKind,
 } from './expenses';
-import { alertOps, delayKeyboard, refreshJobMessage, sendAssignment } from './dispatch';
+import {
+  alertOps,
+  delayKeyboard,
+  refreshJobMessage,
+  sendAssignment,
+} from './dispatch';
 import { reportDelay } from './delays';
 import { claimJob, closeOtherOffers } from './offers';
 import {
@@ -18,6 +23,7 @@ import {
   setDocumentType,
 } from './documents';
 import { applyStep } from './driver-steps';
+import { earningsFor } from './earnings';
 import { driverForChat, redeemLinkToken, unlinkChat } from './linking';
 import {
   decodeCallback,
@@ -68,7 +74,11 @@ interface TelegramMessage {
   chat?: { id?: number };
   text?: string;
   photo?: Array<{ file_id?: string; file_size?: number }>;
-  location?: { latitude?: number; longitude?: number; horizontal_accuracy?: number };
+  location?: {
+    latitude?: number;
+    longitude?: number;
+    horizontal_accuracy?: number;
+  };
   caption?: string;
 }
 
@@ -110,7 +120,10 @@ export async function handleUpdate(
       // how one tap becomes two.
       chatId = toChatId(update.edited_message.chat?.id);
       result = await handleMessage(
-        { chat: update.edited_message.chat, location: update.edited_message.location },
+        {
+          chat: update.edited_message.chat,
+          location: update.edited_message.location,
+        },
         chatId,
       );
     }
@@ -195,7 +208,10 @@ async function handleMessage(
     if (outcome.ok) {
       await alertOps(`${outcome.driverName} has unlinked their Telegram.`);
     }
-    return { kind: 'unlink', outcome: outcome.ok ? 'unlinked' : outcome.message };
+    return {
+      kind: 'unlink',
+      outcome: outcome.ok ? 'unlinked' : outcome.message,
+    };
   }
 
   if (!driver) {
@@ -212,6 +228,13 @@ async function handleMessage(
     const summary = await todayFor(driver.id);
     await sendMessage(chatId, summary);
     return { kind: 'jobs', outcome: 'listed' };
+  }
+
+  if (/^\/pay\b/.test(text) || /^\/earnings\b/.test(text)) {
+    // The driver's own figures and nobody else's — `driver` is whoever this
+    // chat is linked to, and the id never comes from the message.
+    await sendMessage(chatId, await earningsFor(driver.id));
+    return { kind: 'pay', outcome: 'sent' };
   }
 
   if (/^\/document\b/.test(text) || /^\/documents\b/.test(text)) {
@@ -392,17 +415,21 @@ async function handleCallback(
      * need it.
      */
     await answerCallback(queryId, 'How far behind?');
-    await sendMessage(
-      chatId,
-      escapeMarkdown('How late do you expect to be?'),
-      { buttons: delayKeyboard(callback.jobId) },
-    );
+    await sendMessage(chatId, escapeMarkdown('How late do you expect to be?'), {
+      buttons: delayKeyboard(callback.jobId),
+    });
     return { kind: 'late', outcome: 'asked how late' };
   }
 
   if (callback.kind === 'late-eta') {
-    const outcome = await reportDelay(callback.jobId, driver.id, callback.minutes);
-    await answerCallback(queryId, outcome.message, { alert: !outcome.recorded });
+    const outcome = await reportDelay(
+      callback.jobId,
+      driver.id,
+      callback.minutes,
+    );
+    await answerCallback(queryId, outcome.message, {
+      alert: !outcome.recorded,
+    });
     return { kind: 'late-eta', outcome: outcome.outcome };
   }
 
@@ -416,9 +443,13 @@ async function handleCallback(
     if (typeof fileKey !== 'string') {
       // The conversation expired, so the photo is stored but orphaned. Say so
       // rather than filing it against a guess.
-      await answerCallback(queryId, 'That has timed out — send the photo again.', {
-        alert: true,
-      });
+      await answerCallback(
+        queryId,
+        'That has timed out — send the photo again.',
+        {
+          alert: true,
+        },
+      );
       return { kind: 'document-type', outcome: 'no pending document' };
     }
 
@@ -474,14 +505,18 @@ async function respondToOffer(
   });
 
   if (!job || job.driverId !== driverId) {
-    await answerCallback(queryId, 'This job is no longer yours.', { alert: true });
+    await answerCallback(queryId, 'This job is no longer yours.', {
+      alert: true,
+    });
     return { kind, outcome: 'not assigned to this driver' };
   }
 
   if (job.status !== 'ASSIGNED') {
     await answerCallback(
       queryId,
-      job.status === 'ACCEPTED' ? 'Already accepted.' : 'This job has moved on.',
+      job.status === 'ACCEPTED'
+        ? 'Already accepted.'
+        : 'This job has moved on.',
     );
     return { kind, outcome: `status was ${job.status}` };
   }
@@ -489,9 +524,17 @@ async function respondToOffer(
   if (kind === 'accept') {
     await prisma.$transaction(async (tx) => {
       await tx.jobEvent.create({
-        data: { jobId, type: 'ACCEPTED', actorType: 'DRIVER', actorId: driverId },
+        data: {
+          jobId,
+          type: 'ACCEPTED',
+          actorType: 'DRIVER',
+          actorId: driverId,
+        },
       });
-      await tx.job.update({ where: { id: jobId }, data: { status: 'ACCEPTED' } });
+      await tx.job.update({
+        where: { id: jobId },
+        data: { status: 'ACCEPTED' },
+      });
     });
 
     await answerCallback(queryId, 'Accepted — thanks.');
@@ -567,7 +610,10 @@ async function todayFor(driverId: string): Promise<string> {
   const jobs = await prisma.job.findMany({
     where: {
       driverId,
-      scheduledAt: { gte: new Date(now.getTime() - 2 * 60 * 60 * 1000), lte: until },
+      scheduledAt: {
+        gte: new Date(now.getTime() - 2 * 60 * 60 * 1000),
+        lte: until,
+      },
       status: { in: ['ASSIGNED', 'ACCEPTED', 'IN_PROGRESS'] },
     },
     orderBy: { scheduledAt: 'asc' },
@@ -575,7 +621,8 @@ async function todayFor(driverId: string): Promise<string> {
     take: 20,
   });
 
-  if (jobs.length === 0) return escapeMarkdown('Nothing booked in the next 24 hours.');
+  if (jobs.length === 0)
+    return escapeMarkdown('Nothing booked in the next 24 hours.');
 
   const { getLocaleConfig } = await import('../locale-store');
   const { formatDateTime } = await import('../dates');
@@ -595,15 +642,20 @@ function helpText(): string {
     '*What I can do*',
     '',
     escapeMarkdown('/jobs — your next 24 hours'),
+    escapeMarkdown('/pay — this week so far and your last statement'),
     escapeMarkdown('/unlink — disconnect this chat'),
     '',
     escapeMarkdown('Tap the buttons on a job to report where you are.'),
-    escapeMarkdown('Running late opens a set of times — two taps and the office knows.'),
+    escapeMarkdown(
+      'Running late opens a set of times — two taps and the office knows.',
+    ),
     escapeMarkdown('Navigate opens the pickup in your maps app.'),
     escapeMarkdown(
       'A job marked “first to accept takes it” has gone to several drivers — tap quickly, and I will tell you if somebody beat you to it.',
     ),
-    escapeMarkdown('Send a photo of a receipt and I will attach it to the job.'),
+    escapeMarkdown(
+      'Send a photo of a receipt and I will attach it to the job.',
+    ),
     escapeMarkdown('/document — file a licence, badge, insurance, MOT or V5.'),
     escapeMarkdown('Anything else you type goes straight to the office.'),
   ].join('\n');

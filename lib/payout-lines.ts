@@ -80,6 +80,23 @@ export interface PayoutLineDraft {
   occurredAt: Date;
 }
 
+/**
+ * Why a record is not on the payout.
+ *
+ * The `reason` beside it is written for an operator looking at the generate
+ * screen. Drivers now see the same exclusions in Telegram and need different
+ * words — "price it before paying it" is an instruction to the office, not to
+ * the person waiting for the money. The code is what a second audience
+ * translates from, so neither phrasing has to match the other by string.
+ */
+export type PayoutExclusion =
+  | 'ALREADY_PAID'
+  | 'SHIFT_COVERED'
+  | 'UNPRICED'
+  | 'SHIFT_OPEN'
+  | 'SHIFT_UNAPPROVED'
+  | 'SHIFT_NO_HOURS';
+
 export interface PayoutDraft {
   lines: PayoutLineDraft[];
   jobPence: number;
@@ -91,7 +108,11 @@ export interface PayoutDraft {
    * dropped: a driver querying a short payment needs the answer to be
    * visible, not reconstructed.
    */
-  excluded: Array<{ reference: string; reason: string }>;
+  excluded: Array<{
+    reference: string;
+    reason: string;
+    code: PayoutExclusion;
+  }>;
 }
 
 /**
@@ -118,6 +139,7 @@ export function buildPayoutLines(input: {
       excluded.push({
         reference: job.reference,
         reason: 'Covered by a shift, which is paid by the hour instead',
+        code: 'SHIFT_COVERED',
       });
       continue;
     }
@@ -131,6 +153,7 @@ export function buildPayoutLines(input: {
       excluded.push({
         reference: job.reference,
         reason: 'No driver price recorded — price it before paying it',
+        code: 'UNPRICED',
       });
       continue;
     }
@@ -150,6 +173,7 @@ export function buildPayoutLines(input: {
       excluded.push({
         reference: shift.reference,
         reason: 'Still open — a shift is paid once it has ended',
+        code: 'SHIFT_OPEN',
       });
       continue;
     }
@@ -158,6 +182,7 @@ export function buildPayoutLines(input: {
       excluded.push({
         reference: shift.reference,
         reason: 'Not approved yet',
+        code: 'SHIFT_UNAPPROVED',
       });
       continue;
     }
@@ -166,6 +191,7 @@ export function buildPayoutLines(input: {
       excluded.push({
         reference: shift.reference,
         reason: 'No payable hours after the unpaid break',
+        code: 'SHIFT_NO_HOURS',
       });
       continue;
     }
@@ -203,10 +229,14 @@ export function buildPayoutLines(input: {
   lines.sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime());
 
   const jobPence = sumPence(
-    ...lines.filter((line) => line.source === 'JOB').map((line) => line.amountPence),
+    ...lines
+      .filter((line) => line.source === 'JOB')
+      .map((line) => line.amountPence),
   );
   const shiftPence = sumPence(
-    ...lines.filter((line) => line.source === 'SHIFT').map((line) => line.amountPence),
+    ...lines
+      .filter((line) => line.source === 'SHIFT')
+      .map((line) => line.amountPence),
   );
   const expensePence = sumPence(
     ...lines

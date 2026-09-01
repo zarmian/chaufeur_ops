@@ -70,7 +70,14 @@ export function zoneOffsetMs(
   timeZone: string = DEFAULT_TIMEZONE,
 ): number {
   const p = getPartsInZone(instant, timeZone);
-  const asIfUtc = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+  const asIfUtc = Date.UTC(
+    p.year,
+    p.month - 1,
+    p.day,
+    p.hour,
+    p.minute,
+    p.second,
+  );
   // Drop sub-second precision from both sides so the difference is a clean
   // offset rather than offset-plus-milliseconds.
   return asIfUtc - Math.floor(instant.getTime() / 1000) * 1000;
@@ -160,8 +167,14 @@ export function isDST(
   instant: Date,
   timeZone: string = DEFAULT_TIMEZONE,
 ): boolean {
-  const january = zoneOffsetMs(new Date(Date.UTC(instant.getUTCFullYear(), 0, 1)), timeZone);
-  const july = zoneOffsetMs(new Date(Date.UTC(instant.getUTCFullYear(), 6, 1)), timeZone);
+  const january = zoneOffsetMs(
+    new Date(Date.UTC(instant.getUTCFullYear(), 0, 1)),
+    timeZone,
+  );
+  const july = zoneOffsetMs(
+    new Date(Date.UTC(instant.getUTCFullYear(), 6, 1)),
+    timeZone,
+  );
   const standard = Math.min(january, july);
   return zoneOffsetMs(instant, timeZone) > standard;
 }
@@ -215,6 +228,56 @@ export function fromDateOnlyString(value: string): Date {
 }
 
 /**
+ * The calendar date the instant falls on *in `timeZone`*, as `YYYY-MM-DD`.
+ *
+ * `toDateOnlyString` above reads UTC parts, which is right for a `@db.Date`
+ * column and wrong for an instant. Local midnight on a summer Monday is
+ * 23:00 UTC on the Sunday, so putting that instant through the UTC version
+ * fills a date input with the day before the one it means.
+ */
+export function toZonedDateOnlyString(
+  instant: Date,
+  timeZone: string = DEFAULT_TIMEZONE,
+): string {
+  const parts = getPartsInZone(instant, timeZone);
+  const pad = (n: number, width = 2) => String(n).padStart(width, '0');
+  return `${pad(parts.year, 4)}-${pad(parts.month)}-${pad(parts.day)}`;
+}
+
+/**
+ * The instant a `YYYY-MM-DD` local day begins, and the one after it ends.
+ *
+ * The pair a date-range filter needs: `gte: start, lt: endExclusive`. A date
+ * typed into a form is a local calendar day — "the 31st" means the operator's
+ * 31st, not 00:00 UTC — and reading it as UTC quietly moves an hour of work
+ * from one end of the range to the other for seven months of the year.
+ */
+export function zonedDayRange(
+  dateOnly: string,
+  timeZone: string = DEFAULT_TIMEZONE,
+): { start: Date; endExclusive: Date } {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateOnly.trim());
+  if (!match) {
+    throw new RangeError(
+      `Expected a date like 2026-08-02, got ${JSON.stringify(dateOnly)}`,
+    );
+  }
+  const [, year, month, day] = match;
+  const start = partsToUTC(
+    {
+      year: Number(year),
+      month: Number(month),
+      day: Number(day),
+      hour: 0,
+      minute: 0,
+      second: 0,
+    },
+    timeZone,
+  );
+  return { start, endExclusive: endOfZonedDay(start, timeZone) };
+}
+
+/**
  * The last instant a document with this expiry date is still valid.
  *
  * Expiry is inclusive: a PHV badge expiring 14 July is valid through the end
@@ -243,7 +306,10 @@ const DISPLAY_CACHE = new Map<string, Intl.DateTimeFormat>();
 /** Format an instant for display in the configured zone. */
 export function formatInZone(
   instant: Date,
-  options: Intl.DateTimeFormatOptions & { locale?: string; timeZone?: string } = {},
+  options: Intl.DateTimeFormatOptions & {
+    locale?: string;
+    timeZone?: string;
+  } = {},
 ): string {
   const { locale = 'en-GB', timeZone = DEFAULT_TIMEZONE, ...rest } = options;
   const key = `${locale}|${timeZone}|${JSON.stringify(rest)}`;

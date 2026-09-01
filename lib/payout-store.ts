@@ -30,8 +30,7 @@ export interface PayoutPeriod {
 }
 
 export type PayoutResult =
-  | { ok: true; id: string }
-  | { ok: false; code: string; message: string };
+  { ok: true; id: string } | { ok: false; code: string; message: string };
 
 /**
  * What a driver is owed for a period, before anything is written.
@@ -117,6 +116,7 @@ export async function draftFor(
       draft.excluded.push({
         reference: job.reference,
         reason: 'Already on another payout',
+        code: 'ALREADY_PAID',
       });
     }
   }
@@ -125,6 +125,7 @@ export async function draftFor(
       draft.excluded.push({
         reference: shift.reference,
         reason: 'Already on another payout',
+        code: 'ALREADY_PAID',
       });
     }
   }
@@ -205,7 +206,9 @@ async function linesAlreadyTaken(
       lines.map((line) => line.jobId).filter((id): id is string => id !== null),
     ),
     shiftIds: new Set(
-      lines.map((line) => line.shiftId).filter((id): id is string => id !== null),
+      lines
+        .map((line) => line.shiftId)
+        .filter((id): id is string => id !== null),
     ),
   };
 }
@@ -220,7 +223,9 @@ async function linesAlreadyTaken(
 export async function driversOwedIn(
   period: PayoutPeriod,
   driverIds?: string[],
-): Promise<Array<{ id: string; name: string; reference: string; draft: PayoutDraft }>> {
+): Promise<
+  Array<{ id: string; name: string; reference: string; draft: PayoutDraft }>
+> {
   const drivers = await prisma.driver.findMany({
     where: {
       ...(driverIds?.length ? { id: { in: driverIds } } : {}),
@@ -351,7 +356,8 @@ export async function approvePayout(
     where: { id: payoutId },
     select: { id: true, status: true },
   });
-  if (!payout) return { ok: false, code: 'NOT_FOUND', message: 'No such payout' };
+  if (!payout)
+    return { ok: false, code: 'NOT_FOUND', message: 'No such payout' };
 
   if (payout.status !== 'DRAFT') {
     return {
@@ -397,7 +403,8 @@ export async function markPayoutPaid(
     where: { id: payoutId },
     select: { id: true, status: true },
   });
-  if (!payout) return { ok: false, code: 'NOT_FOUND', message: 'No such payout' };
+  if (!payout)
+    return { ok: false, code: 'NOT_FOUND', message: 'No such payout' };
 
   if (payout.status === 'DRAFT') {
     return {
@@ -475,7 +482,8 @@ export async function deletePayout(
     where: { id: payoutId },
     select: { id: true, status: true },
   });
-  if (!payout) return { ok: false, code: 'NOT_FOUND', message: 'No such payout' };
+  if (!payout)
+    return { ok: false, code: 'NOT_FOUND', message: 'No such payout' };
 
   if (!canEditPayout(payout.status)) {
     return {

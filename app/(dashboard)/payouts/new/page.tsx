@@ -7,10 +7,12 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { toDateOnlyString } from '@/lib/dates';
+import { toZonedDateOnlyString, zonedDayRange } from '@/lib/dates';
 import { filterValue, type SearchParams } from '@/lib/list-params';
+import { getLocaleConfig } from '@/lib/locale-store';
 import { formatGBP } from '@/lib/money';
 import { pageRequireCapability } from '@/lib/page-guards';
+import { lastFullPayoutWeek } from '@/lib/payout-period';
 import { driversOwedIn } from '@/lib/payout-store';
 
 export const metadata = { title: 'Generate payouts' };
@@ -31,9 +33,28 @@ export default async function GeneratePayoutsPage({
   await pageRequireCapability('editInvoices');
   const query = await searchParams;
 
-  const fallback = lastFullWeek();
-  const from = parseDate(filterValue(query, 'from')) ?? fallback.from;
-  const to = parseDate(filterValue(query, 'to')) ?? fallback.to;
+  const { timeZone } = await getLocaleConfig();
+  const fallback = lastFullPayoutWeek(new Date(), timeZone);
+
+  /*
+   * The screen speaks in `YYYY-MM-DD` throughout — the value a date input
+   * carries, the value the form posts to `/api/payouts`. Only the
+   * interpretation into instants happens here, and it has to be the same
+   * interpretation the API uses, or the preview shows one period and the
+   * payout covers another.
+   */
+  const fromValue =
+    dateValue(filterValue(query, 'from')) ??
+    toZonedDateOnlyString(fallback.from, timeZone);
+  const toValue =
+    dateValue(filterValue(query, 'to')) ??
+    toZonedDateOnlyString(fallback.to, timeZone);
+
+  const from = zonedDayRange(fromValue, timeZone).start;
+  // Inclusive, because `driversOwedIn` filters with `lte`.
+  const to = new Date(
+    zonedDayRange(toValue, timeZone).endExclusive.getTime() - 1,
+  );
   const error = filterValue(query, 'payoutError');
 
   const drivers = await driversOwedIn({ from, to });
@@ -59,7 +80,11 @@ export default async function GeneratePayoutsPage({
       />
 
       {error ? (
-        <Alert variant="destructive" className="mb-6" data-testid="payout-error">
+        <Alert
+          variant="destructive"
+          className="mb-6"
+          data-testid="payout-error"
+        >
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       ) : null}
@@ -70,21 +95,22 @@ export default async function GeneratePayoutsPage({
         className="mb-6 flex flex-wrap items-end gap-3"
       >
         <div>
-          <label htmlFor="from" className="mb-1 block text-xs text-muted-foreground">
+          <label
+            htmlFor="from"
+            className="text-muted-foreground mb-1 block text-xs"
+          >
             From
           </label>
-          <Input
-            id="from"
-            name="from"
-            type="date"
-            defaultValue={toDateOnlyString(from)}
-          />
+          <Input id="from" name="from" type="date" defaultValue={fromValue} />
         </div>
         <div>
-          <label htmlFor="to" className="mb-1 block text-xs text-muted-foreground">
+          <label
+            htmlFor="to"
+            className="text-muted-foreground mb-1 block text-xs"
+          >
             To
           </label>
-          <Input id="to" name="to" type="date" defaultValue={toDateOnlyString(to)} />
+          <Input id="to" name="to" type="date" defaultValue={toValue} />
         </div>
         <Button type="submit" variant="outline">
           Show
@@ -98,9 +124,9 @@ export default async function GeneratePayoutsPage({
         />
       ) : (
         <div className="space-y-4">
-          <p className="text-sm text-muted-foreground">
+          <p className="text-muted-foreground text-sm">
             {payable.length} driver{payable.length === 1 ? '' : 's'} owed{' '}
-            <span className="tabular font-semibold text-foreground">
+            <span className="tabular text-foreground font-semibold">
               {formatGBP(totalPence)}
             </span>{' '}
             in total.
@@ -113,11 +139,11 @@ export default async function GeneratePayoutsPage({
                   <div className="min-w-0">
                     <p className="font-medium">
                       {driver.name}
-                      <span className="ml-2 text-xs tabular text-muted-foreground">
+                      <span className="tabular text-muted-foreground ml-2 text-xs">
                         {driver.reference}
                       </span>
                     </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
+                    <p className="text-muted-foreground mt-1 text-xs">
                       {summarise(driver.draft)}
                     </p>
                   </div>
@@ -127,13 +153,13 @@ export default async function GeneratePayoutsPage({
                     </span>
                     {driver.draft.lines.length > 0 ? (
                       <form method="post" action="/api/payouts">
-                        <input type="hidden" name="driverId" value={driver.id} />
                         <input
                           type="hidden"
-                          name="from"
-                          value={toDateOnlyString(from)}
+                          name="driverId"
+                          value={driver.id}
                         />
-                        <input type="hidden" name="to" value={toDateOnlyString(to)} />
+                        <input type="hidden" name="from" value={fromValue} />
+                        <input type="hidden" name="to" value={toValue} />
                         <Button type="submit">Draft it</Button>
                       </form>
                     ) : (
@@ -145,7 +171,7 @@ export default async function GeneratePayoutsPage({
                 {driver.draft.excluded.length > 0 ? (
                   <div className="mt-3 rounded-md border border-dashed p-3">
                     <p className="text-xs font-medium">Left out</p>
-                    <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
+                    <ul className="text-muted-foreground mt-1 space-y-0.5 text-xs">
                       {driver.draft.excluded.map((item) => (
                         <li key={`${item.reference}-${item.reason}`}>
                           <span className="tabular">{item.reference}</span> —{' '}
@@ -171,8 +197,10 @@ function summarise(draft: {
   expensePence: number;
 }): string {
   const parts: string[] = [];
-  if (draft.jobPence > 0) parts.push(`${formatGBP(draft.jobPence)} in job fees`);
-  if (draft.shiftPence > 0) parts.push(`${formatGBP(draft.shiftPence)} in shifts`);
+  if (draft.jobPence > 0)
+    parts.push(`${formatGBP(draft.jobPence)} in job fees`);
+  if (draft.shiftPence > 0)
+    parts.push(`${formatGBP(draft.shiftPence)} in shifts`);
   if (draft.expensePence > 0) {
     parts.push(`${formatGBP(draft.expensePence)} reimbursed`);
   }
@@ -180,30 +208,8 @@ function summarise(draft: {
   return `${draft.lines.length} line${draft.lines.length === 1 ? '' : 's'} · ${parts.join(' · ')}`;
 }
 
-function parseDate(value: string | null): Date | null {
+/** A date input's value, or nothing if it is not one. */
+function dateValue(value: string | null): string | null {
   if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
-  return new Date(`${value}T00:00:00.000Z`);
-}
-
-/**
- * The week that just ended, Monday to Sunday.
- *
- * Payouts run weekly here, and defaulting to the week in progress would offer
- * to pay work that has not finished happening.
- */
-function lastFullWeek(): { from: Date; to: Date } {
-  const now = new Date();
-  const day = now.getUTCDay() === 0 ? 7 : now.getUTCDay();
-
-  const to = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
-  );
-  to.setUTCDate(to.getUTCDate() - day);
-  to.setUTCHours(23, 59, 59, 999);
-
-  const from = new Date(to);
-  from.setUTCDate(from.getUTCDate() - 6);
-  from.setUTCHours(0, 0, 0, 0);
-
-  return { from, to };
+  return value;
 }

@@ -158,6 +158,36 @@ case: a job that has to be covered soon, by somebody.
 10. The claim is written to `audit_log` with a null user — no member of staff made it
 11. The job screen shows how many drivers are still holding an offer, and can withdraw it
 
+## 5.13 A driver can see what they have earned
+
+Drivers have no login — the bot is the whole of their access to the system. So
+"what am I owed this week" was a phone call to the office, every week, from a
+fleet of nearly two hundred. The office looked it up on the payouts screen and
+read the number back.
+
+`/pay` reads the same number off the same computation. The figure is not
+recalculated for the bot: it is `draftFor`, which is what the generate-payouts
+screen previews and what the payout is built from. A driver quoted one total in
+Telegram and paid another would have reason to doubt both.
+
+**Acceptance criteria**
+1. `/pay` (or `/earnings`) answers with the week in progress, Monday to Sunday in the configured timezone
+2. The total is the same one a payout for that period would produce — completed jobs, ended and approved shifts, approved reimbursable expenses
+3. Work outside the week, work not completed, and another driver's work are never counted
+4. Anything left out is named with a reason the driver can act on, capped at five entries
+5. The exclusion wording is the driver's, not the operator's — "waiting for the office to price it", never "price it before paying it"
+6. Once a payout covers a job, `/pay` stops counting it, so the same money is never shown twice
+7. The most recent statement is shown with its period, total and state; a `DRAFT` reads as "being prepared"
+8. Statements approved and not yet paid are totalled separately
+9. The message says the week's figure is provisional
+10. Money and dates follow the configured currency, locale and timezone
+11. The driver is whoever the chat is linked to — no identifier is ever taken from the message
+
+**The payout week turns at local midnight.** It was computed in UTC, which is
+an hour out under British Summer Time: a 00:30 Monday airport run fell into the
+week before and was paid a week early. `lib/payout-period.ts` now owns the
+boundary and the generate screen, the API and `/pay` all ask it.
+
 ---
 
 ## Definition of done
