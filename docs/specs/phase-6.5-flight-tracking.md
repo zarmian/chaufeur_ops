@@ -23,7 +23,8 @@ starts on is unlikely to be the one it stays on.
 3. Provider statuses are mapped down to six states in the adapter, and anything unrecognised becomes `UNKNOWN` rather than falling through to "running normally"
 4. The key is stored per install, encrypted, and never returned to a browser
 5. Tracking is off until somebody switches it on *and* supplies a key. With it off, every airport job behaves exactly as it did before this existed
-6. `AeroDataBox` is the first adapter. **It has not been run against the live API** — the mapping is unit-tested against fixtures built from the published documentation, and one real call is required before an install is switched on
+6. `AeroDataBox` is the first adapter. Its **request** reaches the live service — a call with an invalid key returns `403 "You are not subscribed to this API"`, so the host, path and header names are right. Its **response mapping is still unverified**: field names, the time shape and the status vocabulary follow the published documentation, and the fixtures were written from those docs
+7. `npm run check:flights -- <number> <date>` makes one real call and prints the raw payload beside the mapped result, naming what to look at. Run it with a subscribed key and correct the fixtures before switching a customer on
 
 ## 6.5.2 The buffer is the operator's
 
@@ -75,6 +76,6 @@ Every lookup is billed.
 ## Definition of done
 
 - All acceptance criteria pass
-- **One real call against the configured provider**, with the response compared against `lib/flights/aerodatabox.test.ts`'s fixtures, before any customer is switched on
+- **`npm run check:flights` against a subscribed key**, with the raw payload compared against `lib/flights/aerodatabox.test.ts`'s fixtures and the fixtures corrected, before any customer is switched on. The request half is already proven; this is the response half
 - A week run with `autoAdjust` off, watching the flags, before it is turned on
 - The Vercel plan checked: the schedule is every fifteen minutes, which Hobby does not allow (see `docs/deployment.md`)

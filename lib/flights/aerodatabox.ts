@@ -15,13 +15,21 @@ import type {
  * arrival time rather than only a status word. A provider that says "Delayed"
  * without saying by how long cannot move a pickup.
  *
- * **Untested against the live API.** The request shape, the header names and
- * the response mapping below follow AeroDataBox's published documentation;
- * none of it has been run against a real key, because this install has none.
- * The mapping is unit-tested against fixtures built from that documentation,
- * which proves the mapping and not the documentation. Before this is switched
- * on for a customer, one real call should be made and the fixtures corrected
- * against what actually comes back.
+ * **The response mapping is unverified.** Be precise about which half:
+ *
+ * The *request* has reached the live service. A call with a deliberately
+ * invalid key came back `403 {"message":"You are not subscribed to this
+ * API."}` — RapidAPI resolved the path and read the key header, rather than
+ * 404ing an endpoint that does not exist or complaining the key was missing.
+ * So the host, the path and the header names are right.
+ *
+ * The *response* half below — field names, the `utc`/`local` time shape, the
+ * status vocabulary in `STATES` — still follows the published documentation
+ * and nothing else. It is unit-tested against fixtures written from those
+ * docs, which proves the mapping and not the docs. `npm run check:flights`
+ * makes one real call and prints the raw payload beside the mapped result for
+ * exactly this; run it with a subscribed key and correct the fixtures before
+ * switching a customer on.
  *
  * Everything that decides anything is in `./decide.ts` and knows nothing
  * about this file, so a wrong guess here is a wrong guess in one place.

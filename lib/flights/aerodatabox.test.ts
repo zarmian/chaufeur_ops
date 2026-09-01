@@ -11,9 +11,15 @@ import { blankFlightConfig } from './types';
  * rather than an exception in a cron job at four in the morning.
  *
  * It does not prove the documentation. These fixtures were written from
- * AeroDataBox's published response shape, not captured from a live call —
- * this install has no key. One real call before switching a customer on will
- * either confirm them or correct them, and that is a step somebody has to do.
+ * AeroDataBox's published response shape, not captured from a live call — no
+ * subscribed key exists here. The *request* has been proven against the live
+ * service (a call with an invalid key returns a RapidAPI 403 rather than a
+ * 404), so what is left unproven is precisely this: the field names, the
+ * `utc`/`local` time shape and the status words below.
+ *
+ * `npm run check:flights -- <number> <date>` makes that call and prints the
+ * raw payload beside the mapped result. Correcting these fixtures against it
+ * is a step somebody has to do before a customer is switched on.
  */
 
 const CONFIG = { ...blankFlightConfig(), enabled: true, apiKey: 'test-key' };

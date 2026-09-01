@@ -437,6 +437,23 @@ received, and most of any such list is clients who have simply not paid yet.
 Credit-noted invoices are excluded — a credit note is not a debt, and chasing
 one is a letter no client should receive.
 
+### Before switching flight tracking on
+
+`npm run check:flights -- BA117 2026-09-15` makes one real call to the
+configured provider and prints the raw payload beside what the adapter made of
+it, naming what to look at. The key comes from the saved settings, or from
+`FLIGHT_API_KEY` for a single run.
+
+It exists because only half the adapter is proven. The request reaches the live
+service — an invalid key returns RapidAPI's `403 "You are not subscribed to
+this API"` rather than a 404 — so the host, path and headers are right. The
+response mapping still follows the published documentation and nothing else.
+Run this with a subscribed key, correct the fixtures in
+`lib/flights/aerodatabox.test.ts` against what actually arrives, and re-run
+`npm run test:unit`. Pick a flight arriving today or tomorrow: one days out
+returns the timetable and says nothing about the revised and actual arrival
+times, which are the fields a delay is invisible without.
+
 ---
 
 ## Dependencies
