@@ -4,6 +4,7 @@ import {
   Mail,
   MapPin,
   MessageSquare,
+  Plane,
   Send,
   Palette,
   ShieldCheck,
@@ -19,6 +20,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { getBranding } from '@/lib/branding-store';
 import { getEmailConfig } from '@/lib/email-store';
+import { getFlightConfig } from '@/lib/flights/store';
 import { getAllGatewayConfigs } from '@/lib/gateways/store';
 import { getPlacesConfig } from '@/lib/places/store';
 import { getClientMessagingConfig } from '@/lib/client-messaging';
@@ -40,28 +42,31 @@ export default async function SettingsPage({
   await pageRequireCapability('manageSettings');
   const query = await searchParams;
 
-  const [branding, locale, settings, defaultCard, userCount] = await Promise.all([
-    getBranding(),
-    getLocaleConfig(),
-    getSettings(),
-    prisma.rateCard.findFirst({
-      where: { isDefault: true },
-      select: { name: true, _count: { select: { rules: true } } },
-    }),
-    prisma.user.count({ where: { active: true } }),
-  ]);
+  const [branding, locale, settings, defaultCard, userCount] =
+    await Promise.all([
+      getBranding(),
+      getLocaleConfig(),
+      getSettings(),
+      prisma.rateCard.findFirst({
+        where: { isDefault: true },
+        select: { name: true, _count: { select: { rules: true } } },
+      }),
+      prisma.user.count({ where: { active: true } }),
+    ]);
 
   // What a reset would remove, so the number is on the screen before anybody
   // types anything.
   const resetPreview = await previewReset();
 
-  const [email, gateways, places, telegram, messaging] = await Promise.all([
-    getEmailConfig(),
-    getAllGatewayConfigs(),
-    getPlacesConfig(),
-    getTelegramConfig(),
-    getClientMessagingConfig(),
-  ]);
+  const [email, gateways, places, telegram, messaging, flights] =
+    await Promise.all([
+      getEmailConfig(),
+      getAllGatewayConfigs(),
+      getPlacesConfig(),
+      getTelegramConfig(),
+      getClientMessagingConfig(),
+      getFlightConfig(),
+    ]);
 
   const liveTemplates = Object.values(messaging.enabled).filter(Boolean).length;
 
@@ -122,8 +127,23 @@ export default async function SettingsPage({
       href: '/settings/gateways',
       icon: CreditCard,
       title: 'Payment gateways',
-      description: 'Revolut and SumUp, for payment links and webhooks. Optional.',
+      description:
+        'Revolut and SumUp, for payment links and webhooks. Optional.',
       current: gatewaySummary,
+    },
+    {
+      href: '/settings/flights',
+      icon: Plane,
+      title: 'Flight tracking',
+      description:
+        'Watch the flights airport jobs are meeting, and act when one moves. Optional.',
+      current: !flights.enabled
+        ? flights.apiKey
+          ? 'Configured but off'
+          : 'Not configured'
+        : flights.autoAdjust
+          ? 'On — moves pickups'
+          : 'On — flags only',
     },
     {
       href: '/settings/telegram',
@@ -187,18 +207,18 @@ export default async function SettingsPage({
       <div className="grid gap-4 sm:grid-cols-2">
         {sections.map((section) => (
           <Link key={section.href} href={section.href} className="block">
-            <Card className="h-full transition-colors hover:bg-accent">
+            <Card className="hover:bg-accent h-full transition-colors">
               <CardContent className="flex gap-4 p-5">
                 <section.icon
-                  className="mt-0.5 size-5 shrink-0 text-muted-foreground"
+                  className="text-muted-foreground mt-0.5 size-5 shrink-0"
                   aria-hidden
                 />
                 <div className="min-w-0">
                   <p className="font-medium">{section.title}</p>
-                  <p className="mt-0.5 text-sm text-muted-foreground">
+                  <p className="text-muted-foreground mt-0.5 text-sm">
                     {section.description}
                   </p>
-                  <p className="mt-2 truncate text-xs text-muted-foreground">
+                  <p className="text-muted-foreground mt-2 truncate text-xs">
                     {section.current}
                   </p>
                 </div>
@@ -241,10 +261,10 @@ function DangerZone({
   notice?: string | null;
 }) {
   return (
-    <Card className="mt-8 border-destructive/50">
+    <Card className="border-destructive/50 mt-8">
       <CardContent className="p-5">
-        <h2 className="font-medium text-destructive">Start fresh</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <h2 className="text-destructive font-medium">Start fresh</h2>
+        <p className="text-muted-foreground mt-1 text-sm">
           Empties this install of every job, client, driver, vehicle, account,
           invoice, payout and its history — {rows.toLocaleString()} rows across{' '}
           {tables} tables. Your sign-in, branding, locale, tax settings, zones
@@ -257,7 +277,11 @@ function DangerZone({
         </p>
 
         {error ? (
-          <Alert variant="destructive" className="mt-4" data-testid="reset-error">
+          <Alert
+            variant="destructive"
+            className="mt-4"
+            data-testid="reset-error"
+          >
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         ) : null}
@@ -268,7 +292,7 @@ function DangerZone({
         ) : null}
 
         {rows === 0 ? (
-          <p className="mt-4 text-sm text-muted-foreground">
+          <p className="text-muted-foreground mt-4 text-sm">
             Nothing to remove — this install is already empty.
           </p>
         ) : (
@@ -279,7 +303,10 @@ function DangerZone({
             data-testid="reset-form"
           >
             <div>
-              <label htmlFor="confirm" className="mb-1 block text-sm font-medium">
+              <label
+                htmlFor="confirm"
+                className="mb-1 block text-sm font-medium"
+              >
                 Type <span translate="no">{tradingName}</span> to confirm
               </label>
               <Input

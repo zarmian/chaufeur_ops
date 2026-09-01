@@ -55,10 +55,16 @@ const priceField = z
     try {
       const pence = parseMoney(value);
       if (pence < 0) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'That cannot be negative' });
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'That cannot be negative',
+        });
       }
     } catch {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Enter an amount like 125.50' });
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Enter an amount like 125.50',
+      });
     }
   })
   .transform((value) => (value === null ? null : parseMoney(value)));
@@ -128,8 +134,14 @@ const optionalCoordinate = z.preprocess(
 export const stopSchema = z.object({
   address: z.string().trim().min(1).max(500),
   waitMinutes: z.preprocess(
-    (value) => (value === '' || value === null || value === undefined ? null : value),
-    z.coerce.number().int().min(0).max(24 * 60).nullable(),
+    (value) =>
+      value === '' || value === null || value === undefined ? null : value,
+    z.coerce
+      .number()
+      .int()
+      .min(0)
+      .max(24 * 60)
+      .nullable(),
   ),
   chargePence: z
     .string()
@@ -140,10 +152,16 @@ export const stopSchema = z.object({
       if (value === null) return;
       try {
         if (parseMoney(value) < 0) {
-          ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'That cannot be negative' });
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'That cannot be negative',
+          });
         }
       } catch {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Enter an amount like 15.00' });
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Enter an amount like 15.00',
+        });
       }
     })
     .transform((value) => (value === null ? null : parseMoney(value))),
@@ -156,7 +174,12 @@ export const jobSchema = z
   .object({
     clientId: optionalId,
     accountId: optionalId,
-    jobType: z.enum(['AS_DIRECTED', 'TRANSFER', 'AIRPORT_TRANSFER', 'CONTRACT']),
+    jobType: z.enum([
+      'AS_DIRECTED',
+      'TRANSFER',
+      'AIRPORT_TRANSFER',
+      'CONTRACT',
+    ]),
 
     // Entered in the operator's local time; converted to UTC on save.
     scheduledDate: z
@@ -258,7 +281,10 @@ export const jobSchema = z
     driverDays: optionalQuantity,
     driverDayRatePence: priceField,
 
-    stops: z.array(stopSchema).max(20, 'That is more stops than a job can have').default([]),
+    stops: z
+      .array(stopSchema)
+      .max(20, 'That is more stops than a job can have')
+      .default([]),
 
     /** Attributes the job to a hired driver's shift. */
     shiftId: optionalId,
@@ -266,7 +292,9 @@ export const jobSchema = z
       .enum(['OWNER_DRIVER', 'HIRED'])
       .optional()
       .or(z.literal(''))
-      .transform((value) => (value === '' || value === undefined ? null : value)),
+      .transform((value) =>
+        value === '' || value === undefined ? null : value,
+      ),
 
     estimatedMinutes: z.preprocess(
       (value) =>
@@ -342,7 +370,9 @@ function toData(input: JobInput, timeZone?: string) {
     luggageCount: input.luggageCount,
     // Only airport transfers carry one; the schema refuses it elsewhere.
     flightNumber:
-      input.jobType === 'AIRPORT_TRANSFER' ? emptyToNull(input.flightNumber) : null,
+      input.jobType === 'AIRPORT_TRANSFER'
+        ? emptyToNull(input.flightNumber)
+        : null,
 
     clientPricePence: input.clientPricePence,
     driverPricePence: input.driverPricePence,
@@ -431,9 +461,7 @@ function hourlyFinanceFor(input: JobInput) {
     // client's, because on a contract they are there the days the car is —
     // but the figure is written down rather than implied, so the panel shows
     // what it charged.
-    driverDays: input.driverDayRatePence
-      ? (input.driverDays ?? days)
-      : null,
+    driverDays: input.driverDayRatePence ? (input.driverDays ?? days) : null,
     driverDayRatePence: input.driverDayRatePence ?? 0,
   };
   const totals = calculateFinance(amounts);
@@ -475,7 +503,9 @@ const SORTABLE = {
   client: (dir: 'asc' | 'desc') => ({ client: { name: dir } }),
   driver: (dir: 'asc' | 'desc') => ({ driver: { name: dir } }),
   clientPrice: (dir: 'asc' | 'desc') => ({ clientPricePence: dir }),
-  grossProfit: (dir: 'asc' | 'desc') => ({ finance: { grossProfitPence: dir } }),
+  grossProfit: (dir: 'asc' | 'desc') => ({
+    finance: { grossProfitPence: dir },
+  }),
 } as const;
 
 export type JobSortKey = keyof typeof SORTABLE;
@@ -545,7 +575,9 @@ export function buildJobWhere(
     where.scheduledAt = {
       // The operator types a London date; the boundary has to be the start of
       // that day in London, which is not midnight UTC for half the year.
-      ...(filters.from ? { gte: toUTC(`${filters.from}T00:00`, timeZone) } : {}),
+      ...(filters.from
+        ? { gte: toUTC(`${filters.from}T00:00`, timeZone) }
+        : {}),
       ...(filters.to ? { lte: toUTC(`${filters.to}T23:59:59`, timeZone) } : {}),
     };
   }
@@ -633,8 +665,12 @@ export async function getJob(id: string) {
     include: {
       client: true,
       account: true,
-      driver: { select: { id: true, name: true, reference: true, phone: true } },
-      vehicle: { select: { id: true, registration: true, make: true, model: true } },
+      driver: {
+        select: { id: true, name: true, reference: true, phone: true },
+      },
+      vehicle: {
+        select: { id: true, registration: true, make: true, model: true },
+      },
       finance: true,
       events: { orderBy: { occurredAt: 'asc' } },
       expenses: { orderBy: { createdAt: 'asc' } },
@@ -655,6 +691,18 @@ export async function getJob(id: string) {
       // series, without loading its other eleven jobs.
       series: { select: { id: true, label: true, cancelledAt: true } },
       contract: { select: { id: true, label: true, reference: true } },
+      // Whatever tracking last heard about the flight this job is meeting.
+      // Null until a provider is configured, which is most installs.
+      flight: {
+        select: {
+          state: true,
+          scheduledArrival: true,
+          estimatedArrival: true,
+          actualArrival: true,
+          terminal: true,
+          checkedAt: true,
+        },
+      },
       invoiceLines: {
         select: {
           invoice: { select: { id: true, number: true, status: true } },
@@ -688,7 +736,9 @@ export async function createJob(
   // dozen callers still pass one. Both shapes are accepted rather than
   // touching every call site to add a field almost none of them set.
   const { timeZone, contractId } =
-    typeof options === 'string' ? { timeZone: options, contractId: null } : options;
+    typeof options === 'string'
+      ? { timeZone: options, contractId: null }
+      : options;
 
   noteLocationsUsed(input);
 
@@ -712,7 +762,9 @@ export async function createJob(
 
         const hourly = hourlyFinanceFor(input);
         if (hourly) {
-          await tx.jobFinance.create({ data: { ...hourly, jobId: created.id } });
+          await tx.jobFinance.create({
+            data: { ...hourly, jobId: created.id },
+          });
         }
 
         await tx.jobEvent.create({
@@ -898,8 +950,9 @@ function invoiceLock(
 ): { reference: string; status: string; issued: boolean } | null {
   const invoices = lines
     .map((line) => line.invoice)
-    .filter((invoice): invoice is { number: string; status: string } =>
-      Boolean(invoice) && invoice!.status !== 'CANCELLED',
+    .filter(
+      (invoice): invoice is { number: string; status: string } =>
+        Boolean(invoice) && invoice!.status !== 'CANCELLED',
     )
     .map((invoice) => ({
       reference: invoice.number,
@@ -944,7 +997,11 @@ export async function transitionJob(
   });
 
   if (!job) {
-    return { ok: false, code: 'INVALID_TRANSITION', message: 'That job no longer exists' };
+    return {
+      ok: false,
+      code: 'INVALID_TRANSITION',
+      message: 'That job no longer exists',
+    };
   }
 
   // A reason supplied with the click counts, so completing an unpriced job is
@@ -962,7 +1019,11 @@ export async function transitionJob(
   // and not only on the form.
   const compliance =
     next === 'ASSIGNED' && job.driverId
-      ? await checkAssignmentCompliance(job.driverId, job.vehicleId, job.scheduledAt)
+      ? await checkAssignmentCompliance(
+          job.driverId,
+          job.vehicleId,
+          job.scheduledAt,
+        )
       : null;
 
   const verdict = canTransition(
@@ -998,7 +1059,9 @@ export async function transitionJob(
         where: { id },
         data: {
           status: next,
-          ...(zeroValueReason !== job.zeroValueReason ? { zeroValueReason } : {}),
+          ...(zeroValueReason !== job.zeroValueReason
+            ? { zeroValueReason }
+            : {}),
         },
       });
 
@@ -1093,7 +1156,9 @@ export async function checkAssignmentCompliance(
 ) {
   if (!driverId) return null;
 
-  const compliance = await isDriverCompliantAt(driverId, scheduledAt, { vehicleId });
+  const compliance = await isDriverCompliantAt(driverId, scheduledAt, {
+    vehicleId,
+  });
   if (!vehicleId) return compliance;
 
   const availability = await checkVehicleAvailability(vehicleId, scheduledAt);
@@ -1199,11 +1264,13 @@ export function duplicateDefaults(
     // Swapped together with the text, or a return journey would carry the
     // outbound leg's coordinates and price from the wrong zone.
     pickupText: options.swap ? job.dropoffText : job.pickupText,
-    pickupPostcode: (options.swap ? job.dropoffPostcode : job.pickupPostcode) ?? '',
+    pickupPostcode:
+      (options.swap ? job.dropoffPostcode : job.pickupPostcode) ?? '',
     pickupLat: asField(options.swap ? job.dropoffLat : job.pickupLat),
     pickupLng: asField(options.swap ? job.dropoffLng : job.pickupLng),
     dropoffText: options.swap ? job.pickupText : job.dropoffText,
-    dropoffPostcode: (options.swap ? job.pickupPostcode : job.dropoffPostcode) ?? '',
+    dropoffPostcode:
+      (options.swap ? job.pickupPostcode : job.dropoffPostcode) ?? '',
     dropoffLat: asField(options.swap ? job.pickupLat : job.dropoffLat),
     dropoffLng: asField(options.swap ? job.pickupLng : job.dropoffLng),
     viaText: job.viaText ?? '',

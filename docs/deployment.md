@@ -193,6 +193,17 @@ before doing any work. Confirm the schedule appears under the project's Cron
 Jobs tab after the first deploy — a cron declared in `vercel.json` but not
 listed there means the deployment did not pick the file up.
 
+**`/api/cron/flights` runs every fifteen minutes**, which Vercel's Hobby plan
+does not allow — it caps crons at one a day. On Hobby, either leave flight
+tracking switched off (the route then returns immediately having done nothing)
+or drive it from an external scheduler with the same bearer token. On Pro the
+schedule in `vercel.json` works as written.
+
+The value in flight tracking is entirely in being early: a delay found at five
+past five is a driver who leaves later; the same delay found at six is a driver
+already in a car park on a wait-time clock the client will argue about. A daily
+run would find every delay after it had cost the money.
+
 ### Backups and restore
 
 Supabase takes a daily logical backup on every paid plan; on the free plan it

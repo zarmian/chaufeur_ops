@@ -283,11 +283,11 @@ model User {
   deletedAt          DateTime?
 
   auditEntries     AuditLog[]
-  createdJobs      Job[]           @relation("JobCreatedBy")
-  createdJobSeries JobSeries[]     @relation("JobSeriesCreatedBy")
-  createdContracts JobContract[]   @relation("JobContractCreatedBy")
-  bulkOperations   BulkOperation[] @relation("BulkOperationCreatedBy")
-  createdRentals   VehicleRental[] @relation("RentalCreatedBy")
+  createdJobs      Job[]            @relation("JobCreatedBy")
+  createdJobSeries JobSeries[]      @relation("JobSeriesCreatedBy")
+  createdContracts JobContract[]    @relation("JobContractCreatedBy")
+  bulkOperations   BulkOperation[]  @relation("BulkOperationCreatedBy")
+  createdRentals   VehicleRental[]  @relation("RentalCreatedBy")
   sessions         Session[]
   telegramLinks    StaffLinkToken[]
 
@@ -755,6 +755,26 @@ model Job {
   luggageCount   Int?
   flightNumber   String?
 
+  /// The flight this job is meeting, once tracking has found it.
+  ///
+  /// A relation rather than a repeat of the arrival times, because several
+  /// jobs meet the same aeroplane and three copies of an estimate is three
+  /// chances to hold a stale one.
+  flightStatusId     String?
+  /// Where a *person* last put the pickup, if tracking has moved it since.
+  ///
+  /// The buffer between the scheduled landing and the pickup is somebody's
+  /// judgement about that terminal and that client, and it is preserved
+  /// against the new arrival rather than recomputed. Measuring from a time
+  /// this system set would fold each adjustment into the next, walking the
+  /// pickup steadily away from the aeroplane. Null means the pickup is where
+  /// a person left it.
+  flightPickupBaseAt DateTime?
+  /// When tracking last moved this pickup. For the audit trail and for the
+  /// dispatch board, which has to say "we moved this" rather than implying
+  /// somebody did.
+  flightAdjustedAt   DateTime?
+
   /// Unguessable key for this job's meet-and-greet name board.
   ///
   /// The board is reachable without a session, because the person who holds
@@ -822,7 +842,8 @@ model Job {
   dropoffLocation Location?     @relation("JobDropoffLocation", fields: [dropoffLocationId], references: [id])
   rateCardRule    RateCardRule? @relation(fields: [rateCardRuleId], references: [id])
 
-  shift DriverShift? @relation(fields: [shiftId], references: [id])
+  shift  DriverShift?  @relation(fields: [shiftId], references: [id])
+  flight FlightStatus? @relation(fields: [flightStatusId], references: [id])
 
   finance      JobFinance?
   events       JobEvent[]
@@ -842,6 +863,7 @@ model Job {
   @@index([accountId])
   @@index([shiftId])
   @@index([seriesId, scheduledAt])
+  @@index([flightStatusId])
   @@index([deletedAt])
 }
 
@@ -1332,6 +1354,7 @@ model VehicleRental {
 
   @@index([vehicleId, startAt])
   @@index([driverId])
+  @@index([accountId])
   @@index([status])
   @@index([deletedAt])
 }
@@ -1911,4 +1934,61 @@ model ClientMessage {
 
   @@index([clientId, createdAt])
   @@index([status])
+}
+
+/// What a flight is doing, reduced to the states that change a decision.
+///
+/// Providers report a dozen or more. Mapping down happens in the adapter so a
+/// provider inventing a new status cannot leak an unhandled string into
+/// dispatch — see `lib/flights/types.ts`.
+enum FlightState {
+  SCHEDULED
+  ACTIVE
+  LANDED
+  CANCELLED
+  DIVERTED
+  UNKNOWN
+}
+
+/// One flight, on one day, as last seen by the provider.
+///
+/// Keyed on the flight and the date rather than on the job, because several
+/// jobs meet the same aeroplane: a family in two cars, or two clients off the
+/// same New York service. One row means one lookup, which matters when every
+/// lookup is billed.
+///
+/// Not soft-deleted. It is a cache of somebody else's data, not a record of
+/// anything this business did — there is nothing here to audit or restore, and
+/// the row is rewritten every time the flight is checked.
+model FlightStatus {
+  id String @id @default(cuid())
+
+  /// Normalised — `BA117`, never `ba 117`. See `normaliseFlightNumber`.
+  flightNumber String
+  /// The UTC calendar date asked about, which is the date the provider keys on.
+  scheduledOn  DateTime @db.Date
+
+  state            FlightState @default(UNKNOWN)
+  /// The timetable. The baseline the booking's buffer is measured against.
+  scheduledArrival DateTime?
+  /// The provider's current best guess.
+  estimatedArrival DateTime?
+  /// Wheels down.
+  actualArrival    DateTime?
+
+  origin      String?
+  destination String?
+  terminal    String?
+
+  provider  String
+  /// The last answer, verbatim, for when the mapping turns out to be wrong.
+  raw       Json?
+  checkedAt DateTime @default(now())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  jobs Job[]
+
+  @@unique([flightNumber, scheduledOn])
+  @@index([scheduledArrival])
 }

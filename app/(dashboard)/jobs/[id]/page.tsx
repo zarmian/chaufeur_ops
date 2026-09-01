@@ -57,13 +57,18 @@ export default async function JobDetailPage({
 
   const priced = hasPriceOrReason(job);
   const mayEdit = can(user, 'editJobs');
-  const maySeeFinance = can(user, 'viewReports') || can(user, 'editJobFinances');
+  const maySeeFinance =
+    can(user, 'viewReports') || can(user, 'editJobFinances');
   const timeline = buildTimeline(job.events);
 
   // Only worth the queries while the job could still be assigned.
   const compliance =
     mayEdit && !['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(job.status)
-      ? await checkAssignmentCompliance(job.driverId, job.vehicleId, job.scheduledAt)
+      ? await checkAssignmentCompliance(
+          job.driverId,
+          job.vehicleId,
+          job.scheduledAt,
+        )
       : null;
 
   const invoice = job.invoiceLines[0]?.invoice ?? null;
@@ -138,17 +143,25 @@ export default async function JobDetailPage({
       />
 
       {!priced ? (
-        <Alert variant="destructive" className="mb-6" data-testid="unpriced-alert">
+        <Alert
+          variant="destructive"
+          className="mb-6"
+          data-testid="unpriced-alert"
+        >
           <AlertTitle>This job has no price</AlertTitle>
           <AlertDescription>
-            It will not appear in any revenue report, and it cannot be
-            completed until a price or a zero-value reason is recorded.
+            It will not appear in any revenue report, and it cannot be completed
+            until a price or a zero-value reason is recorded.
           </AlertDescription>
         </Alert>
       ) : null}
 
       {compliance && !compliance.compliant ? (
-        <Alert variant="destructive" className="mb-6" data-testid="compliance-alert">
+        <Alert
+          variant="destructive"
+          className="mb-6"
+          data-testid="compliance-alert"
+        >
           <AlertTitle>
             This driver or vehicle cannot be assigned to a job
           </AlertTitle>
@@ -189,7 +202,10 @@ export default async function JobDetailPage({
           {job.series ? (
             <span>
               {job.seriesIndex ? `Job ${job.seriesIndex} of a ` : 'Part of a '}
-              <Link href={`/jobs/series/${job.series.id}`} className="underline">
+              <Link
+                href={`/jobs/series/${job.series.id}`}
+                className="underline"
+              >
                 recurring series
               </Link>
               {job.series.cancelledAt ? ' (ended)' : null}
@@ -207,7 +223,9 @@ export default async function JobDetailPage({
             <CardContent>
               <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
                 <Field label="Pickup time">
-                  <span className="tabular">{formatDateTime(job.scheduledAt)}</span>
+                  <span className="tabular">
+                    {formatDateTime(job.scheduledAt)}
+                  </span>
                 </Field>
                 <Field label="Type">{jobTypeLabel(job.jobType)}</Field>
                 {/* One day of a standing contract. The contract is where the
@@ -220,7 +238,7 @@ export default async function JobDetailPage({
                     >
                       {job.contract.label}
                     </Link>
-                    <span className="ml-2 text-xs text-muted-foreground tabular">
+                    <span className="text-muted-foreground tabular ml-2 text-xs">
                       {job.contract.reference}
                     </span>
                   </Field>
@@ -232,7 +250,7 @@ export default async function JobDetailPage({
                 <Field label="Pickup">
                   {job.pickupText}
                   {job.pickupPostcode ? (
-                    <span className="ml-2 text-xs text-muted-foreground tabular">
+                    <span className="text-muted-foreground tabular ml-2 text-xs">
                       {job.pickupPostcode}
                     </span>
                   ) : null}
@@ -240,18 +258,44 @@ export default async function JobDetailPage({
                 <Field label="Destination">
                   {job.dropoffText}
                   {job.dropoffPostcode ? (
-                    <span className="ml-2 text-xs text-muted-foreground tabular">
+                    <span className="text-muted-foreground tabular ml-2 text-xs">
                       {job.dropoffPostcode}
                     </span>
                   ) : null}
                 </Field>
                 {job.viaText ? <Field label="Via">{job.viaText}</Field> : null}
                 {job.flightNumber ? (
-                  <Field label="Flight">{job.flightNumber}</Field>
+                  <Field label="Flight">
+                    {job.flightNumber}
+                    {/*
+                      What tracking last heard, beside the number somebody
+                      typed. Absent on every install with no provider
+                      configured, which is the point: the field reads exactly
+                      as it did before any of this existed.
+                    */}
+                    {job.flight ? (
+                      <span className="text-muted-foreground ml-2 text-xs">
+                        {flightSummary(job.flight)}
+                      </span>
+                    ) : null}
+                  </Field>
+                ) : null}
+                {job.flightAdjustedAt && job.flightPickupBaseAt ? (
+                  <Field label="Pickup moved">
+                    <span className="tabular">
+                      {formatDateTime(job.flightPickupBaseAt)}
+                    </span>{' '}
+                    <span className="text-muted-foreground text-xs">
+                      — moved for the flight, not by anyone here
+                    </span>
+                  </Field>
                 ) : null}
                 <Field label="Client">
                   {job.client ? (
-                    <Link href={`/clients/${job.client.id}`} className="hover:underline">
+                    <Link
+                      href={`/clients/${job.client.id}`}
+                      className="hover:underline"
+                    >
                       {job.client.name}
                     </Link>
                   ) : (
@@ -272,11 +316,16 @@ export default async function JobDetailPage({
                 </Field>
                 <Field label="Driver">
                   {job.driver ? (
-                    <Link href={`/drivers/${job.driver.id}`} className="hover:underline">
+                    <Link
+                      href={`/drivers/${job.driver.id}`}
+                      className="hover:underline"
+                    >
                       {job.driver.name}
                     </Link>
                   ) : (
-                    <span className="italic text-muted-foreground">Unassigned</span>
+                    <span className="text-muted-foreground italic">
+                      Unassigned
+                    </span>
                   )}
                 </Field>
                 <Field label="Vehicle">
@@ -310,7 +359,7 @@ export default async function JobDetailPage({
               {job.notes ? (
                 <div className="mt-6 border-t pt-4">
                   <p className="text-sm font-medium">Notes</p>
-                  <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">
+                  <p className="text-muted-foreground mt-1 text-sm whitespace-pre-wrap">
                     {job.notes}
                   </p>
                 </div>
@@ -320,11 +369,11 @@ export default async function JobDetailPage({
                 <div className="mt-4 border-t pt-4">
                   <p className="text-sm font-medium">
                     Internal notes
-                    <span className="ml-2 font-normal text-xs text-muted-foreground">
+                    <span className="text-muted-foreground ml-2 text-xs font-normal">
                       Never shown to the driver
                     </span>
                   </p>
-                  <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">
+                  <p className="text-muted-foreground mt-1 text-sm whitespace-pre-wrap">
                     {job.internalNotes}
                   </p>
                 </div>
@@ -353,12 +402,12 @@ export default async function JobDetailPage({
                           {stop.sequence}. {stop.address}
                         </p>
                         {stop.waitMinutes ? (
-                          <p className="text-xs text-muted-foreground">
+                          <p className="text-muted-foreground text-xs">
                             Waited {stop.waitMinutes} minutes
                           </p>
                         ) : null}
                       </div>
-                      <span className="tabular whitespace-nowrap text-sm">
+                      <span className="tabular text-sm whitespace-nowrap">
                         {stop.chargePence === null
                           ? '—'
                           : formatGBP(stop.chargePence)}
@@ -404,7 +453,7 @@ export default async function JobDetailPage({
             </CardHeader>
             <CardContent>
               {timeline.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
+                <p className="text-muted-foreground text-sm">
                   No events recorded yet.
                 </p>
               ) : (
@@ -416,14 +465,14 @@ export default async function JobDetailPage({
                     >
                       <div>
                         <p className="text-sm font-medium">{entry.label}</p>
-                        <p className="text-xs text-muted-foreground">
+                        <p className="text-muted-foreground text-xs">
                           {ACTOR_LABELS[entry.actorType]}
                           {entry.sincePrevious
                             ? ` · ${entry.sincePrevious} after the previous step`
                             : ''}
                         </p>
                       </div>
-                      <span className="tabular whitespace-nowrap text-xs text-muted-foreground">
+                      <span className="tabular text-muted-foreground text-xs whitespace-nowrap">
                         {formatDateTime(entry.occurredAt)}
                       </span>
                     </li>
@@ -451,7 +500,7 @@ export default async function JobDetailPage({
                   error={statusError}
                 />
               ) : (
-                <p className="text-sm text-muted-foreground">
+                <p className="text-muted-foreground text-sm">
                   Your role cannot change a job&apos;s status.
                 </p>
               )}
@@ -481,7 +530,11 @@ export default async function JobDetailPage({
               </CardHeader>
               <CardContent className="space-y-3">
                 <Row label="Client price">
-                  {priced ? formatGBP(job.clientPricePence ?? 0) : <UnpricedBadge />}
+                  {priced ? (
+                    formatGBP(job.clientPricePence ?? 0)
+                  ) : (
+                    <UnpricedBadge />
+                  )}
                 </Row>
                 <Row label="Driver price">
                   {job.driverPricePence === null
@@ -503,10 +556,12 @@ export default async function JobDetailPage({
                     {formatGBP(economics.rechargedExpensePence)}
                   </Row>
                 ) : null}
-                <Row label="Revenue">{formatGBP(economics.totalClientPence)}</Row>
+                <Row label="Revenue">
+                  {formatGBP(economics.totalClientPence)}
+                </Row>
                 <Row label="Costs">{formatGBP(economics.totalCostsPence)}</Row>
                 {economics.paidByShift && job.shift ? (
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-muted-foreground text-xs">
                     The driver was paid for{' '}
                     <Link
                       href={`/shifts/${job.shift.id}`}
@@ -521,7 +576,7 @@ export default async function JobDetailPage({
                   <span
                     className={
                       economics.grossProfitPence < 0
-                        ? 'font-medium text-destructive'
+                        ? 'text-destructive font-medium'
                         : 'font-medium'
                     }
                   >
@@ -532,7 +587,9 @@ export default async function JobDetailPage({
 
                 {can(user, 'editJobFinances') ? (
                   <Button asChild variant="outline" className="w-full">
-                    <Link href={`/jobs/${job.id}/finance`}>Open finance panel</Link>
+                    <Link href={`/jobs/${job.id}/finance`}>
+                      Open finance panel
+                    </Link>
                   </Button>
                 ) : null}
               </CardContent>
@@ -551,7 +608,7 @@ export default async function JobDetailPage({
                 >
                   {invoice.number}
                 </Link>
-                <p className="mt-1 text-sm text-muted-foreground">
+                <p className="text-muted-foreground mt-1 text-sm">
                   {invoice.status}
                 </p>
               </CardContent>
@@ -566,7 +623,8 @@ export default async function JobDetailPage({
                   <ComplianceBadge level={compliance.level} />
                 </CardTitle>
                 <CardDescription>
-                  Checked against the pickup time, {formatDate(job.scheduledAt)}.
+                  Checked against the pickup time, {formatDate(job.scheduledAt)}
+                  .
                 </CardDescription>
               </CardHeader>
             </Card>
@@ -577,10 +635,16 @@ export default async function JobDetailPage({
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <div>
-      <dt className="text-xs uppercase tracking-wide text-muted-foreground">
+      <dt className="text-muted-foreground text-xs tracking-wide uppercase">
         {label}
       </dt>
       <dd className="mt-0.5 text-sm">{children}</dd>
@@ -588,7 +652,13 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+function Row({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="flex items-center justify-between gap-4 text-sm">
       <span className="text-muted-foreground">{label}</span>
@@ -599,4 +669,30 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 
 function jobTypeLabel(value: string): string {
   return JOB_TYPES.find((type) => type.value === value)?.label ?? value;
+}
+
+/**
+ * What tracking last heard, in a few words beside the flight number.
+ *
+ * The synchronous twin of `describeFlight` in `lib/flights/track.ts`: the
+ * page already has the locale it renders everything else with, and a second
+ * settings read for one label would be a query per job screen.
+ */
+function flightSummary(flight: {
+  state: string;
+  scheduledArrival: Date | null;
+  estimatedArrival: Date | null;
+  actualArrival: Date | null;
+}): string {
+  if (flight.state === 'CANCELLED') return '· cancelled';
+  if (flight.state === 'DIVERTED') return '· diverted';
+  if (flight.actualArrival)
+    return `· landed ${formatDateTime(flight.actualArrival)}`;
+  if (flight.estimatedArrival) {
+    return `· expected ${formatDateTime(flight.estimatedArrival)}`;
+  }
+  if (flight.scheduledArrival) {
+    return `· scheduled ${formatDateTime(flight.scheduledArrival)}`;
+  }
+  return '· nothing known';
 }

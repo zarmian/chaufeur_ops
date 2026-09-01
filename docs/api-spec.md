@@ -375,6 +375,7 @@ All require `Authorization: Bearer ${CRON_SECRET}`.
 | `/api/cron/invoice-reminders` | daily 09:00 | Chases invoices overdue by the configured number of days |
 | `/api/cron/unpriced-digest` | daily 07:00 | Emails ops the list of completed-but-unpriced jobs |
 | `/api/cron/telegram` | daily 08:00 | Document chasing, unassigned and unanswered alerts, position purge |
+| `/api/cron/flights` | every 15 min | Checks the flights upcoming airport jobs are meeting; flags or moves the pickup |
 
 ## Rate limiting
 
