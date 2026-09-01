@@ -513,6 +513,16 @@ reachable one with no tables, and prints the remedy for each. If `/api/health`
 itself fails, the deployment is not booting — check the Vercel build and
 function logs for the digest shown on the screen.
 
+**A document upload sits at 0% and never moves** — the browser is being
+stopped by `connect-src` before the request opens. Uploads go direct from the
+browser to Vercel Blob, so the policy in `lib/security-headers.ts` has to name
+those hosts; with them missing there is no error to show, because nothing
+failed — the request was never made. Check the `Content-Security-Policy`
+header on any page (`curl -I`) and confirm `connect-src` lists
+`https://vercel.com` and `https://*.vercel-storage.com`. Anything else the
+browser blocks shows the same way, so a stall with no message is almost always
+this directive.
+
 **`prepared statement "s0" already exists`** — `pgbouncer=true` is missing
 from `DATABASE_URL`.
 

@@ -24,9 +24,9 @@ describe('the content security policy', () => {
   it('never allows inline script', () => {
     // The single line that would make the whole policy decorative.
     expect(policy).not.toContain("script-src 'self' 'unsafe-inline'");
-    expect(policy.split('; ').find((d) => d.startsWith('script-src'))).not.toContain(
-      "'unsafe-inline'",
-    );
+    expect(
+      policy.split('; ').find((d) => d.startsWith('script-src')),
+    ).not.toContain("'unsafe-inline'");
   });
 
   it('never allows eval in production', () => {
@@ -35,6 +35,38 @@ describe('the content security policy', () => {
     expect(contentSecurityPolicy(nonce, { development: true })).toContain(
       'unsafe-eval',
     );
+  });
+
+  /*
+   * The regression this pair exists for.
+   *
+   * `connect-src 'self'` was written believing nothing in the browser talked
+   * to a third party. Uploads had already moved into the browser by then, so
+   * the policy silently blocked every document upload: the request never
+   * opened, no progress event fired, and the panel sat at 0% with nothing to
+   * report because nothing had failed.
+   *
+   * A stall is the worst failure shape available — no error, no log, and an
+   * operator who tries again. So the hosts are asserted by name.
+   */
+  it('lets the browser reach Vercel Blob, because uploads go direct', () => {
+    const connect = policy.split('; ').find((d) => d.startsWith('connect-src'));
+
+    expect(connect).toContain("'self'");
+    // Where `@vercel/blob/client` starts and completes an upload.
+    expect(connect).toContain('https://vercel.com');
+    // The store's own subdomain, where the object itself is written.
+    expect(connect).toContain('https://*.vercel-storage.com');
+  });
+
+  it('does not open connect-src to anything else', () => {
+    // Widening this to `https:` would make the directive decorative, and it
+    // is the one that says where the application legitimately talks out.
+    const connect = policy.split('; ').find((d) => d.startsWith('connect-src'));
+
+    expect(connect).not.toContain('connect-src https:');
+    expect(connect).not.toContain("'unsafe-inline'");
+    expect(connect?.split(' ').filter((s) => s === '*')).toHaveLength(0);
   });
 
   it('refuses to be framed', () => {

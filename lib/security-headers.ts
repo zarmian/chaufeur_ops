@@ -78,9 +78,28 @@ export function contentSecurityPolicy(
     // a PDF template.
     `img-src 'self' data: blob: https:`,
     `font-src 'self' data:`,
-    // Nothing here talks to a third-party API from the browser. Telegram,
-    // the payment gateways and the email provider are all called server-side.
-    `connect-src 'self'`,
+    /*
+     * Telegram, the payment gateways and the email provider are all called
+     * server-side. **Document uploads are not**, and this directive said they
+     * were.
+     *
+     * `@vercel/blob/client` uploads straight from the browser: it asks
+     * `/api/documents/upload` for a token — same origin, allowed — and then
+     * PUTs the file to Vercel's own hosts. Under `connect-src 'self'` the
+     * browser blocked that request before it opened, so `onUploadProgress`
+     * never fired and the panel sat at **0% forever**, with no error to show
+     * because nothing failed: the request was never made.
+     *
+     * Two hosts, because the SDK uses both — `vercel.com/api/blob` to start
+     * and complete the upload, and the store's own subdomain for the object.
+     *
+     * This is not a real loosening of the policy: `img-src` above already
+     * allows `https:` to any host, so a compromised script had a wider channel
+     * out than these two entries open. The value of the directive is in
+     * stating where the app *does* legitimately talk, which is why the list is
+     * specific rather than `https:`.
+     */
+    `connect-src 'self' https://vercel.com https://*.vercel-storage.com`,
     `object-src 'none'`,
     `base-uri 'self'`,
     `form-action 'self'`,
@@ -127,7 +146,8 @@ export function staticSecurityHeaders({
 
     // Nothing here needs any of them, and a compromised script should not be
     // able to reach for them either.
-    'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=()',
+    'Permissions-Policy':
+      'camera=(), microphone=(), geolocation=(), payment=()',
 
     /*
      * A year, subdomains included — and only on a request that arrived over
