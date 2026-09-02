@@ -1,3 +1,6 @@
+// First, so Zod is configured before any schema is parsed. See the file for
+// why the browser must not be allowed to probe for `eval`.
+import './zod-config';
 import { ZodError } from 'zod';
 import { zodFields } from './zod-fields';
 import { ForbiddenError, UnauthenticatedError } from './permissions';
@@ -47,7 +50,8 @@ export function toFormState(
     return { error: 'Check the highlighted fields', fields: zodFields(error) };
   }
   if (error instanceof ForbiddenError) return { error: error.message };
-  if (error instanceof UnauthenticatedError) return { error: 'Please sign in again' };
+  if (error instanceof UnauthenticatedError)
+    return { error: 'Please sign in again' };
 
   // Domain errors carry a message written for the operator, so use it.
   if (error instanceof Error && error.name.startsWith('Duplicate')) {
