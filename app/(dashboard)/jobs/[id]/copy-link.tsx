@@ -13,7 +13,18 @@ import { Button } from '@/components/ui/button';
  * domain then both produce a URL that works, without a setting to keep in
  * step with either.
  */
-export function CopyLink({ path }: { path: string }) {
+export function CopyLink({
+  path,
+  /*
+   * Named by the caller, because the job screen now carries two of these —
+   * the name board's and the passenger's tracking link. Two elements sharing
+   * one test id is a selector that silently matches the wrong button.
+   */
+  testId = 'copy-board-link',
+}: {
+  path: string;
+  testId?: string;
+}) {
   const [copied, setCopied] = useState(false);
 
   async function copy() {
@@ -29,7 +40,7 @@ export function CopyLink({ path }: { path: string }) {
       // Clipboard access is refused in some browsers outside a secure
       // context. Prompting is a poor substitute but it is one — the operator
       // still ends up with the link, which is the point.
-      window.prompt('Copy the board link', url);
+      window.prompt('Copy the link', url);
     }
   }
 
@@ -39,7 +50,7 @@ export function CopyLink({ path }: { path: string }) {
       variant="ghost"
       size="sm"
       onClick={() => void copy()}
-      data-testid="copy-board-link"
+      data-testid={testId}
     >
       {copied ? <Check aria-hidden /> : <Link2 aria-hidden />}
       {copied ? 'Copied' : 'Copy the link'}

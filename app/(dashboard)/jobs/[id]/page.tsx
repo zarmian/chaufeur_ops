@@ -20,6 +20,7 @@ import { formatDate, formatDateTime } from '@/lib/dates';
 import { buildTimeline, ACTOR_LABELS } from '@/lib/job-events';
 import { allowedTransitions, hasPriceOrReason } from '@/lib/job-status';
 import { issueNameBoardToken } from '@/lib/name-board-store';
+import { issueTrackingToken } from '@/lib/tracking-store';
 import { JOB_TYPES } from '@/lib/enum-options';
 import { formatGBP } from '@/lib/money';
 import { filterValue, type SearchParams } from '@/lib/list-params';
@@ -29,6 +30,7 @@ import { financeAmountsFrom, jobEconomics } from '@/lib/job-finance';
 import { engagementPeriodsFor } from '@/lib/shift-store';
 import { ExpensesPanel } from './expenses-panel';
 import { NameBoardPanel } from './name-board-panel';
+import { TrackingPanel } from './tracking-panel';
 import { liveOfferCount } from '@/lib/telegram/offers';
 import { OfferPanel } from './offer-panel';
 import { StatusControl } from './status-control';
@@ -94,6 +96,17 @@ export default async function JobDetailPage({
    * which is how the panel knows not to appear.
    */
   const boardToken = await issueNameBoardToken(job.id);
+
+  /*
+   * The passenger's link, minted on the same terms as the board's:
+   * get-or-create, so it is idempotent, and once in a job's life.
+   *
+   * Every job that is not a draft can have one. Whether the page behind it
+   * says anything useful yet is `lib/tracking.ts`'s decision, not the
+   * operator's — so there is no state in which the office has to work out
+   * whether it is too early to send.
+   */
+  const trackingToken = mayEdit ? await issueTrackingToken(job.id) : null;
 
   // The terms this job was worked under decide who bears an expense by
   // default, and whether the driver was paid per job at all.
@@ -355,6 +368,8 @@ export default async function JobDetailPage({
                   passengerName={job.passengerName}
                 />
               ) : null}
+
+              {trackingToken ? <TrackingPanel token={trackingToken} /> : null}
 
               {job.notes ? (
                 <div className="mt-6 border-t pt-4">

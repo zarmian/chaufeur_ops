@@ -377,6 +377,17 @@ All require `Authorization: Bearer ${CRON_SECRET}`.
 | `/api/cron/telegram` | daily 08:00 | Document chasing, unassigned and unanswered alerts, position purge |
 | `/api/cron/flights` | every 15 min | Checks the flights upcoming airport jobs are meeting; flags or moves the pickup |
 
+## Public pages
+
+No session. The token in the path is the whole credential, and each answers
+identically for a token that never existed, one that has been reissued, and one
+outside its window.
+
+| Route | Held by | Notes |
+|---|---|---|
+| `/board/:token` | The driver | The meet-and-greet name board. One self-contained document, no app chrome |
+| `/track/:token` | The passenger | Driver, car and ETA. No prices, no phone numbers. Answers from 24h before the pickup until 6h after |
+
 ## Rate limiting
 
 - Auth endpoints: 5 attempts per 15 minutes per IP

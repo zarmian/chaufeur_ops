@@ -785,6 +785,18 @@ model Job {
   /// one be revoked by reissuing rather than by editing the booking.
   nameBoardToken String? @unique
 
+  /// Unguessable key for this job's passenger tracking page.
+  ///
+  /// A second token rather than reusing the name board's, because the two
+  /// pages are held by different people for different reasons: the board is
+  /// the driver's, the tracking link is the passenger's. One token would mean
+  /// revoking a link forwarded to the wrong person also blanks the board a
+  /// driver is holding up in an arrivals hall.
+  ///
+  /// Issued lazily, like the board's, so it stays null on the jobs that never
+  /// need one.
+  trackingToken String? @unique
+
   /// captured at booking — the commercial agreement
   clientPricePence Int?
   driverPricePence Int?

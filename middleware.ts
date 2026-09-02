@@ -54,6 +54,16 @@ const PUBLIC_PREFIXES = [
   // login — the 24-byte token in the path is the credential, and the route
   // itself refuses anything it does not recognise.
   '/board',
+  /*
+   * The passenger's tracking page. Same reasoning as the board and the same
+   * 24-byte token: the person opening it is a client, and clients have no
+   * login either — the link reaches them by email or text.
+   *
+   * The page itself decides what a holder of the token may see, refuses a
+   * link outside its window, and answers identically for a token that never
+   * existed and one that has been reissued.
+   */
+  '/track',
 ];
 
 export function middleware(request: NextRequest) {
@@ -102,10 +112,9 @@ export function middleware(request: NextRequest) {
    * is what broke CI: a production build served over http upgraded every
    * `fetch` to https and they all failed to connect.
    */
-  const secure =
-    (request.headers.get('x-forwarded-proto') ?? request.nextUrl.protocol).startsWith(
-      'https',
-    );
+  const secure = (
+    request.headers.get('x-forwarded-proto') ?? request.nextUrl.protocol
+  ).startsWith('https');
 
   const nonce = createNonce();
   const csp = contentSecurityPolicy(nonce, {
@@ -123,7 +132,9 @@ export function middleware(request: NextRequest) {
    */
   function decorate(response: NextResponse): NextResponse {
     response.headers.set('Content-Security-Policy', csp);
-    for (const [header, value] of Object.entries(staticSecurityHeaders({ secure }))) {
+    for (const [header, value] of Object.entries(
+      staticSecurityHeaders({ secure }),
+    )) {
       response.headers.set(header, value);
     }
     return response;

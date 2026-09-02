@@ -178,6 +178,7 @@ docs/
     phase-5-telegram.md
     phase-6-dispatch.md
     phase-6.5-flight-tracking.md
+    phase-6.6-passenger-tracking.md
 reference/
   legacy-system-audit.md               how the old system worked, and why this one differs
 tests/
