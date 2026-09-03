@@ -4,6 +4,7 @@ import { Loader2, MapPin } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import { Input } from '@/components/ui/input';
 import {
+  extractPostcode,
   newSessionToken,
   preferredAddressText,
   worthAsking,
@@ -51,6 +52,21 @@ export function AddressField({
   describedBy,
   onChosen,
   clientId,
+  /**
+   * Whether to offer suggestions at all.
+   *
+   * Off, this is a plain text box: no lookup, no dropdown, nothing to choose
+   * and nothing to overwrite what was typed. That is the right shape until a
+   * provider that can find named places is connected — the fallback provider
+   * only knows postcodes, so its whole contribution to a chauffeur operator's
+   * pickup field was a list of postcodes and a way to lose the address the
+   * operator had already typed.
+   *
+   * The postcode and coordinates carried on an existing job are untouched
+   * while the field is left alone, and cleared the moment it is edited, which
+   * is the same rule as before.
+   */
+  suggest = true,
 }: {
   /** The text field's name. Hidden fields are `${name}Postcode` and so on. */
   name: string;
@@ -71,6 +87,7 @@ export function AddressField({
    * Heathrow on a count taken across the whole business.
    */
   clientId?: string | null;
+  suggest?: boolean;
 }) {
   const listId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -93,6 +110,20 @@ export function AddressField({
       ? defaultValue
       : null,
   );
+
+  /**
+   * The postcode read out of what was typed, when there is nothing to ask.
+   *
+   * With suggestions off nothing resolves an address, and the postcode is what
+   * prices a job by zone — so a field that took plain text and threw the
+   * postcode away would quietly cost money on every booking. An operator
+   * pasting "10 Downing Street, London SW1A 2AA" has already supplied it;
+   * this reads it back out.
+   *
+   * Only the postcode. Coordinates cannot be guessed from text, and inventing
+   * them is how an address ends up describing somewhere it is not.
+   */
+  const [typedPostcode, setTypedPostcode] = useState<string | null>(null);
 
   const [suggestions, setSuggestions] = useState<PlaceSuggestion[]>([]);
   const [open, setOpen] = useState(false);
@@ -156,6 +187,12 @@ export function AddressField({
     // box, and stale coordinates are worse than none. Guarded so an ordinary
     // keystroke does not re-render for nothing.
     setResolved((current) => (current === null ? current : null));
+  }
+
+  function scanForPostcode(typed: string) {
+    const found = extractPostcode(typed);
+    // Guarded so an ordinary keystroke does not re-render for nothing.
+    setTypedPostcode((current) => (current === found ? current : found));
   }
 
   function search(query: string) {
@@ -280,10 +317,15 @@ export function AddressField({
         name={name}
         type="text"
         autoComplete="off"
-        role="combobox"
-        aria-expanded={open}
-        aria-controls={listId}
-        aria-autocomplete="list"
+        /*
+         * Only a combobox when there is a list. Announcing one to a screen
+         * reader and then never populating it is worse than a plain text
+         * field, which is exactly what this is with suggestions off.
+         */
+        role={suggest ? 'combobox' : undefined}
+        aria-expanded={suggest ? open : undefined}
+        aria-controls={suggest ? listId : undefined}
+        aria-autocomplete={suggest ? 'list' : undefined}
         aria-invalid={invalid ? true : undefined}
         aria-describedby={describedBy}
         required={required}
@@ -293,7 +335,8 @@ export function AddressField({
         onChange={(event) => {
           if (choosing.current) return;
           clearResolved();
-          search(event.target.value);
+          if (suggest) search(event.target.value);
+          else scanForPostcode(event.target.value);
         }}
         onKeyDown={(event) => {
           if (!open || suggestions.length === 0) return;
@@ -322,7 +365,10 @@ export function AddressField({
       <input
         type="hidden"
         name={`${name}Postcode`}
-        value={resolved?.postcode ?? ''}
+        // A resolved address knows its own postcode; a typed one only has
+        // whatever is in the text. `resolved` wins because it came from a
+        // provider, and it is null the moment the box is edited.
+        value={resolved?.postcode ?? typedPostcode ?? ''}
         readOnly
       />
       <input
@@ -344,14 +390,14 @@ export function AddressField({
         readOnly
       />
 
-      {busy ? (
+      {suggest && busy ? (
         <Loader2
           className="text-muted-foreground absolute top-2.5 right-2 size-4 animate-spin"
           aria-hidden
         />
       ) : null}
 
-      {open && suggestions.length > 0 ? (
+      {suggest && open && suggestions.length > 0 ? (
         <ul
           id={listId}
           role="listbox"

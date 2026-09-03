@@ -9,6 +9,7 @@ import {
 import Link from 'next/link';
 import { useActionState, useEffect, useRef, useState } from 'react';
 import { AddressField } from '@/components/address-field';
+import { FilteredSelect } from '@/components/filtered-select';
 import { FormField, fieldProps } from '@/components/form-field';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { SubmitButton } from '@/components/submit-button';
@@ -162,6 +163,7 @@ export function JobForm({
   inSeries = false,
   currency = DEFAULT_CURRENCY,
   locale: localeTag = DEFAULT_LOCALE,
+  addressSuggestions = false,
 }: {
   action: (state: FormState, formData: FormData) => Promise<FormState>;
   values?: JobFormValues;
@@ -172,6 +174,19 @@ export function JobForm({
   drivers: DriverOption[];
   vehicles: VehicleOption[];
   locations: string[];
+  /**
+   * Whether the pickup and destination boxes offer suggestions.
+   *
+   * Off unless a provider that can find named places is connected. The
+   * fallback provider only knows postcodes, which for a chauffeur operator
+   * means a dropdown of postcodes in a field where somebody wants to type
+   * "The Dorchester" — and, before that was fixed, a way to lose the address
+   * they had already typed. A plain text box is better than a bad list.
+   *
+   * Defaulted to off rather than on: a caller that forgets to pass it gets
+   * the safe shape.
+   */
+  addressSuggestions?: boolean;
   /**
    * From settings, so the hourly quote is in the install's own currency.
    * Defaulted rather than required: this is a live preview of a figure the
@@ -617,15 +632,19 @@ export function JobForm({
         </h2>
 
         <div className="grid gap-4 sm:grid-cols-2">
-          {/* Suggests as you type, and stores the postcode and coordinates
-              alongside the text — spec 4.8.6. With no provider configured it
-              still completes UK postcodes and offers saved locations, so it
-              is never worse than the plain box it replaced. */}
+          {/* Plain text until a Places provider is connected, and a
+              suggesting field once one is — spec 4.8.6. The fallback provider
+              only knows postcodes, so on an install with no key its entire
+              contribution to a chauffeur operator's pickup field was a list of
+              postcodes and a way to overwrite the address already typed. The
+              postcode is still read out of the text either way, because that
+              is what prices the job by zone. */}
           <FormField name="pickupText" label="Pickup" required errors={errors.pickupText}>
             <AddressField
               name="pickupText"
               required
               autoFocus
+              suggest={addressSuggestions}
               invalid={Boolean(errors.pickupText?.length)}
               describedBy={
                 errors.pickupText?.length ? 'pickupText-error' : undefined
@@ -636,7 +655,11 @@ export function JobForm({
                 lat: values.pickupLat,
                 lng: values.pickupLng,
               }}
-              placeholder="The Dorchester"
+              placeholder={
+                addressSuggestions
+                  ? 'The Dorchester'
+                  : 'The Dorchester, 53 Park Lane, London W1K 1QA'
+              }
               clientId={clientId || null}
               onChosen={() => setRevision((count) => count + 1)}
             />
@@ -651,6 +674,7 @@ export function JobForm({
             <AddressField
               name="dropoffText"
               required
+              suggest={addressSuggestions}
               invalid={Boolean(errors.dropoffText?.length)}
               describedBy={
                 errors.dropoffText?.length ? 'dropoffText-error' : undefined
@@ -661,7 +685,11 @@ export function JobForm({
                 lat: values.dropoffLat,
                 lng: values.dropoffLng,
               }}
-              placeholder="Heathrow Terminal 5"
+              placeholder={
+                addressSuggestions
+                  ? 'Heathrow Terminal 5'
+                  : 'Heathrow Terminal 5, Longford TW6 2GA'
+              }
               clientId={clientId || null}
               onChosen={() => setRevision((count) => count + 1)}
             />
@@ -711,18 +739,17 @@ export function JobForm({
             hint="Expired documents are refused when the job is assigned."
             errors={errors.driverId}
           >
-            <Select
+            <FilteredSelect
               {...fieldProps('driverId', errors.driverId)}
               value={driverId}
-              onChange={(event) => onDriverChange(event.target.value)}
-            >
-              <option value="">Unassigned</option>
-              {drivers.map((driver) => (
-                <option key={driver.id} value={driver.id}>
-                  {driver.label}
-                </option>
-              ))}
-            </Select>
+              onChange={onDriverChange}
+              options={drivers.map((driver) => ({
+                value: driver.id,
+                label: driver.label,
+              }))}
+              emptyLabel="Unassigned"
+              searchLabel="Search drivers"
+            />
           </FormField>
 
           {openShifts.length > 0 ? (
@@ -752,18 +779,17 @@ export function JobForm({
             hint="Defaults to the driver's assigned car; change it if they are in another."
             errors={errors.vehicleId}
           >
-            <Select
+            <FilteredSelect
               {...fieldProps('vehicleId', errors.vehicleId)}
               value={vehicleId}
-              onChange={(event) => setVehicleId(event.target.value)}
-            >
-              <option value="">No vehicle</option>
-              {vehicles.map((vehicle) => (
-                <option key={vehicle.id} value={vehicle.id}>
-                  {vehicle.label}
-                </option>
-              ))}
-            </Select>
+              onChange={setVehicleId}
+              options={vehicles.map((vehicle) => ({
+                value: vehicle.id,
+                label: vehicle.label,
+              }))}
+              emptyLabel="No vehicle"
+              searchLabel="Search by registration or model"
+            />
           </FormField>
         </div>
       </section>

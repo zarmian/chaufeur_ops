@@ -87,6 +87,37 @@ Ports the legacy finance modal, with the arithmetic moved server-side.
 4. Reports show `unpricedJobCount` alongside every revenue figure
 5. Bulk price entry: select rows in the list and set client and driver price for all of them, for backfilling migrated data
 
+## 2.7 Finding a driver in a long list
+
+Added after the first customer, at 195 owner-drivers, described the driver and
+vehicle pickers as "very long to go through". They were: one option per driver,
+in a native select that opens as a scroll of two hundred names.
+
+**Acceptance criteria**
+1. A search box above the driver and vehicle selects narrows the options to
+   what has been typed, matching anywhere in the label so a name or a reference
+   works equally
+2. Matching ignores case, spacing and punctuation — "O'Brien" typed without the
+   apostrophe is the same person
+3. Order is preserved rather than re-ranked. The list is already sorted by name
+   and by registration, and re-ordering it moves things around under somebody
+   who knows where they are
+4. **The current selection always survives the filter.** A native `<select>`
+   whose selected `<option>` leaves the DOM loses its value silently, so a
+   dispatcher who picks a driver and then types would book a job with nobody on
+   it and see nothing wrong. This is the rule the feature lives or dies by
+5. The search box is not part of the form. It has no `name`, nothing about it
+   is submitted, and Enter inside it filters rather than booking the job
+6. A filtered list says how much it is hiding — "Showing 3 of 195" — because a
+   select holding three of a hundred and ninety-five options otherwise looks
+   like a system that has lost the rest
+7. Short lists get no search box. A four-vehicle install does not need one, and
+   it is one more thing on the screen with nothing to find
+8. The native select is kept rather than replaced by a custom combobox. It
+   carries the keyboard behaviour, the mobile picker and the form-post contract
+   for free, and it is genuinely faster on a laptop, which is where dispatch
+   works
+
 ---
 
 ## Definition of done

@@ -179,7 +179,7 @@ export default async function SettingsPage({
           ? places.keySet
             ? 'Google Places'
             : 'Google Places — no key set'
-          : 'Postcode lookup — no key needed',
+          : 'Off — the address boxes are plain text',
     },
     {
       href: '/settings/compliance',

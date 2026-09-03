@@ -4,6 +4,7 @@ import { duplicateDefaults, getJob } from '@/lib/jobs';
 import { filterFlag, filterValue, type SearchParams } from '@/lib/list-params';
 import { getLocaleConfig } from '@/lib/locale-store';
 import { pageRequireCapability } from '@/lib/page-guards';
+import { getPlacesConfig } from '@/lib/places/store';
 import { peekNextJobReference } from '@/lib/references';
 import { returnDefaults } from '@/lib/series';
 import { createJobAction } from '../actions';
@@ -23,11 +24,12 @@ export default async function NewJobPage({
   await pageRequireCapability('editJobs');
   const params = await searchParams;
 
-  const [options, nextReference, openShifts, locale] = await Promise.all([
+  const [options, nextReference, openShifts, locale, places] = await Promise.all([
     loadJobFormOptions(),
     peekNextJobReference(),
     loadOpenShifts(),
     getLocaleConfig(),
+    getPlacesConfig(),
   ]);
 
   // `?from=<id>` duplicates an existing job; `&return=true` swaps the
@@ -96,6 +98,7 @@ export default async function NewJobPage({
         returnOfJobId={isReturn && source ? source.id : undefined}
         currency={locale.currency}
         locale={locale.locale}
+        addressSuggestions={places.provider === 'google' && places.keySet}
       />
     </>
   );

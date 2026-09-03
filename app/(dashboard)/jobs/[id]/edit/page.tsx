@@ -5,6 +5,7 @@ import { loadJobFormOptions, loadOpenShifts } from '@/lib/job-form-data';
 import { getJob } from '@/lib/jobs';
 import { getLocaleConfig } from '@/lib/locale-store';
 import { pageRequireCapability } from '@/lib/page-guards';
+import { getPlacesConfig } from '@/lib/places/store';
 import { updateJobAction } from '../../actions';
 import { JobForm } from '../../job-form';
 
@@ -22,11 +23,12 @@ export default async function EditJobPage({
   await pageRequireCapability('editJobs');
   const { id } = await params;
 
-  const [job, options, openShifts, locale] = await Promise.all([
+  const [job, options, openShifts, locale, places] = await Promise.all([
     getJob(id),
     loadJobFormOptions(),
     loadOpenShifts(),
     getLocaleConfig(),
+    getPlacesConfig(),
   ]);
   if (!job) notFound();
 
@@ -52,6 +54,7 @@ export default async function EditJobPage({
         inSeries={Boolean(job.seriesId)}
         currency={locale.currency}
         locale={locale.locale}
+        addressSuggestions={places.provider === 'google' && places.keySet}
         values={{
           clientId: job.clientId ?? '',
           accountId: job.accountId ?? '',

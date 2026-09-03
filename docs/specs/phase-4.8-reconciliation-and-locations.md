@@ -132,20 +132,34 @@ Debits matter as much as credits.
    Dorchester", "Heathrow T5" — is what a chauffeur operator actually types
 3. The provider is a seam. A second implementation can be added without
    touching the booking form, and the system works with none configured
-4. With no provider configured, the field falls back to today's behaviour —
-   free text plus saved locations — and additionally validates and completes
-   UK postcodes through `postcodes.io`, which needs no key and no billing
-5. Choosing a suggestion stores the formatted address, the postcode, and the
+4. With no provider configured the field is plain text: no lookup, no
+   dropdown, and nothing that can replace what the operator typed. **Revised
+   after the first customer reported that "pickup and dropoff only take
+   postcodes".** The `postcodes.io` fallback needs no key and no billing, and
+   that was the whole of its appeal — asked for "10 Downing Street, London
+   SW1A 2AA" the only thing it can offer is "SW1A 2AA", which is less than was
+   already typed, in a dropdown positioned exactly where a hurried dispatcher
+   will hit it. A suggestion that can only ever subtract is worse than no
+   suggestion
+5. Plain text still carries a postcode. It is read out of what was typed — the
+   same canonical, spaced form a lookup would have produced — because the
+   postcode is what resolves the pricing zone, and a field that took the
+   address and dropped it would quietly mis-price every booking. Coordinates
+   are not guessed: text cannot supply them, and inventing them is how an
+   address ends up describing somewhere it is not
+6. Choosing a suggestion stores the formatted address, the postcode, and the
    latitude and longitude on the job
-6. A chosen suggestion is saved as a `Location` if it is not already one, so
+7. **A lookup may add to what the operator typed. It may never replace it with
+   less** — a label is taken only when it contains what was already in the box
+8. A chosen suggestion is saved as a `Location` if it is not already one, so
    the second booking to the same hotel needs no lookup at all
-7. The postcode from a suggestion feeds zone resolution directly, so a
+9. The postcode from a suggestion feeds zone resolution directly, so a
    correctly-picked address prices correctly
-8. Autocomplete requests are debounced and session-tokened, because Google
-   bills per session and a request per keystroke is a bill per keystroke
-9. The provider key is stored encrypted like every other credential, and the
-   lookup is proxied through this application — a key in the browser is a key
-   anybody can spend
+10. Autocomplete requests are debounced and session-tokened, because Google
+    bills per session and a request per keystroke is a bill per keystroke
+11. The provider key is stored encrypted like every other credential, and the
+    lookup is proxied through this application — a key in the browser is a key
+    anybody can spend
 
 ---
 

@@ -24,9 +24,15 @@ export const metadata = { title: 'Address search' };
 /**
  * Where address suggestions come from — spec 4.8.6.
  *
- * Optional, and useful with nothing configured: postcode lookup needs no key
- * and no billing, and completes and validates a UK postcode well enough to
- * price a job. Google Places is what finds "The Dorchester".
+ * Optional, and off by default. The fallback provider only knows postcodes,
+ * and a chauffeur pickup is a building rather than a postcode district: asked
+ * for "10 Downing Street, London SW1A 2AA" it can offer nothing but
+ * "SW1A 2AA", which is less than the operator had already typed. So until a
+ * key is saved the pickup and destination boxes are plain text, and the
+ * postcode is read out of what was typed rather than looked up.
+ *
+ * Google Places is what finds "The Dorchester", and saving a key is what turns
+ * the suggestions on.
  */
 export default async function PlacesSettingsPage({
   searchParams,
@@ -47,7 +53,7 @@ export default async function PlacesSettingsPage({
     <>
       <PageHeader
         title="Address search"
-        description="Optional. Without a key, pickup fields still complete UK postcodes and offer saved locations."
+        description="Optional. Without a key the pickup and destination boxes are plain text — type the full address, and the postcode is read out of it."
         actions={
           <Button asChild variant="outline">
             <Link href="/settings">
@@ -85,7 +91,7 @@ export default async function PlacesSettingsPage({
           <CardTitle className="flex items-center gap-2">
             Provider
             <Badge variant={config.provider === 'google' ? 'success' : 'secondary'}>
-              {config.provider === 'google' ? 'Google Places' : 'Postcode lookup'}
+              {config.provider === 'google' ? 'Google Places' : 'Plain text'}
             </Badge>
           </CardTitle>
         </CardHeader>
@@ -102,10 +108,18 @@ export default async function PlacesSettingsPage({
                 </label>
                 <Select id="provider" name="provider" defaultValue={config.provider}>
                   <option value="postcodes">
-                    Postcode lookup — no key, no billing
+                    Nothing — the address boxes stay plain text
                   </option>
-                  <option value="google">Google Places — needs a key</option>
+                  <option value="google">
+                    Google Places — needs a key, finds named places
+                  </option>
                 </Select>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Plain text is not a limitation to work around: an operator
+                  typing the full address is faster than one choosing from a
+                  list that cannot find the building, and the postcode that
+                  prices the job is read out of it either way.
+                </p>
               </div>
 
               <div>
