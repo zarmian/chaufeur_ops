@@ -4,6 +4,7 @@ import { AlertCircle } from 'lucide-react';
 import Link from 'next/link';
 import { useActionState, useState } from 'react';
 import { useFormStatus } from 'react-dom';
+import { FilteredSelect } from '@/components/filtered-select';
 import { FormField, fieldProps } from '@/components/form-field';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -177,17 +178,16 @@ export function ContractForm({
 
         <div className="grid gap-4 sm:grid-cols-2">
           <FormField name="accountId" label="Billed to" errors={errors.accountId}>
-            <Select
+            <FilteredSelect
               {...fieldProps('accountId', errors.accountId)}
               defaultValue={values.accountId}
-            >
-              <option value="">—</option>
-              {accounts.map((account) => (
-                <option key={account.id} value={account.id}>
-                  {account.label}
-                </option>
-              ))}
-            </Select>
+              options={accounts.map((account) => ({
+                value: account.id,
+                label: account.label,
+              }))}
+              emptyLabel="—"
+              searchLabel="Search accounts"
+            />
           </FormField>
 
           <FormField
@@ -196,17 +196,16 @@ export function ContractForm({
             hint="Every day it makes has to be billable to somebody."
             errors={errors.clientId}
           >
-            <Select
+            <FilteredSelect
               {...fieldProps('clientId', errors.clientId)}
               defaultValue={values.clientId}
-            >
-              <option value="">—</option>
-              {clients.map((client) => (
-                <option key={client.id} value={client.id}>
-                  {client.label}
-                </option>
-              ))}
-            </Select>
+              options={clients.map((client) => ({
+                value: client.id,
+                label: client.label,
+              }))}
+              emptyLabel="—"
+              searchLabel="Search clients"
+            />
           </FormField>
         </div>
       </section>
@@ -305,17 +304,16 @@ export function ContractForm({
             hint="Copied onto each day and changeable there. Nothing stops them doing other work."
             errors={errors.driverId}
           >
-            <Select
+            <FilteredSelect
               {...fieldProps('driverId', errors.driverId)}
               defaultValue={values.driverId}
-            >
-              <option value="">Unassigned</option>
-              {drivers.map((driver) => (
-                <option key={driver.id} value={driver.id}>
-                  {driver.label}
-                </option>
-              ))}
-            </Select>
+              options={drivers.map((driver) => ({
+                value: driver.id,
+                label: driver.label,
+              }))}
+              emptyLabel="Unassigned"
+              searchLabel="Search drivers"
+            />
           </FormField>
           <FormField
             name="vehicleId"
@@ -323,17 +321,16 @@ export function ContractForm({
             hint="Same — it is free for other jobs."
             errors={errors.vehicleId}
           >
-            <Select
+            <FilteredSelect
               {...fieldProps('vehicleId', errors.vehicleId)}
               defaultValue={values.vehicleId}
-            >
-              <option value="">Unassigned</option>
-              {vehicles.map((vehicle) => (
-                <option key={vehicle.id} value={vehicle.id}>
-                  {vehicle.label}
-                </option>
-              ))}
-            </Select>
+              options={vehicles.map((vehicle) => ({
+                value: vehicle.id,
+                label: vehicle.label,
+              }))}
+              emptyLabel="Unassigned"
+              searchLabel="Search by registration or model"
+            />
           </FormField>
         </div>
       </section>

@@ -3,6 +3,7 @@
 import { AlertCircle } from 'lucide-react';
 import Link from 'next/link';
 import { useActionState, useState } from 'react';
+import { FilteredSelect } from '@/components/filtered-select';
 import { FormField, fieldProps } from '@/components/form-field';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { SubmitButton } from '@/components/submit-button';
@@ -139,18 +140,17 @@ export function RentalForm({
         </h2>
         <div className="grid gap-4 sm:grid-cols-2">
           <FormField name="vehicleId" label="Vehicle" required errors={errors.vehicleId}>
-            <Select
+            <FilteredSelect
               {...fieldProps('vehicleId', errors.vehicleId)}
               defaultValue={values.vehicleId}
               required
-            >
-              <option value="">Choose a vehicle</option>
-              {vehicles.map((vehicle) => (
-                <option key={vehicle.id} value={vehicle.id}>
-                  {vehicle.label}
-                </option>
-              ))}
-            </Select>
+              options={vehicles.map((vehicle) => ({
+                value: vehicle.id,
+                label: vehicle.label,
+              }))}
+              emptyLabel="Choose a vehicle"
+              searchLabel="Search by registration or model"
+            />
           </FormField>
 
           <FormField name="renterType" label="Renting to" required>
@@ -169,35 +169,33 @@ export function RentalForm({
 
           {renterType === 'DRIVER' ? (
             <FormField name="driverId" label="Driver" required errors={errors.driverId}>
-              <Select
+              <FilteredSelect
                 {...fieldProps('driverId', errors.driverId)}
                 defaultValue={values.driverId}
                 required
-              >
-                <option value="">Choose a driver</option>
-                {drivers.map((driver) => (
-                  <option key={driver.id} value={driver.id}>
-                    {driver.label}
-                  </option>
-                ))}
-              </Select>
+                options={drivers.map((driver) => ({
+                  value: driver.id,
+                  label: driver.label,
+                }))}
+                emptyLabel="Choose a driver"
+                searchLabel="Search drivers"
+              />
             </FormField>
           ) : null}
 
           {renterType === 'ACCOUNT' ? (
             <FormField name="accountId" label="Company" required errors={errors.accountId}>
-              <Select
+              <FilteredSelect
                 {...fieldProps('accountId', errors.accountId)}
                 defaultValue={values.accountId}
                 required
-              >
-                <option value="">Choose an account</option>
-                {accounts.map((account) => (
-                  <option key={account.id} value={account.id}>
-                    {account.label}
-                  </option>
-                ))}
-              </Select>
+                options={accounts.map((account) => ({
+                  value: account.id,
+                  label: account.label,
+                }))}
+                emptyLabel="Choose an account"
+                searchLabel="Search accounts"
+              />
             </FormField>
           ) : null}
 

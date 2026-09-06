@@ -1,12 +1,12 @@
 import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import { EmptyState } from '@/components/empty-state';
+import { FilteredSelect } from '@/components/filtered-select';
 import { PageHeader } from '@/components/page-header';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Select } from '@/components/ui/select';
 import {
   Table,
   TableBody,
@@ -126,14 +126,17 @@ export default async function NewInvoicePage({
           >
             Account
           </label>
-          <Select id="accountId" name="accountId" defaultValue={accountId ?? ''}>
-            <option value="">Any</option>
-            {accounts.map((account) => (
-              <option key={account.id} value={account.id}>
-                {account.name}
-              </option>
-            ))}
-          </Select>
+          <FilteredSelect
+            id="accountId"
+            name="accountId"
+            defaultValue={accountId ?? ''}
+            options={accounts.map((account) => ({
+              value: account.id,
+              label: account.name,
+            }))}
+            emptyLabel="Any"
+            searchLabel="Search accounts"
+          />
         </div>
         <div>
           <label
@@ -142,14 +145,17 @@ export default async function NewInvoicePage({
           >
             Client
           </label>
-          <Select id="clientId" name="clientId" defaultValue={clientId ?? ''}>
-            <option value="">Any</option>
-            {clients.map((client) => (
-              <option key={client.id} value={client.id}>
-                {client.name}
-              </option>
-            ))}
-          </Select>
+          <FilteredSelect
+            id="clientId"
+            name="clientId"
+            defaultValue={clientId ?? ''}
+            options={clients.map((client) => ({
+              value: client.id,
+              label: client.name,
+            }))}
+            emptyLabel="Any"
+            searchLabel="Search clients"
+          />
         </div>
         <Button type="submit" variant="outline">
           Show
@@ -180,18 +186,17 @@ export default async function NewInvoicePage({
               >
                 Bill to account
               </label>
-              <Select
+              <FilteredSelect
                 id="recipientAccountId"
                 name="accountId"
                 defaultValue={accountId ?? ''}
-              >
-                <option value="">—</option>
-                {accounts.map((account) => (
-                  <option key={account.id} value={account.id}>
-                    {account.name}
-                  </option>
-                ))}
-              </Select>
+                options={accounts.map((account) => ({
+                  value: account.id,
+                  label: account.name,
+                }))}
+                emptyLabel="—"
+                searchLabel="Search accounts to bill"
+              />
             </div>
             <div>
               <label
@@ -200,18 +205,17 @@ export default async function NewInvoicePage({
               >
                 …or to client
               </label>
-              <Select
+              <FilteredSelect
                 id="recipientClientId"
                 name="clientId"
                 defaultValue={clientId ?? ''}
-              >
-                <option value="">—</option>
-                {clients.map((client) => (
-                  <option key={client.id} value={client.id}>
-                    {client.name}
-                  </option>
-                ))}
-              </Select>
+                options={clients.map((client) => ({
+                  value: client.id,
+                  label: client.name,
+                }))}
+                emptyLabel="—"
+                searchLabel="Search clients to bill"
+              />
             </div>
             <div>
               <label htmlFor="issueDate" className="mb-1 block text-sm font-medium">

@@ -547,18 +547,17 @@ export function JobForm({
 
         <div className="grid gap-4 sm:grid-cols-2">
           <FormField name="clientId" label="Client" errors={errors.clientId}>
-            <Select
+            <FilteredSelect
               {...fieldProps('clientId', errors.clientId)}
               value={clientId}
-              onChange={(event) => setClientId(event.target.value)}
-            >
-              <option value="">No client recorded</option>
-              {clients.map((client) => (
-                <option key={client.id} value={client.id}>
-                  {client.label}
-                </option>
-              ))}
-            </Select>
+              onChange={setClientId}
+              options={clients.map((client) => ({
+                value: client.id,
+                label: client.label,
+              }))}
+              emptyLabel="No client recorded"
+              searchLabel="Search clients"
+            />
           </FormField>
 
           <FormField
@@ -567,17 +566,16 @@ export function JobForm({
             hint="Who gets invoiced. Often not the person riding."
             errors={errors.accountId}
           >
-            <Select
+            <FilteredSelect
               {...fieldProps('accountId', errors.accountId)}
               defaultValue={values.accountId}
-            >
-              <option value="">No account</option>
-              {accounts.map((account) => (
-                <option key={account.id} value={account.id}>
-                  {account.label}
-                </option>
-              ))}
-            </Select>
+              options={accounts.map((account) => ({
+                value: account.id,
+                label: account.label,
+              }))}
+              emptyLabel="No account"
+              searchLabel="Search accounts"
+            />
           </FormField>
 
           <FormField name="jobType" label="Job type" required errors={errors.jobType}>

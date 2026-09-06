@@ -3,12 +3,12 @@
 import { AlertCircle } from 'lucide-react';
 import Link from 'next/link';
 import { useActionState } from 'react';
+import { FilteredSelect } from '@/components/filtered-select';
 import { FormField, fieldProps } from '@/components/form-field';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { SubmitButton } from '@/components/submit-button';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { INITIAL_FORM_STATE, type FormState } from '@/lib/form-state';
 
@@ -45,25 +45,28 @@ export function ShiftForm({
 
       <div className="grid gap-4 sm:grid-cols-2">
         <FormField name="driverId" label="Driver" required errors={errors.driverId}>
-          <Select {...fieldProps('driverId', errors.driverId)} required>
-            <option value="">Choose a driver</option>
-            {drivers.map((driver) => (
-              <option key={driver.id} value={driver.id}>
-                {driver.label}
-              </option>
-            ))}
-          </Select>
+          <FilteredSelect
+            {...fieldProps('driverId', errors.driverId)}
+            required
+            options={drivers.map((driver) => ({
+              value: driver.id,
+              label: driver.label,
+            }))}
+            emptyLabel="Choose a driver"
+            searchLabel="Search drivers"
+          />
         </FormField>
 
         <FormField name="vehicleId" label="Vehicle" errors={errors.vehicleId}>
-          <Select {...fieldProps('vehicleId', errors.vehicleId)}>
-            <option value="">Not recorded</option>
-            {vehicles.map((vehicle) => (
-              <option key={vehicle.id} value={vehicle.id}>
-                {vehicle.label}
-              </option>
-            ))}
-          </Select>
+          <FilteredSelect
+            {...fieldProps('vehicleId', errors.vehicleId)}
+            options={vehicles.map((vehicle) => ({
+              value: vehicle.id,
+              label: vehicle.label,
+            }))}
+            emptyLabel="Not recorded"
+            searchLabel="Search by registration or model"
+          />
         </FormField>
 
         <FormField name="startedAt" label="Clocked on" required errors={errors.startedAt}>

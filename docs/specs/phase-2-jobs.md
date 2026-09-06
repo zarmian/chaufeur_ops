@@ -87,16 +87,19 @@ Ports the legacy finance modal, with the arithmetic moved server-side.
 4. Reports show `unpricedJobCount` alongside every revenue figure
 5. Bulk price entry: select rows in the list and set client and driver price for all of them, for backfilling migrated data
 
-## 2.7 Finding a driver in a long list
+## 2.7 Finding one record in a long list
 
 Added after the first customer, at 195 owner-drivers, described the driver and
 vehicle pickers as "very long to go through". They were: one option per driver,
-in a native select that opens as a scroll of two hundred names.
+in a native select that opens as a scroll of two hundred names. The client and
+account lists were asked for immediately afterwards and are the same problem,
+so the control covers every form that picks from a long list — booking a job,
+raising an invoice, a contract, a shift, a hire, and the driver's and vehicle's
+own forms.
 
 **Acceptance criteria**
-1. A search box above the driver and vehicle selects narrows the options to
-   what has been typed, matching anywhere in the label so a name or a reference
-   works equally
+1. A search box above the select narrows the options to what has been typed,
+   matching anywhere in the label so a name or a reference works equally
 2. Matching ignores case, spacing and punctuation — "O'Brien" typed without the
    apostrophe is the same person
 3. Order is preserved rather than re-ranked. The list is already sorted by name
@@ -117,6 +120,16 @@ in a native select that opens as a scroll of two hundred names.
    carries the keyboard behaviour, the mobile picker and the form-post contract
    for free, and it is genuinely faster on a laptop, which is where dispatch
    works
+9. It works on a form with no state of its own. The booking form drives its
+   selects from React, because choosing a driver fills the vehicle in and
+   re-quotes the job; a shift, a hire and an invoice are server-rendered and
+   post plainly. Criterion 4 holds in both cases, and the second is the one
+   where it is easiest to lose, because nothing outside the control remembers
+   what was chosen
+10. Two search boxes on one screen say which list each searches. `/invoices/new`
+    carries an account and client pair to filter by and a second pair to bill,
+    and four boxes all called "Search accounts" would be ambiguous to a screen
+    reader before it was ambiguous to anybody else
 
 ---
 

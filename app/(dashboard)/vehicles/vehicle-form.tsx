@@ -4,6 +4,7 @@ import { AlertCircle } from 'lucide-react';
 import Link from 'next/link';
 import { useActionState, useState } from 'react';
 import { useFormStatus } from 'react-dom';
+import { FilteredSelect } from '@/components/filtered-select';
 import { FormField, fieldProps } from '@/components/form-field';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -299,17 +300,16 @@ export function VehicleForm({
               hint="The owner-driver this car belongs to."
               errors={errors.ownerDriverId}
             >
-              <Select
+              <FilteredSelect
                 {...fieldProps('ownerDriverId', errors.ownerDriverId)}
                 defaultValue={values.ownerDriverId}
-              >
-                <option value="">Not recorded</option>
-                {drivers.map((driver) => (
-                  <option key={driver.id} value={driver.id}>
-                    {driver.name} · {driver.reference}
-                  </option>
-                ))}
-              </Select>
+                options={drivers.map((driver) => ({
+                  value: driver.id,
+                  label: `${driver.name} · ${driver.reference}`,
+                }))}
+                emptyLabel="Not recorded"
+                searchLabel="Search drivers"
+              />
             </FormField>
           )}
         </div>

@@ -4,6 +4,7 @@ import { AlertCircle } from 'lucide-react';
 import Link from 'next/link';
 import { useActionState } from 'react';
 import { useFormStatus } from 'react-dom';
+import { FilteredSelect } from '@/components/filtered-select';
 import { FormField, fieldProps } from '@/components/form-field';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -217,17 +218,16 @@ export function DriverForm({
             hint="A job can still override this. Sharing a car with another driver is allowed."
             errors={errors.assignedVehicleId}
           >
-            <Select
+            <FilteredSelect
               {...fieldProps('assignedVehicleId', errors.assignedVehicleId)}
               defaultValue={values.assignedVehicleId}
-            >
-              <option value="">None</option>
-              {vehicles.map((vehicle) => (
-                <option key={vehicle.id} value={vehicle.id}>
-                  {vehicle.label}
-                </option>
-              ))}
-            </Select>
+              options={vehicles.map((vehicle) => ({
+                value: vehicle.id,
+                label: vehicle.label,
+              }))}
+              emptyLabel="None"
+              searchLabel="Search by registration or model"
+            />
           </FormField>
 
           <FormField

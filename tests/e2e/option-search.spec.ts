@@ -6,7 +6,9 @@ import { uniqueDigits, uniquePhone, uniquePlate } from './unique';
  *
  * The report was that the driver and vehicle pickers are "very long to go
  * through", which they are: one option per owner-driver, in a native select
- * that opens as a scroll. A search box above the select narrows it.
+ * that opens as a scroll. A search box above the select narrows it. The same
+ * control now sits over the client, account and vehicle lists on every form
+ * that picks from one.
  *
  * **The rule that needs a browser is the one about the current selection.** A
  * native `<select>` whose selected `<option>` is removed from the DOM loses
@@ -148,6 +150,33 @@ test.describe('searching a long list of drivers', () => {
     // Still there, still selected — the option survives its own filter.
     await expect(select).toHaveValue(chosen!);
     await expect(select.locator(`option[value="${chosen}"]`)).toHaveCount(1);
+    await expect(page.getByRole('status').first()).toHaveText(/Showing 1 of /);
+  });
+
+  test('keeps the selection on a form that holds no state of its own', async () => {
+    /*
+     * The same rule, through the other half of the component.
+     *
+     * The booking form drives its selects from React state, because choosing a
+     * driver fills the vehicle in and re-quotes the job. Most other forms —
+     * a driver, a shift, an invoice — are server-rendered and post plainly,
+     * so the select holds its own selection instead. That is a different code
+     * path, and it is the one where "the option must survive its own filter"
+     * is easiest to get wrong, because nothing outside the component
+     * remembers what was chosen.
+     */
+    await page.goto('/drivers/new');
+    const select = page.locator('#assignedVehicleId');
+    const search = page.getByLabel('Search by registration or model');
+
+    await expect(search).toBeVisible();
+
+    const chosen = await select.locator('option').nth(1).getAttribute('value');
+    await select.selectOption(chosen!);
+
+    await search.fill('nothing will match this');
+
+    await expect(select).toHaveValue(chosen!);
     await expect(page.getByRole('status').first()).toHaveText(/Showing 1 of /);
   });
 

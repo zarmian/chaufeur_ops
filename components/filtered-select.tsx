@@ -14,8 +14,8 @@ import {
  * A native `<select>` with a search box above it.
  *
  * Nearly two hundred owner-drivers makes the driver picker a scroll rather
- * than a choice, and the vehicle list beside it is the same. This is the
- * smallest thing that fixes that.
+ * than a choice, and the client, account and vehicle lists beside it are the
+ * same. This is the smallest thing that fixes that.
  *
  * **A filter over the select, not a replacement for it.** A custom combobox
  * would have meant re-implementing keyboard handling, the mobile picker and
@@ -27,31 +27,53 @@ import {
  * The search box is not part of the form. It has no `name`, so nothing about
  * it is submitted, and with JavaScript unavailable the select still holds
  * every option and still works.
+ *
+ * **Controlled or not.** The booking form drives its driver select from state,
+ * because choosing a driver fills the vehicle in and re-quotes the job. Most
+ * other forms — a new invoice, a shift, a rental — are server-rendered and
+ * post plainly, and have no state to speak of. Both are supported: pass
+ * `value` and `onChange` to drive it, or `defaultValue` and let it hold its
+ * own. Nothing about the search behaves differently, and the rule below
+ * applies to both.
  */
 export function FilteredSelect({
   options,
   value,
+  defaultValue,
   onChange,
   emptyLabel,
   searchLabel,
   ...select
 }: {
   options: FilterableOption[];
-  value: string;
-  onChange: (value: string) => void;
+  /** Present when the caller drives the selection. */
+  value?: string;
+  /** The starting selection when the caller does not. */
+  defaultValue?: string;
+  onChange?: (value: string) => void;
   /** The always-present first option — "Unassigned", "No vehicle". */
   emptyLabel: string;
   /** What the search box is for, announced rather than only placeheld. */
   searchLabel: string;
 } & Omit<
   React.ComponentProps<'select'>,
-  'value' | 'onChange' | 'children'
+  'value' | 'defaultValue' | 'onChange' | 'children'
 >) {
   const searchId = useId();
   const [query, setQuery] = useState('');
 
+  /**
+   * The selection, tracked here even when the caller also tracks it.
+   *
+   * Not an optimisation — it is what makes the rule below possible. The filter
+   * has to know which option must survive it, and an uncontrolled `<select>`
+   * would only be able to answer that by reading the DOM during a render.
+   */
+  const [own, setOwn] = useState(defaultValue ?? '');
+  const selected = value ?? own;
+
   const showSearch = worthFiltering(options.length);
-  const shown = showSearch ? filterOptions(options, query, value) : options;
+  const shown = showSearch ? filterOptions(options, query, selected) : options;
 
   return (
     <div className="space-y-1.5">
@@ -74,7 +96,7 @@ export function FilteredSelect({
             placeholder={searchLabel}
             aria-label={searchLabel}
             className="h-8 pl-7 text-sm"
-            // Enter in a search box should filter, not submit the booking.
+            // Enter in a search box should filter, not submit the form.
             onKeyDown={(event) => {
               if (event.key === 'Enter') event.preventDefault();
             }}
@@ -84,8 +106,11 @@ export function FilteredSelect({
 
       <Select
         {...select}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
+        value={selected}
+        onChange={(event) => {
+          setOwn(event.target.value);
+          onChange?.(event.target.value);
+        }}
       >
         <option value="">{emptyLabel}</option>
         {shown.map((option) => (
