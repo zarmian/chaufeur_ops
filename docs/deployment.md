@@ -437,6 +437,31 @@ received, and most of any such list is clients who have simply not paid yet.
 Credit-noted invoices are excluded — a credit note is not a debt, and chasing
 one is a letter no client should receive.
 
+### After the release that made a contract's end cancel its days
+
+`npm run check:contracts` finds days still booked against a contract that has
+already ended — one that was stopped, or whose end date is behind the days on
+the board. From that release onwards ending a contract calls its remaining
+days off, but it does nothing about the contracts that ended *before* it: an
+arrangement the office ended weeks ago can still have a fortnight of days
+waiting to send cars to a client who cancelled.
+
+It reports and changes nothing. `npm run check:contracts -- --fix` cancels
+what it found, through the same path the screens use — each day becomes a
+cancelled job with an event on it, its driver is told, and any offer still out
+is withdrawn. Nothing is deleted, a day that has already run is never touched,
+and an invoiced day is refused and named so the invoice can be credited first.
+
+**Read the report before running the fix.** It prints the contract, why it is
+over, the cut-off and the days, and the count is worth recognising: a number
+far larger than the install's recent history suggests a contract stopped and
+restarted rather than a backlog, and that is worth understanding before
+cancelling anything.
+
+Worth keeping rather than running once. A day can end up beyond its contract
+by other routes — a cron run that overlapped an edit, an import — and the cost
+of finding out late is a driver at a door nobody opens.
+
 ### Before switching flight tracking on
 
 `npm run check:flights -- BA117 2026-09-15` makes one real call to the

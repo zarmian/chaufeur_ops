@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   addDays,
+  contractEndedFrom,
   contractSchema,
   datesToGenerate,
   describeWeekdays,
@@ -384,5 +385,81 @@ describe('endedAfter', () => {
 
     expect(newYork!.getTime()).toBeGreaterThan(london!.getTime());
     expect(newYork?.toISOString()).toBe('2026-08-01T04:00:00.000Z');
+  });
+});
+
+/**
+ * Whether a contract, as it stands, owes anything beyond a point.
+ *
+ * The question `scripts/check-contract-days.ts` asks of every contract on the
+ * install. It has to agree with what the screens do — two answers to "should
+ * this day be here" is how a check comes back clean on a board that is not.
+ */
+describe('contractEndedFrom', () => {
+  const LONDON = 'Europe/London';
+  const NOW = new Date('2026-07-25T09:00:00.000Z');
+  const date = (value: string) => new Date(`${value}T00:00:00.000Z`);
+
+  it('has no cut-off for a contract running with no end in sight', () => {
+    // Most of them. The whole reason an end date is optional.
+    expect(contractEndedFrom({ active: true, endsOn: null }, NOW, LONDON)).toBeNull();
+  });
+
+  it('cuts off at now for a contract that has been stopped', () => {
+    expect(
+      contractEndedFrom({ active: false, endsOn: null }, NOW, LONDON),
+    ).toEqual(NOW);
+  });
+
+  it('cuts off at the end of the last day for one with an end date', () => {
+    // The day named is a day the contract owes, so the line is the midnight
+    // that ends it — 23:00 UTC in a British summer.
+    expect(
+      contractEndedFrom(
+        { active: true, endsOn: date('2026-07-31') },
+        NOW,
+        LONDON,
+      )?.toISOString(),
+    ).toBe('2026-07-31T23:00:00.000Z');
+  });
+
+  it('takes whichever came first when a contract is both stopped and dated', () => {
+    /*
+     * Either one on its own is enough to make a day wrong, so the earlier
+     * wins. A contract due to end in August but stopped today owes nothing
+     * from today — not from August.
+     */
+    expect(
+      contractEndedFrom(
+        { active: false, endsOn: date('2026-08-31') },
+        NOW,
+        LONDON,
+      ),
+    ).toEqual(NOW);
+
+    // …and the other way round: one that ended in June and was only stopped
+    // today has owed nothing since June.
+    expect(
+      contractEndedFrom(
+        { active: false, endsOn: date('2026-06-30') },
+        NOW,
+        LONDON,
+      )?.toISOString(),
+    ).toBe('2026-06-30T23:00:00.000Z');
+  });
+
+  it('reads the end date in the operator’s zone', () => {
+    const london = contractEndedFrom(
+      { active: true, endsOn: date('2026-07-31') },
+      NOW,
+      LONDON,
+    );
+    const newYork = contractEndedFrom(
+      { active: true, endsOn: date('2026-07-31') },
+      NOW,
+      'America/New_York',
+    );
+
+    expect(newYork!.getTime()).toBeGreaterThan(london!.getTime());
   });
 });

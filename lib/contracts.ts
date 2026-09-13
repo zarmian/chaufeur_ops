@@ -393,6 +393,44 @@ export function endedAfter(
 }
 
 /**
+ * The instant from which a contract's days should not exist at all, or null.
+ *
+ * `endedAfter` answers the narrower question an edit asks — *has this end date
+ * just become more restrictive*. This one asks the standing question: given a
+ * contract as it is right now, is there any point beyond which it owes
+ * nothing? Two ways for that to be true, and a contract can be both:
+ *
+ * **Stopped.** The arrangement is over as of now, so everything still ahead of
+ * us is owed to nobody.
+ *
+ * **Past its end date.** Whatever the end date is, the contract owes nothing
+ * after the local day it names — and a day booked *on* it is still owed.
+ *
+ * The earlier of the two wins, because either one on its own is enough to make
+ * a day wrong. Null for a contract that is running with no end in sight, which
+ * is most of them.
+ *
+ * Its own function, and tested, because `scripts/check-contract-days.ts` asks
+ * exactly this of every contract on the install and has to agree with what the
+ * screens do. Two answers to "should this day be here" is how a check comes
+ * back clean on a board that is not.
+ */
+export function contractEndedFrom(
+  contract: { active: boolean; endsOn: Date | null },
+  now: Date,
+  timeZone: string,
+): Date | null {
+  const byEnd = contract.endsOn
+    ? zonedDayRange(toDateOnlyString(contract.endsOn), timeZone).endExclusive
+    : null;
+  const byStop = contract.active ? null : now;
+
+  if (!byEnd) return byStop;
+  if (!byStop) return byEnd;
+  return byEnd < byStop ? byEnd : byStop;
+}
+
+/**
  * How far back a rate change reaches.
  *
  * The default is `none`: a rate agreed today applies to the work you have not

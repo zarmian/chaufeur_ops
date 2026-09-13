@@ -5,6 +5,7 @@ import {
   contractSchema,
   createContract,
   cancelContractJobsFrom,
+  contractEndedFrom,
   endedAfter,
   generateAllContracts,
   generateContractJobs,
@@ -365,6 +366,40 @@ describe.skipIf(!DATABASE_AVAILABLE)('standing contracts', () => {
     expect(
       await raw!.job.count({ where: { contractId: id, status: 'CANCELLED' } }),
     ).toBe(0);
+  });
+
+  it('finds and cleans a contract that was stopped the old way', async () => {
+    /*
+     * What `scripts/check-contract-days.ts` does, as the two functions it
+     * composes. Before stopping cancelled anything, an operator could end an
+     * arrangement and leave a fortnight of days on the board — so the contract
+     * here is stopped by writing the column directly, which is exactly the
+     * state those installs are in.
+     *
+     * Worth a test rather than trusting the script, because the script is the
+     * one thing here nothing else exercises, and the failure it prevents is a
+     * car arriving at a door nobody opens.
+     */
+    const id = await start();
+    await generateContractJobs(id, audit, { today: MONDAY });
+    await raw!.jobContract.update({ where: { id }, data: { active: false } });
+
+    const contract = await raw!.jobContract.findUniqueOrThrow({
+      where: { id },
+      select: { active: true, endsOn: true },
+    });
+    const now = new Date('2026-07-20T09:00:00.000Z');
+    const from = contractEndedFrom(contract, now, 'Europe/London');
+
+    // Stopped, so nothing from `now` — and the days are all after it.
+    expect(from).toEqual(now);
+
+    const result = await cancelContractJobsFrom(id, from!, audit);
+    expect(result.cancelled).toBe(6);
+
+    // Clean on a second pass, which is what the check reports after a fix.
+    const again = await cancelContractJobsFrom(id, from!, audit);
+    expect(again).toEqual({ cancelled: 0, refused: [] });
   });
 
   it('cancels the days beyond an end date brought forward', async () => {
