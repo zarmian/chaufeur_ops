@@ -39,14 +39,20 @@ function tomorrow(): string {
   return date.toISOString().slice(0, 10);
 }
 
-/** An airport transfer with a passenger on it. Returns the job's URL. */
-async function airportJob(page: Page, passenger: string): Promise<string> {
+/** A job with a passenger on it. Returns the job's URL. */
+async function bookJob(
+  page: Page,
+  passenger: string,
+  jobType = 'AIRPORT_TRANSFER',
+): Promise<string> {
   await page.goto('/jobs/new');
-  await page.selectOption('#jobType', 'AIRPORT_TRANSFER');
+  await page.selectOption('#jobType', jobType);
   await page.getByLabel('Date').fill(tomorrow());
   await page.getByLabel('Time').fill('09:00');
   await page.getByLabel('Pickup').fill(`Heathrow T5 ${RUN}`);
   await page.getByLabel('Destination').fill('The Dorchester');
+  // The addresses stay airport-shaped whatever the type, so the only thing
+  // varying between these bookings is the one under test.
   await page.getByLabel('Passenger name').fill(passenger);
   await page.getByLabel('Client price').fill('125.50');
   await page.getByRole('button', { name: 'Book job' }).click();
@@ -59,22 +65,35 @@ test.describe.configure({ mode: 'serial' });
 test.describe('name board', () => {
   test.skip(!CREDENTIALS_SET, 'E2E_ADMIN_PASSWORD is not set');
 
-  test('an airport transfer offers a board, and a road transfer does not', async ({
-    page,
-  }) => {
+  test('every job type with a passenger offers a board', async ({ page }) => {
+    /*
+     * Widened from airport transfers only. A driver meeting a guest in a hotel
+     * lobby or a client on a station concourse holds up the same board, and
+     * restricting it meant mislabelling the job as an airport transfer to get
+     * one — which changes how it prices and how long the free waiting
+     * allowance runs.
+     */
     await signIn(page);
 
-    await airportJob(page, `Mr Jamal Abdullah ${RUN}`);
-    await expect(page.getByTestId('name-board-panel')).toBeVisible();
+    for (const jobType of ['AIRPORT_TRANSFER', 'TRANSFER', 'AS_DIRECTED']) {
+      await bookJob(page, `${jobType} Passenger ${RUN}`, jobType);
+      await expect(
+        page.getByTestId('name-board-panel'),
+        `${jobType} was offered no board`,
+      ).toBeVisible();
+    }
+  });
 
-    // A road transfer with a passenger on it is still not a board: the
-    // decision was airport transfers only.
+  test('a job with nobody named on it still offers none', async ({ page }) => {
+    // The one rule left, and the whole of it: a board is the name, so without
+    // one there is nothing to print and the button would produce a blank sheet.
+    await signIn(page);
+
     await page.goto('/jobs/new');
     await page.getByLabel('Date').fill(tomorrow());
     await page.getByLabel('Time').fill('11:00');
     await page.getByLabel('Pickup').fill(`Mayfair ${RUN}`);
     await page.getByLabel('Destination').fill('The City');
-    await page.getByLabel('Passenger name').fill(`Ms Road ${RUN}`);
     await page.getByLabel('Client price').fill('80.00');
     await page.getByRole('button', { name: 'Book job' }).click();
     await expect(page.getByTestId('job-status')).toBeVisible({ timeout: 15_000 });
@@ -84,7 +103,7 @@ test.describe('name board', () => {
 
   test('the board shows the name and nothing else', async ({ page, context }) => {
     await signIn(page);
-    await airportJob(page, `Ms Chen ${RUN}`);
+    await bookJob(page, `Ms Chen ${RUN}`);
 
     const link = page.getByTestId('name-board-panel').getByRole('link', {
       name: 'Open the board',
@@ -125,7 +144,7 @@ test.describe('name board', () => {
     await board.setViewportSize(PHONE_LANDSCAPE);
 
     for (const name of names) {
-      await airportJob(page, name);
+      await bookJob(page, name);
       const href = await page
         .getByTestId('name-board-panel')
         .getByRole('link', { name: 'Open the board' })
@@ -177,7 +196,7 @@ test.describe('name board', () => {
     // A board for a job that is not happening is a driver sent to arrivals
     // for nobody.
     await signIn(page);
-    const jobUrl = await airportJob(page, `Dr Okafor ${RUN}`);
+    const jobUrl = await bookJob(page, `Dr Okafor ${RUN}`);
 
     const href = await page
       .getByTestId('name-board-panel')

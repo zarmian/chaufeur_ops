@@ -19,32 +19,37 @@ import {
  */
 
 describe('who gets a board', () => {
-  it('is airport transfers with a passenger on them', () => {
-    expect(
-      canHaveNameBoard({ jobType: 'AIRPORT_TRANSFER', passengerName: 'Mr Ali' }),
-    ).toBe(true);
-  });
-
-  it('is not other job types', () => {
-    // The decision was airport transfers only. Meeting somebody at arrivals is
-    // the case that needs a board held up.
-    expect(
-      canHaveNameBoard({ jobType: 'TRANSFER', passengerName: 'Mr Ali' }),
-    ).toBe(false);
-    expect(
-      canHaveNameBoard({ jobType: 'AS_DIRECTED', passengerName: 'Mr Ali' }),
-    ).toBe(false);
+  it('is any job with a passenger named on it', () => {
+    /*
+     * Widened from airport transfers only. That was the case that prompted a
+     * board, not the only one that needs one: a driver meeting a guest in a
+     * hotel lobby, a delegate at a conference centre or a client on a station
+     * concourse is doing the same job, and the passenger is looking for their
+     * own name in the same way.
+     *
+     * The restriction had a cost beyond the missing button. An operator whose
+     * passenger needed a board had to mislabel the job as an airport transfer
+     * to get one, which changes how it prices and how long the free waiting
+     * allowance runs.
+     *
+     * There is no job type in this test because there is no job type in the
+     * argument any more — `BoardJob` does not carry one, so no future edit can
+     * quietly reintroduce a type check here without changing the signature.
+     * The per-type claim is made against the database, in
+     * `name-board-store.integration.test.ts`.
+     */
+    expect(canHaveNameBoard({ passengerName: 'Mr Ali' })).toBe(true);
   });
 
   it('is not a job with nobody named on it', () => {
     // A board is the name. Without one there is nothing to print, and
-    // offering the button anyway produces a blank sheet.
-    expect(
-      canHaveNameBoard({ jobType: 'AIRPORT_TRANSFER', passengerName: null }),
-    ).toBe(false);
-    expect(
-      canHaveNameBoard({ jobType: 'AIRPORT_TRANSFER', passengerName: '   ' }),
-    ).toBe(false);
+    // offering the button anyway produces a blank sheet. This is now the only
+    // thing standing between a job and a board, so it carries the whole rule.
+    expect(canHaveNameBoard({ passengerName: null })).toBe(false);
+    expect(canHaveNameBoard({ passengerName: '' })).toBe(false);
+    expect(canHaveNameBoard({ passengerName: '   ' })).toBe(false);
+    // Whitespace that is not a space, which a paste can easily leave behind.
+    expect(canHaveNameBoard({ passengerName: '\t\n' })).toBe(false);
   });
 });
 

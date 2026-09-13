@@ -28,8 +28,8 @@ export const GET = withErrorHandling(async (request: Request) => {
   if (boards.length === 0) {
     // 404 rather than an empty PDF: a nought-page document downloads happily
     // and then opens as nothing, which reads as a broken feature rather than
-    // as a day with no airport work on it.
-    return new Response('No airport transfers with a passenger name that day.', {
+    // as a day with nobody to meet.
+    return new Response('No jobs with a passenger name that day.', {
       status: 404,
       headers: { 'Content-Type': 'text/plain; charset=utf-8' },
     });

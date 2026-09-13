@@ -95,9 +95,15 @@ describe.skipIf(!DATABASE_AVAILABLE)('name board links', () => {
     expect(second).toBe(first);
   });
 
-  it('refuses anything that is not an airport transfer', async () => {
-    const transfer = await makeJob({ jobType: 'TRANSFER' });
-    expect(await issueNameBoardToken(transfer)).toBeNull();
+  it('issues one for any job type, not only an airport transfer', async () => {
+    // Widened deliberately: a driver meeting a guest in a hotel lobby or a
+    // client on a station concourse holds up the same board. Restricting it
+    // meant mislabelling the job as an airport transfer to get one, which
+    // changes how it prices and how long the free waiting allowance runs.
+    for (const jobType of ['TRANSFER', 'AS_DIRECTED']) {
+      const jobId = await makeJob({ jobType, passengerName: `Ms Chen ${stamp}` });
+      expect(await issueNameBoardToken(jobId), `${jobType} got no board`).toBeTruthy();
+    }
   });
 
   it('refuses a job with nobody named on it', async () => {
@@ -176,16 +182,20 @@ describe.skipIf(!DATABASE_AVAILABLE)('name board links', () => {
     const ids = boards.map((board) => board.jobId);
 
     // By id rather than by counting: every other test in this file books its
-    // own airport transfer on this same day, so a count would be a tally of
-    // whatever ran before rather than a statement about this one.
+    // own job on this same day, so a count would be a tally of whatever ran
+    // before rather than a statement about this one.
     expect(ids).toContain(early);
     expect(ids).toContain(late);
     expect(ids.indexOf(early)).toBeLessThan(ids.indexOf(late));
 
-    // A road transfer is not a board, and neither is a job with nobody named
-    // on it — a blank sheet in the middle of the stack is worse than a
-    // shorter stack.
-    expect(ids).not.toContain(road);
+    // The road transfer is in the stack too, in its own place in the running
+    // order — the print run is the day's boards, not the day's airport runs.
+    expect(ids).toContain(road);
+    expect(ids.indexOf(early)).toBeLessThan(ids.indexOf(road));
+    expect(ids.indexOf(road)).toBeLessThan(ids.indexOf(late));
+
+    // A job with nobody named on it is still not a board: a blank sheet in
+    // the middle of the stack is worse than a shorter stack.
     expect(ids).not.toContain(nameless);
   });
 });

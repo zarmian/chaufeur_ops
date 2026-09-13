@@ -1,10 +1,12 @@
 /**
- * The board a driver holds up in the arrivals hall.
+ * The board a driver holds up while they wait for somebody.
  *
  * One job, one name, as large as the sheet or the screen will carry it. That
  * is the whole product: a passenger coming through the doors at Terminal 5
  * scans a row of held-up boards for their own name, and anything else on the
- * board is something their eye has to discard first.
+ * board is something their eye has to discard first. A hotel lobby, a station
+ * concourse and a conference centre are the same scan with fewer boards to
+ * discard, which is why every job type can have one.
  *
  * The operator asked for nothing but the name, and this takes that literally
  * — no logo, no flight number, no reference. Some clients specifically do not
@@ -15,22 +17,37 @@
  * looks at on their phone and the thing the office prints cannot drift apart.
  */
 
-/** Nothing narrower than this is worth a board. */
+/**
+ * Nothing narrower than this is worth a board.
+ *
+ * The job type used to be here too, back when it decided anything. It does
+ * not: the name is the whole rule, and a field kept "for clarity" after it
+ * stopped being read is the next reader's false lead.
+ */
 export interface BoardJob {
-  jobType: string;
   passengerName: string | null;
 }
 
 /**
  * Whether this job can have a board.
  *
- * Airport transfers only, by decision — meeting somebody at arrivals is the
- * case that needs it. A name is equally required: a board is the name, so
+ * **Any job with a named passenger.** This was airport transfers only, on the
+ * reasoning that meeting somebody at arrivals is the case that needs it. That
+ * was the case that *prompted* it, which is not the same thing: a driver
+ * meeting a guest in a hotel lobby, a delegate at a conference centre, a
+ * client at a station concourse or outside an office at the end of a long day
+ * is doing exactly the same job, and the passenger is looking for their own
+ * name in exactly the same way. Restricting it meant an operator whose
+ * passenger needed a board had to mislabel the job as an airport transfer to
+ * get one — which then changes how it prices and how long the free waiting
+ * allowance runs.
+ *
+ * The name is the real requirement, and the only one. A board is the name, so
  * there is nothing to print without one, and offering the button anyway
  * produces a blank sheet somebody has to work out how to fix.
  */
 export function canHaveNameBoard(job: BoardJob): boolean {
-  return job.jobType === 'AIRPORT_TRANSFER' && normaliseName(job.passengerName) !== '';
+  return normaliseName(job.passengerName) !== '';
 }
 
 /** Collapsed whitespace, trimmed. What is actually shown. */

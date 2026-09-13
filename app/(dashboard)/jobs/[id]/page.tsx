@@ -91,9 +91,8 @@ export default async function JobDetailPage({
    * A write during a render, which is normally the wrong shape — but this one
    * is get-or-create and therefore idempotent, it happens at most once in a
    * job's life, and the alternative is a "create the link" button standing
-   * between a dispatcher and the thing they came here for. Returns null for
-   * anything that is not an airport transfer with a passenger named on it,
-   * which is how the panel knows not to appear.
+   * between a dispatcher and the thing they came here for. Returns null for a
+   * job with nobody named on it, which is how the panel knows not to appear.
    */
   const boardToken = await issueNameBoardToken(job.id);
 

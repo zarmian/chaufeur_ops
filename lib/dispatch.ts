@@ -579,7 +579,7 @@ export async function loadDispatchRange(
         unpriced: forDay.filter((job) => job.unpriced).length,
         conflicts: forDay.filter((job) => job.conflictsWith.length > 0).length,
         nameBoards: forDay.filter((job) =>
-          canHaveNameBoard({ jobType: job.jobType, passengerName: job.passengerName }),
+          canHaveNameBoard({ passengerName: job.passengerName }),
         ).length,
       },
     });

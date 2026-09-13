@@ -245,9 +245,9 @@ export async function sendAssignment(jobId: string): Promise<void> {
    * Here rather than in `briefFor`, which also builds the card for every
    * subsequent refresh: the driver is the person who needs the board, and
    * waiting for somebody in the office to open the job first would mean the
-   * card that reaches them has no link on it. A no-op on anything that is not
-   * an airport transfer with a passenger named on it, and idempotent after
-   * the first time, so the link a driver saved this morning still works.
+   * card that reaches them has no link on it. A no-op on a job with nobody
+   * named on it, and idempotent after the first time, so the link a driver
+   * saved this morning still works.
    */
   await issueNameBoardToken(jobId);
 

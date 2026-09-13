@@ -30,11 +30,10 @@ export interface NameBoard {
 /**
  * This job's board link, minting one if it has never had a board.
  *
- * Lazily, so the column stays null on the overwhelming majority of jobs that
- * will never need one, and stable once issued — a driver who saved the link
- * to their home screen at six in the morning still has a working board at
- * eleven, and re-sending the job on Telegram does not invalidate the link
- * they are already holding up.
+ * Lazily, so the column stays null on every job that never needs one, and
+ * stable once issued — a driver who saved the link to their home screen at
+ * six in the morning still has a working board at eleven, and re-sending the
+ * job on Telegram does not invalidate the link they are already holding up.
  *
  * Returns null when the job cannot have a board at all, which the caller
  * shows as no button rather than as a broken one.
@@ -42,7 +41,7 @@ export interface NameBoard {
 export async function issueNameBoardToken(jobId: string): Promise<string | null> {
   const job = await prisma.job.findUnique({
     where: { id: jobId },
-    select: { id: true, jobType: true, passengerName: true, nameBoardToken: true },
+    select: { id: true, passengerName: true, nameBoardToken: true },
   });
 
   if (!job || !canHaveNameBoard(job)) return null;
@@ -63,7 +62,7 @@ export async function issueNameBoardToken(jobId: string): Promise<string | null>
 export async function reissueNameBoardToken(jobId: string): Promise<string | null> {
   const job = await prisma.job.findUnique({
     where: { id: jobId },
-    select: { id: true, jobType: true, passengerName: true },
+    select: { id: true, passengerName: true },
   });
   if (!job || !canHaveNameBoard(job)) return null;
 
@@ -93,14 +92,13 @@ export async function resolveNameBoard(token: string): Promise<NameBoard | null>
     select: {
       id: true,
       reference: true,
-      jobType: true,
       passengerName: true,
       status: true,
     },
   });
 
   if (!job || !canHaveNameBoard(job)) return null;
-  // A board for a job that is not happening is a driver sent to arrivals for
+  // A board for a job that is not happening is a driver stood in a lobby for
   // nobody. The link stops working the moment it is called off.
   if (job.status === 'CANCELLED') return null;
 
@@ -118,13 +116,16 @@ export async function resolveNameBoard(token: string): Promise<NameBoard | null>
  * day's boards as one stack in the order the cars go out, not eleven separate
  * downloads. Pickup order is what makes the stack usable — the top one is the
  * next car to leave.
+ *
+ * Every job type, not only airport transfers: the name is what decides, and
+ * the filter lives in `canHaveNameBoard` so the stack and the single board
+ * cannot disagree about what is printable.
  */
 export async function nameBoardsForDay(day: Date): Promise<NameBoard[]> {
   const { timeZone } = await getLocaleConfig();
 
   const jobs = await prisma.job.findMany({
     where: {
-      jobType: 'AIRPORT_TRANSFER',
       scheduledAt: {
         gte: startOfZonedDay(day, timeZone),
         lt: endOfZonedDay(day, timeZone),
@@ -134,9 +135,19 @@ export async function nameBoardsForDay(day: Date): Promise<NameBoard[]> {
       // blank sheet in the middle of the stack is worse than a shorter stack.
       passengerName: { not: null },
     },
-    select: { id: true, reference: true, jobType: true, passengerName: true },
+    select: { id: true, reference: true, passengerName: true },
     orderBy: { scheduledAt: 'asc' },
-    take: 200,
+    /*
+     * A ceiling on the render, not a limit anybody should reach.
+     *
+     * It was 200, which was generous while this covered airport transfers
+     * only and is not obviously so now that it covers every named job on a
+     * day. Ordered by pickup time, a cap that bites drops the *evening*
+     * boards off the end of a stack printed at six in the morning, and says
+     * nothing about it — so the number has to sit above what a day can
+     * plausibly hold rather than merely above what it usually does.
+     */
+    take: 500,
   });
 
   return jobs.filter(canHaveNameBoard).map((job) => ({
