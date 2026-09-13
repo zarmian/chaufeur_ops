@@ -44,6 +44,7 @@ export default async function ContractDetailPage({
   const [{ id }, query] = await Promise.all([params, searchParams]);
   const notice = filterValue(query, 'contractNotice');
   const moved = filterValue(query, 'contractMoved');
+  const ended = filterValue(query, 'contractEnded');
 
   const contract = await getContract(id);
   if (!contract) notFound();
@@ -107,6 +108,16 @@ export default async function ContractDetailPage({
       {moved ? (
         <Notice className="mb-6" data-testid="contract-moved">
           {moved}
+        </Notice>
+      ) : null}
+
+      {/* The days called off when the arrangement ended. Said out loud for
+          the same reason as the two above, and one more: a cancelled booking
+          is the kind of thing an operator needs to be able to tell a client
+          they have done. */}
+      {ended ? (
+        <Notice className="mb-6" data-testid="contract-ended">
+          {ended}
         </Notice>
       ) : null}
 

@@ -4,6 +4,8 @@ import { checkDriverConflicts } from './conflict-store';
 import {
   contractSchema,
   createContract,
+  cancelContractJobsFrom,
+  endedAfter,
   generateAllContracts,
   generateContractJobs,
   reassignContractJobs,
@@ -271,14 +273,138 @@ describe.skipIf(!DATABASE_AVAILABLE)('standing contracts', () => {
   it('stops making days when the contract is stopped', async () => {
     const id = await start();
     await generateContractJobs(id, audit, { today: MONDAY });
-    const before = await raw!.job.count({ where: { contractId: id } });
 
     await setContractActive(id, false, audit);
     const results = await generateAllContracts(audit, { today: '2026-08-10' });
     expect(results.some((row) => row.contractId === id)).toBe(false);
+  });
 
-    // The days it already made stay: they are bookings a client expects.
-    expect(await raw!.job.count({ where: { contractId: id } })).toBe(before);
+  it('cancels the days still to come when the contract is stopped', async () => {
+    /*
+     * Changed behaviour, and the reason: leaving them standing made stopping a
+     * half-action. The arrangement was over, the office believed it had ended
+     * it, and a fortnight of days sat on the board waiting to send cars to a
+     * client who had cancelled.
+     *
+     * `now` is pinned before the fixture week so its days count as upcoming,
+     * the same trick the reassignment tests use.
+     */
+    const id = await start();
+    await generateContractJobs(id, audit, { today: MONDAY });
+    const booked = await raw!.job.count({ where: { contractId: id } });
+    expect(booked).toBe(6);
+
+    const result = await setContractActive(id, false, audit, {
+      now: new Date('2026-07-20T09:00:00.000Z'),
+    });
+
+    expect(result.cancelled).toBe(6);
+    expect(result.refused).toEqual([]);
+    // Cancelled, not deleted. They are bookings that happened and then did
+    // not, and the record of them is what answers "what did we tell them".
+    expect(await raw!.job.count({ where: { contractId: id } })).toBe(booked);
+    expect(
+      await raw!.job.count({ where: { contractId: id, status: 'CANCELLED' } }),
+    ).toBe(6);
+  });
+
+  it('leaves a day that has already run, and one already called off', async () => {
+    const id = await start();
+    await generateContractJobs(id, audit, { today: MONDAY });
+    const [first, second] = await raw!.job.findMany({
+      where: { contractId: id },
+      orderBy: { scheduledAt: 'asc' },
+      take: 2,
+    });
+    await raw!.job.update({
+      where: { id: first!.id },
+      data: { status: 'COMPLETED' },
+    });
+    await raw!.job.update({
+      where: { id: second!.id },
+      data: { status: 'CANCELLED' },
+    });
+
+    const result = await setContractActive(id, false, audit, {
+      now: new Date('2026-07-20T09:00:00.000Z'),
+    });
+
+    // The four still to come. The completed day keeps its status — a contract
+    // ending has no business in work that was already done and is billable.
+    expect(result.cancelled).toBe(4);
+    const after = await raw!.job.findUniqueOrThrow({ where: { id: first!.id } });
+    expect(after.status).toBe('COMPLETED');
+  });
+
+  it('cancels nothing that is already in the past', async () => {
+    // The default `now`. A contract stopped today must not reach back and
+    // call off last month's work.
+    const id = await start();
+    await generateContractJobs(id, audit, { today: MONDAY });
+
+    const result = await setContractActive(id, false, audit);
+
+    expect(result).toEqual({ cancelled: 0, refused: [] });
+    expect(
+      await raw!.job.count({ where: { contractId: id, status: 'CANCELLED' } }),
+    ).toBe(0);
+  });
+
+  it('cancels nothing when a contract is started again', async () => {
+    // Restarting makes no days until the next run, so there is nothing to
+    // undo — and un-cancelling days somebody has since dealt with is not
+    // something this could get right.
+    const id = await start();
+    await generateContractJobs(id, audit, { today: MONDAY });
+
+    const result = await setContractActive(id, true, audit, {
+      now: new Date('2026-07-20T09:00:00.000Z'),
+    });
+
+    expect(result).toEqual({ cancelled: 0, refused: [] });
+    expect(
+      await raw!.job.count({ where: { contractId: id, status: 'CANCELLED' } }),
+    ).toBe(0);
+  });
+
+  it('cancels the days beyond an end date brought forward', async () => {
+    /*
+     * The other way a contract ends: not stopped, but cut short. A client says
+     * "we finish on the Wednesday" and the days already booked for Thursday
+     * and Friday have to be called off, or a car turns up at the school gates
+     * on the Thursday.
+     */
+    const id = await start();
+    await generateContractJobs(id, audit, { today: MONDAY });
+
+    const { previous } = await updateContract(
+      id,
+      form({ endsOn: '2026-07-29' }), // the Wednesday
+      audit,
+    );
+    const from = endedAfter(
+      previous.endsOn,
+      new Date('2026-07-29T00:00:00.000Z'),
+      'Europe/London',
+    );
+    expect(from).not.toBeNull();
+
+    const result = await cancelContractJobsFrom(id, from!, audit);
+
+    // Mon, Tue and Wed survive; Thu, Fri and the following Mon go.
+    expect(result.cancelled).toBe(3);
+
+    const standing = await raw!.job.findMany({
+      where: { contractId: id, status: { not: 'CANCELLED' } },
+      orderBy: { scheduledAt: 'asc' },
+      select: { scheduledAt: true },
+    });
+    expect(standing).toHaveLength(3);
+    // The Wednesday itself is kept — a day *on* the end date is a day the
+    // contract owes, and in July its 07:45 pickup is 06:45 UTC.
+    expect(standing[2]?.scheduledAt.toISOString()).toBe(
+      '2026-07-29T06:45:00.000Z',
+    );
   });
 
   it('does not reprice days it has already made', async () => {

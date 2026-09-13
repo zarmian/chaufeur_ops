@@ -3,15 +3,19 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import {
+  cancelContractJobsFrom,
   contractSchema,
   createContract,
+  endedAfter,
   generateContractJobs,
   reassignContractJobs,
   repriceContractJobs,
   setContractActive,
   updateContract,
+  type CancelResult,
   type ReassignResult,
 } from '@/lib/contracts';
+import { fromDateOnlyString } from '@/lib/dates';
 import type { RepriceScope } from '@/lib/enum-options';
 import { isRedirectError, toFormState, type FormState } from '@/lib/form-state';
 import { getLocaleConfig } from '@/lib/locale-store';
@@ -102,6 +106,31 @@ function describe(result: ReassignResult): string {
   return parts.join('. ');
 }
 
+/**
+ * What was called off, and what would not go — in one line.
+ *
+ * The refusals are the part that needs saying. An invoiced day cannot be
+ * cancelled while the client is holding a document that bills for it, and an
+ * office that assumed the whole contract was called off would leave a car
+ * going to a booking nobody expects to pay for.
+ */
+function describeCancelled(result: CancelResult): string {
+  const parts = [
+    `${result.cancelled} upcoming ${result.cancelled === 1 ? 'day' : 'days'} cancelled`,
+  ];
+
+  if (result.refused.length > 0) {
+    parts.push(
+      `${result.refused.length} could not be: ${result.refused
+        .slice(0, 5)
+        .map((refusal) => `${refusal.reference} — ${refusal.reason}`)
+        .join('; ')}${result.refused.length > 5 ? '…' : ''}`,
+    );
+  }
+
+  return parts.join('. ');
+}
+
 /** Only the three the form offers; anything else means "leave them alone". */
 function repriceScopeFrom(value: FormDataEntryValue | null): RepriceScope {
   const text = String(value ?? '');
@@ -119,6 +148,33 @@ export async function updateContractAction(
     const { audit } = await actingUser('editJobs');
     const parsed = contractSchema.parse(readContractForm(formData));
     const { previous } = await updateContract(contractId, parsed, audit);
+
+    /*
+     * An end date brought forward calls off the days beyond it.
+     *
+     * Before the move below, deliberately: a day that is about to be cancelled
+     * should not first send its driver a message about a change of car.
+     *
+     * Not offered as a choice, because there is no sensible other answer. A
+     * contract that ends on the 20th has no business putting a car outside
+     * somebody's house on the 25th, and leaving those days standing is how an
+     * office ends an arrangement, believes it is done, and sends a driver
+     * anyway.
+     */
+    const { timeZone } = await getLocaleConfig();
+    const endedFrom = endedAfter(
+      previous.endsOn,
+      parsed.endsOn ? fromDateOnlyString(parsed.endsOn) : null,
+      timeZone,
+    );
+    if (endedFrom) {
+      const result = await cancelContractJobsFrom(contractId, endedFrom, audit);
+      if (result.cancelled > 0 || result.refused.length > 0) {
+        query.set('contractEnded', describeCancelled(result));
+        revalidatePath('/jobs');
+        revalidatePath('/dispatch');
+      }
+    }
 
     /*
      * Moving the days not yet started onto the new driver or car.
@@ -174,18 +230,32 @@ export async function updateContractAction(
 /**
  * Stop or restart a contract.
  *
- * Stopping makes no more days. The days it already made stay: they are
- * bookings a client is expecting, and each is cancelled individually if it is
- * not going to happen.
+ * Stopping makes no more days *and* calls off the ones already booked — see
+ * `setContractActive`. What was cancelled, and anything that could not be,
+ * comes back on the contract screen rather than being left to be noticed on
+ * the board.
  */
 export async function setContractActiveAction(
   contractId: string,
   active: boolean,
 ): Promise<void> {
   const { audit } = await actingUser('editJobs');
-  await setContractActive(contractId, active, audit);
+  const result = await setContractActive(contractId, active, audit);
+
   revalidatePath('/contracts');
   revalidatePath(`/contracts/${contractId}`);
+
+  if (result.cancelled === 0 && result.refused.length === 0) {
+    revalidatePath(`/contracts/${contractId}`);
+    return;
+  }
+
+  // Days came off the board, so the screens that show them are stale.
+  revalidatePath('/jobs');
+  revalidatePath('/dispatch');
+
+  const query = new URLSearchParams({ contractEnded: describeCancelled(result) });
+  redirect(`/contracts/${contractId}?${query.toString()}`);
 }
 
 /** Book the days now, without waiting for the overnight run. */

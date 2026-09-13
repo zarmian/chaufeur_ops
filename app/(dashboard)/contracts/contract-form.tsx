@@ -421,7 +421,11 @@ export function ContractForm({
           <FormField
             name="endsOn"
             label="Ends"
-            hint="Leave blank — most of these run until they are stopped."
+            hint={
+              offerReprice
+                ? 'Leave blank — most run until they are stopped. Bringing this forward cancels the days after it.'
+                : 'Leave blank — most of these run until they are stopped.'
+            }
             errors={errors.endsOn}
           >
             <Input

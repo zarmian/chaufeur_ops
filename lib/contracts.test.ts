@@ -4,6 +4,7 @@ import {
   contractSchema,
   datesToGenerate,
   describeWeekdays,
+  endedAfter,
   MAX_GENERATE_AHEAD_DAYS,
   reassignmentFor,
   runsOn,
@@ -312,5 +313,76 @@ describe('reassignmentFor', () => {
     expect(
       reassignmentFor(day(), { driverId: 'drv-old', vehicleId: null }, OLD),
     ).toEqual({ move: true, driverId: 'drv-old', vehicleId: null });
+  });
+});
+
+/**
+ * When an end date means days already booked have to be called off.
+ *
+ * A timezone boundary, which is why it is a function with a test rather than a
+ * comparison written inline. An end date is a calendar day in the operator's
+ * zone; a day booked *on* it is a day the contract owes. Read as UTC instead,
+ * a 07:45 school run on the last day of a British summer contract falls the
+ * wrong side of the line and gets cancelled on the morning it was due to run.
+ */
+describe('endedAfter', () => {
+  const LONDON = 'Europe/London';
+  const date = (value: string) => new Date(`${value}T00:00:00.000Z`);
+
+  it('has nothing to cancel on an open-ended contract', () => {
+    // The normal case: most of these run until somebody stops them.
+    expect(endedAfter(null, null, LONDON)).toBeNull();
+    expect(endedAfter(date('2026-07-31'), null, LONDON)).toBeNull();
+  });
+
+  it('cancels from the midnight that ends the last day, not the one that starts it', () => {
+    /*
+     * The whole point. In July London is an hour ahead, so the last day ends
+     * at 23:00 UTC — and a pickup at 07:45 on that day sits safely before it.
+     */
+    const from = endedAfter(null, date('2026-07-31'), LONDON);
+
+    expect(from?.toISOString()).toBe('2026-07-31T23:00:00.000Z');
+    expect(new Date('2026-07-31T06:45:00.000Z').getTime()).toBeLessThan(
+      from!.getTime(),
+    );
+  });
+
+  it('gets the winter boundary right too', () => {
+    // No offset in January, so the last day ends at the midnight that starts
+    // the next one — exclusive, like every other range boundary here.
+    expect(endedAfter(null, date('2027-01-15'), LONDON)?.toISOString()).toBe(
+      '2027-01-16T00:00:00.000Z',
+    );
+  });
+
+  it('cancels when an end date is brought forward', () => {
+    expect(
+      endedAfter(date('2026-08-31'), date('2026-07-31'), LONDON)?.toISOString(),
+    ).toBe('2026-07-31T23:00:00.000Z');
+  });
+
+  it('cancels when an open-ended contract is given an end', () => {
+    expect(
+      endedAfter(null, date('2026-07-31'), LONDON)?.toISOString(),
+    ).toBe('2026-07-31T23:00:00.000Z');
+  });
+
+  it('has nothing to cancel when the end is pushed out or left alone', () => {
+    // Extending only leaves room for more days; nothing is orphaned. And
+    // saving a contract again after correcting its notes must not reach into
+    // a single booking.
+    expect(endedAfter(date('2026-07-31'), date('2026-08-31'), LONDON)).toBeNull();
+    expect(endedAfter(date('2026-07-31'), date('2026-07-31'), LONDON)).toBeNull();
+  });
+
+  it('is read in the operator\u2019s zone, not the server\u2019s', () => {
+    // The same last day, two installs. A contract ending on the 31st in New
+    // York owes its client five hours of that day that London's does not.
+    const london = endedAfter(null, date('2026-07-31'), LONDON);
+    const newYork = endedAfter(null, date('2026-07-31'), 'America/New_York');
+
+    expect(newYork!.getTime()).toBeGreaterThan(london!.getTime());
+    expect(newYork?.toISOString()).toBe('2026-08-01T04:00:00.000Z');
   });
 });

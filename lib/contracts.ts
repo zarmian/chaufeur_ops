@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { withAudit, type AuditContext } from './audit';
-import { fromDateOnlyString, toDateOnlyString } from './dates';
+import { fromDateOnlyString, toDateOnlyString, zonedDayRange } from './dates';
 import {
   calculateFinance,
   financeAmountsFrom,
@@ -10,6 +10,7 @@ import {
   checkAssignmentCompliance,
   checkVehicleAvailability,
   createJob,
+  transitionJob,
   type JobInput,
 } from './jobs';
 import { isVehicleCompliantAt } from './compliance';
@@ -40,14 +41,20 @@ import type { RepriceScope } from './enum-options';
  * around, for the same reason: by the time anybody edits a contract, some of
  * its days have drivers assigned and prices agreed.
  *
- * There are exactly two exceptions, both asked for explicitly on the edit
- * form and both reporting what they did and did not touch:
- * `repriceContractJobs` for a rate agreed after the fact, and
- * `reassignContractJobs` for a contract that changes driver or car. Each is
- * narrower than it looks — neither will overwrite a decision somebody made
- * about a particular day. If a third is ever added, it needs the same shape,
- * because the failure they all avoid is the system quietly editing bookings a
- * client is already expecting.
+ * There are exactly three exceptions, each tied to something an operator
+ * actually did and each reporting what it did and did not touch:
+ * `repriceContractJobs` for a rate agreed after the fact,
+ * `reassignContractJobs` for a contract that changes driver or car, and
+ * `cancelContractJobsFrom` for one that ends. The first two are narrower than
+ * they look — neither will overwrite a decision somebody made about a
+ * particular day. The third has the clearest claim of the three, because it is
+ * about bookings that are no longer going to happen at all rather than about
+ * changing ones that are.
+ *
+ * None of them deletes anything, none touches a day that has run, and all
+ * three refuse an invoiced day and name it. A fourth, if it is ever wanted,
+ * needs the same shape: the failure they exist to avoid is the system quietly
+ * editing bookings a client is already expecting.
  *
  * **Nothing is reserved.** The driver and the car named here are who normally
  * does it, not who is locked to it. A contract day raises no clash warning at
@@ -245,7 +252,7 @@ export async function updateContract(
   id: string,
   input: ContractInput,
   context: AuditContext,
-): Promise<{ id: string; previous: ContractCrew }> {
+): Promise<{ id: string; previous: ContractCrew & { endsOn: Date | null } }> {
   return withAudit(
     'JobContract',
     'update',
@@ -259,12 +266,21 @@ export async function updateContract(
         entityId: id,
         before,
         after,
-        // Who was on it a moment ago. `reassignContractJobs` needs this to
-        // tell a day that still follows the contract from one somebody
-        // deliberately changed.
+        /*
+         * What it looked like a moment ago.
+         *
+         * `reassignContractJobs` needs the crew to tell a day that still
+         * follows the contract from one somebody deliberately changed, and
+         * `endedAfter` needs the end date to tell an arrangement being cut
+         * short from one merely being saved again.
+         */
         result: {
           id,
-          previous: { driverId: before.driverId, vehicleId: before.vehicleId },
+          previous: {
+            driverId: before.driverId,
+            vehicleId: before.vehicleId,
+            endsOn: before.endsOn,
+          },
         },
       };
     },
@@ -344,6 +360,36 @@ export function reassignmentFor(
   }
 
   return { move: true, driverId, vehicleId };
+}
+
+/**
+ * The instant after which a contract's days should not exist, or null.
+ *
+ * An end date is a calendar day in the operator's own zone, and a day booked
+ * *on* it is a day the contract owes — so the boundary is the midnight that
+ * ends it, not the midnight that starts it. Read as UTC instead, a 07:45
+ * school run on the last day of a British summer contract falls an hour the
+ * wrong side of the line and gets cancelled on the morning it was meant to
+ * run.
+ *
+ * Null when there is nothing to cancel: an open-ended contract has no beyond,
+ * and an end date pushed further out only leaves room for more days rather
+ * than orphaning any. Tied to the end date actually becoming more restrictive
+ * rather than firing on every save, because reaching forward into booked days
+ * is something an operator does, not something a form does quietly.
+ */
+export function endedAfter(
+  previous: Date | null,
+  next: Date | null,
+  timeZone: string,
+): Date | null {
+  if (!next) return null;
+
+  const nextDay = toDateOnlyString(next);
+  // Unchanged or extended: whatever is booked is still within the contract.
+  if (previous && toDateOnlyString(previous) <= nextDay) return null;
+
+  return zonedDayRange(nextDay, timeZone).endExclusive;
 }
 
 /**
@@ -663,18 +709,79 @@ async function registrationsFor(
   return new Map(vehicles.map((vehicle) => [vehicle.id, vehicle.registration]));
 }
 
+export interface CancelResult {
+  cancelled: number;
+  /** Days still standing, and why — each named so it can be dealt with. */
+  refused: Array<{ reference: string; reason: string }>;
+}
+
 /**
- * Stop a contract making any more days.
+ * Call off the days a contract no longer covers.
  *
- * The days it already made are left standing: they are bookings a client is
- * expecting, and each is cancelled individually if it is not going to happen —
- * the same rule `endSeries` follows.
+ * Everything from `from` onwards that has not already run. The third and last
+ * of this module's reaches forward, and the one with the clearest claim on it:
+ * the others change a booking that is still going to happen, and this one is
+ * about bookings that are not.
+ *
+ * **Not a delete.** Each day goes through `transitionJob`, so it becomes a
+ * `CANCELLED` job with an event on it, the driver is told and any offer still
+ * out is withdrawn. A contract ending is exactly when a driver most needs to
+ * hear that next Tuesday is off — they have it in their diary.
+ *
+ * **An invoiced day is refused rather than cancelled**, by `transitionJob`'s
+ * own rule. The client is holding a document that bills for it, and cancelling
+ * the job underneath would leave the two disagreeing with nothing to say which
+ * is right. Those come back by reference so the invoice can be credited first.
+ */
+export async function cancelContractJobsFrom(
+  contractId: string,
+  from: Date,
+  context: AuditContext,
+): Promise<CancelResult> {
+  const days = await prisma.job.findMany({
+    where: {
+      contractId,
+      scheduledAt: { gte: from },
+      // A day that has run, or is running, or was already called off is not
+      // something the end of a contract has any business in.
+      status: { notIn: ['COMPLETED', 'CANCELLED', 'NO_SHOW', 'IN_PROGRESS'] },
+    },
+    select: { id: true, reference: true },
+    orderBy: { scheduledAt: 'asc' },
+  });
+
+  const result: CancelResult = { cancelled: 0, refused: [] };
+
+  for (const day of days) {
+    const outcome = await transitionJob(day.id, 'CANCELLED', context);
+    if (outcome.ok) result.cancelled += 1;
+    else result.refused.push({ reference: day.reference, reason: outcome.message });
+  }
+
+  return result;
+}
+
+/**
+ * Stop a contract making any more days, and call off the ones it has booked.
+ *
+ * **Changed.** Days already created used to be left standing, on the reasoning
+ * that they are bookings a client is expecting and each should be cancelled
+ * deliberately — the rule `endSeries` follows. In practice that made stopping
+ * a contract a half-action: the arrangement was over, the office believed it
+ * had ended it, and a fortnight of days sat on the board waiting to send cars
+ * to a client who had cancelled. The first anybody knew was a driver arriving
+ * at a school gate nobody was standing at.
+ *
+ * Stopping now means stopping. What it does *not* do is delete anything or
+ * touch a day that has already run — and an invoiced day is refused and named,
+ * because the client is holding a figure for it.
  */
 export async function setContractActive(
   id: string,
   active: boolean,
   context: AuditContext,
-): Promise<void> {
+  options: { now?: Date } = {},
+): Promise<CancelResult> {
   await withAudit(
     'JobContract',
     'update',
@@ -688,6 +795,13 @@ export async function setContractActive(
     },
     context,
   );
+
+  // Starting one again makes no days until the next run, so there is nothing
+  // to undo — and un-cancelling days the operator has since dealt with is not
+  // something this could get right anyway.
+  if (active) return { cancelled: 0, refused: [] };
+
+  return cancelContractJobsFrom(id, options.now ?? new Date(), context);
 }
 
 export async function getContract(id: string) {

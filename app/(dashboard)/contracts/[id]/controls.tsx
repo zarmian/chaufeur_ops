@@ -9,9 +9,11 @@ import { generateNowAction, setContractActiveAction } from '../actions';
 /**
  * Stopping a contract, and booking its days now.
  *
- * Stopping is confirmed: it is one click from an arrangement somebody is
- * relying on, and the consequence — no more days — is not visible until the
- * morning a car does not turn up.
+ * Stopping is confirmed, and the dialog has to say what it actually does. It
+ * is one click from an arrangement somebody is relying on, and stopping now
+ * calls off every day still to come rather than only the ones not yet made —
+ * which is a great deal more than "no more days" and the opposite of what this
+ * button used to promise.
  */
 export function ContractControls({
   contractId,
@@ -48,8 +50,8 @@ export function ContractControls({
           disabled={pending}
           label="Stop this contract"
           title="Stop this contract?"
-          description="No more days will be created. The ones already booked stay — they are bookings a client is expecting, so cancel any of them individually."
-          confirmLabel="Stop it"
+          description="No more days will be created, and every day still to come is cancelled — the drivers on them are told. Days already run are untouched, and one that has been invoiced is left alone and named."
+          confirmLabel="Stop it and cancel the rest"
           cancelLabel="Leave it running"
           onConfirm={() =>
             startTransition(() => setContractActiveAction(contractId, false))
@@ -69,8 +71,9 @@ export function ContractControls({
       )}
 
       <p className="text-xs text-muted-foreground">
-        Stopping makes no more days. The days it already created are bookings a
-        client is expecting, so they stay — cancel any individually.
+        Stopping makes no more days and calls off the ones still to come. To end
+        it on a date instead, set the end date — the days after it are cancelled
+        the same way.
       </p>
     </>
   );

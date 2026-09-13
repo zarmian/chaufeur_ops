@@ -2,21 +2,24 @@ import { expect, test, type Page } from '@playwright/test';
 import { uniqueDigits, uniquePhone, uniquePlate } from './unique';
 
 /**
- * Changing the car on a standing contract.
+ * The three times a standing contract reaches into the days it already booked.
  *
- * A contract is an arrangement, and the days it has already booked are
- * ordinary jobs — which is why nothing else in the contract screen reaches
- * forward into them. Moving the car is the exception, and it earns it: a
- * contract whose car changes permanently, with a fortnight of days already
- * booked against the old one, otherwise means a fortnight of jobs reassigned
- * by hand, and the day somebody misses is a client watching the road for a
- * registration that is not coming.
+ * A contract is an arrangement, and its days are ordinary jobs — which is why
+ * nothing else on the contract screen touches them once they exist. The
+ * exceptions each earn it. Moving the car: a contract whose car changes
+ * permanently, with a fortnight already booked against the old one, otherwise
+ * means a fortnight of jobs reassigned by hand, and the day somebody misses is
+ * a client watching the road for a registration that is not coming. Ending it,
+ * by stopping it or by cutting its end date short: those days are not going to
+ * happen, and leaving them on the board is how a car turns up at a school gate
+ * nobody is standing at.
  *
  * The decisions are unit-tested in `lib/contracts.test.ts` and the database
  * behaviour in `lib/contracts.integration.test.ts`. What only a browser shows
- * is whether the box is wired to any of it — whether it is on by default,
- * whether it posts, and whether what happened is actually said back to the
- * operator. That is where the equivalent address bug lived.
+ * is whether the controls are wired to any of it — whether the box is on by
+ * default, whether the dialog describes what it actually does, and whether
+ * what happened is said back to the operator. That is where the equivalent
+ * address bug lived.
  */
 
 const ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL ?? 'admin@example.com';
@@ -66,7 +69,7 @@ async function selectByOptionText(page: Page, selectId: string, text: string) {
   await select.selectOption(value!);
 }
 
-test.describe('changing the car on a contract', () => {
+test.describe('a contract and the days it has booked', () => {
   test.skip(!CREDENTIALS_SET, 'E2E_ADMIN_PASSWORD is not set');
 
   // One dispatcher, one contract, worked through in order.
@@ -189,4 +192,48 @@ test.describe('changing the car on a contract', () => {
     await openFirstDay();
     await expect(page.getByText(newCar).first()).toBeVisible();
   });
+
+  test('bringing the end date forward cancels the days beyond it', async () => {
+    /*
+     * The other way a contract ends: not stopped, but cut short. A client says
+     * "we finish on Friday" and the days already booked for the week after
+     * have to be called off, or a car turns up at the school gates on Monday.
+     */
+    await page.goto(`${contractUrl}/edit`);
+    await page.locator('#endsOn').fill(dateIn(3));
+    await page.getByRole('button', { name: 'Save changes' }).click();
+
+    const notice = page.getByTestId('contract-ended');
+    await expect(notice).toBeVisible();
+    await expect(notice).toHaveText(/\d+ upcoming days? cancelled/);
+
+    // Some days survive — the ones on or before the new end date.
+    await expect(page.getByText('Cancelled').first()).toBeVisible();
+  });
+
+  test('stopping it calls off the days still to come', async () => {
+    /*
+     * Changed behaviour, and the one worth a browser test: stopping used to
+     * leave the days standing, which made it a half-action. The arrangement
+     * was over, the office believed it had ended it, and a fortnight of days
+     * sat on the board waiting to send cars to a client who had cancelled.
+     *
+     * The dialog has to say so too. A confirmation that promises one thing and
+     * does another is worse than none.
+     */
+    await page.goto(contractUrl);
+
+    await page.getByRole('button', { name: 'Stop this contract' }).click();
+    await expect(page.getByText(/every day still to come is cancelled/)).toBeVisible();
+    await page.getByRole('button', { name: 'Stop it and cancel the rest' }).click();
+
+    const notice = page.getByTestId('contract-ended');
+    await expect(notice).toBeVisible();
+    await expect(notice).toHaveText(/\d+ upcoming days? cancelled/);
+
+    // Cancelled, not deleted: the days are still listed, and say so.
+    await expect(page.locator('table tbody tr')).not.toHaveCount(0);
+    await expect(page.getByText('Cancelled').first()).toBeVisible();
+  });
+
 });
