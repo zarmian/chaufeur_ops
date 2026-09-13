@@ -6,10 +6,17 @@ import {
   financeAmountsFrom,
   type FinanceAmounts,
 } from './job-finance';
-import { createJob, type JobInput } from './jobs';
+import {
+  checkAssignmentCompliance,
+  checkVehicleAvailability,
+  createJob,
+  type JobInput,
+} from './jobs';
+import { isVehicleCompliantAt } from './compliance';
 import { parseMoney } from './money';
 import { prisma } from './prisma';
 import { formatReference } from './references';
+import { onDriverReplaced, onJobAssigned, onVehicleChanged } from './telegram/hooks';
 import { emptyToNull, tidy } from './text';
 import type { RepriceScope } from './enum-options';
 
@@ -28,10 +35,19 @@ import type { RepriceScope } from './enum-options';
  * spreadsheet beside.
  *
  * **The days it makes are ordinary jobs.** They can be reassigned, repriced,
- * cancelled and invoiced individually, and nothing here reaches back into one
- * once it exists — the same rule `lib/series.ts` is built around, for the same
- * reason: by the time anybody edits a contract, some of its days have drivers
- * assigned and prices agreed.
+ * cancelled and invoiced individually, and by default nothing here reaches
+ * back into one once it exists — the same rule `lib/series.ts` is built
+ * around, for the same reason: by the time anybody edits a contract, some of
+ * its days have drivers assigned and prices agreed.
+ *
+ * There are exactly two exceptions, both asked for explicitly on the edit
+ * form and both reporting what they did and did not touch:
+ * `repriceContractJobs` for a rate agreed after the fact, and
+ * `reassignContractJobs` for a contract that changes driver or car. Each is
+ * narrower than it looks — neither will overwrite a decision somebody made
+ * about a particular day. If a third is ever added, it needs the same shape,
+ * because the failure they all avoid is the system quietly editing bookings a
+ * client is already expecting.
  *
  * **Nothing is reserved.** The driver and the car named here are who normally
  * does it, not who is locked to it. A contract day raises no clash warning at
@@ -229,7 +245,7 @@ export async function updateContract(
   id: string,
   input: ContractInput,
   context: AuditContext,
-): Promise<{ id: string }> {
+): Promise<{ id: string; previous: ContractCrew }> {
   return withAudit(
     'JobContract',
     'update',
@@ -239,10 +255,95 @@ export async function updateContract(
         where: { id },
         data: toData(input),
       });
-      return { entityId: id, before, after, result: { id } };
+      return {
+        entityId: id,
+        before,
+        after,
+        // Who was on it a moment ago. `reassignContractJobs` needs this to
+        // tell a day that still follows the contract from one somebody
+        // deliberately changed.
+        result: {
+          id,
+          previous: { driverId: before.driverId, vehicleId: before.vehicleId },
+        },
+      };
     },
     context,
   );
+}
+
+/**
+ * Who is on a contract, and who was.
+ *
+ * The driver and the car travel together through every decision below, because
+ * the two questions are the same question: does this day still follow the
+ * arrangement, or has somebody made their own call about it?
+ */
+export interface ContractCrew {
+  driverId: string | null;
+  vehicleId: string | null;
+}
+
+/** A day that cannot be moved, whatever the contract now says. */
+const SETTLED_STATUSES = ['COMPLETED', 'CANCELLED', 'NO_SHOW', 'IN_PROGRESS'];
+
+export type Reassignment =
+  | { move: false; reason: string | null }
+  | { move: true; driverId: string | null; vehicleId: string | null };
+
+/**
+ * What a changed contract should do to one day it already made.
+ *
+ * The rule, in one sentence: **a day that still carries who the contract said
+ * follows the contract; a day somebody changed by hand keeps their change.**
+ *
+ * That second half is the part worth stating out loud, because it is the one
+ * that will look wrong before it looks right. The usual car goes in for its
+ * MOT on the 14th, so the operator puts that day in another car. Six weeks
+ * later the contract moves to a new car permanently. Silently overwriting the
+ * 14th would undo a decision somebody made for a reason nothing here can see —
+ * and it would do it to a booking a client is expecting. So those days are
+ * left alone and named, and the operator moves them if that is what they
+ * meant. Being told is the whole difference between a system reaching into
+ * your bookings and one doing what you asked.
+ *
+ * Pure, and tested, because every branch here is a real car arriving or not
+ * arriving somewhere.
+ */
+export function reassignmentFor(
+  day: { driverId: string | null; vehicleId: string | null; status: string },
+  contract: ContractCrew,
+  previous: ContractCrew,
+): Reassignment {
+  // A day that has run, or been called off, is history. The contract has no
+  // business in it.
+  if (SETTLED_STATUSES.includes(day.status)) {
+    return { move: false, reason: `already ${day.status.toLowerCase().replace('_', ' ')}` };
+  }
+
+  const vehicleChanged = contract.vehicleId !== previous.vehicleId;
+  const driverChanged = contract.driverId !== previous.driverId;
+  if (!vehicleChanged && !driverChanged) return { move: false, reason: null };
+
+  // Changed by hand: the day carries somebody other than who the contract had.
+  // Not an error and not a conflict — a decision, which is why it survives.
+  if (vehicleChanged && day.vehicleId !== previous.vehicleId) {
+    return { move: false, reason: 'its car was changed on the day itself' };
+  }
+  if (driverChanged && day.driverId !== previous.driverId) {
+    return { move: false, reason: 'its driver was changed on the day itself' };
+  }
+
+  const vehicleId = vehicleChanged ? contract.vehicleId : day.vehicleId;
+  const driverId = driverChanged ? contract.driverId : day.driverId;
+
+  // Already where it is being asked to go. Common when a day was created after
+  // the contract changed, and not worth an audit row or a message to a driver.
+  if (vehicleId === day.vehicleId && driverId === day.driverId) {
+    return { move: false, reason: null };
+  }
+
+  return { move: true, driverId, vehicleId };
 }
 
 /**
@@ -372,6 +473,194 @@ export async function repriceContractJobs(
   }
 
   return result;
+}
+
+export interface ReassignResult {
+  moved: number;
+  /** Days left as they were, and why — each named so it can be dealt with. */
+  skipped: Array<{ reference: string; reason: string }>;
+}
+
+/**
+ * Move the days not yet started onto the contract's new driver or car.
+ *
+ * The one place a contract edit is allowed to reach forward into the days it
+ * already made. It earns the exception because the alternative is worse than
+ * the rule it breaks: a contract whose car changes permanently, with thirty
+ * days already booked against the old one, otherwise means thirty jobs
+ * reassigned by hand — and the day somebody misses is a driver turning up in a
+ * car the client was not expecting, or in no car at all.
+ *
+ * Three things are never done quietly:
+ *
+ * **A day changed by hand keeps its change** — see `reassignmentFor`.
+ *
+ * **A car that cannot legally do the job is refused**, exactly as it would be
+ * on the booking form. A lapsed MOT does not become acceptable because it
+ * arrived through a contract, and a car out on hire that day is not available
+ * just because a contract says so.
+ *
+ * **The driver is told.** A new driver gets the job card; the driver already
+ * on it is told the car changed, because the registration is what the client
+ * is watching for and what the driver has to actually go and collect.
+ */
+export async function reassignContractJobs(
+  contractId: string,
+  previous: ContractCrew,
+  context: AuditContext,
+  options: { now?: Date } = {},
+): Promise<ReassignResult> {
+  const contract = await prisma.jobContract.findUniqueOrThrow({
+    where: { id: contractId },
+    select: { driverId: true, vehicleId: true },
+  });
+
+  const result: ReassignResult = { moved: 0, skipped: [] };
+  if (
+    contract.driverId === previous.driverId &&
+    contract.vehicleId === previous.vehicleId
+  ) {
+    return result;
+  }
+
+  const now = options.now ?? new Date();
+
+  // Not yet started, and still ahead of us. The status filter is the real
+  // guard — a job can be running late and still be `IN_PROGRESS` — and the
+  // date keeps the query off the whole history of a long-standing contract.
+  const days = await prisma.job.findMany({
+    where: {
+      contractId,
+      scheduledAt: { gte: now },
+      status: { notIn: ['COMPLETED', 'CANCELLED', 'NO_SHOW', 'IN_PROGRESS'] },
+    },
+    select: {
+      id: true,
+      reference: true,
+      scheduledAt: true,
+      status: true,
+      driverId: true,
+      vehicleId: true,
+    },
+    orderBy: { scheduledAt: 'asc' },
+  });
+
+  // For the driver's message. Loaded once rather than per day.
+  const registration = await registrationsFor([
+    previous.vehicleId,
+    contract.vehicleId,
+  ]);
+
+  for (const day of days) {
+    const decision = reassignmentFor(day, contract, previous);
+    if (!decision.move) {
+      if (decision.reason) {
+        result.skipped.push({ reference: day.reference, reason: decision.reason });
+      }
+      continue;
+    }
+
+    const refusal = await refuseAssignment(
+      decision.driverId,
+      decision.vehicleId,
+      day.scheduledAt,
+    );
+    if (refusal) {
+      result.skipped.push({ reference: day.reference, reason: refusal });
+      continue;
+    }
+
+    const driverChanged = decision.driverId !== day.driverId;
+    const vehicleChanged = decision.vehicleId !== day.vehicleId;
+
+    await withAudit(
+      'Job',
+      'update',
+      async (tx) => {
+        const before = await tx.job.findUniqueOrThrow({ where: { id: day.id } });
+        const after = await tx.job.update({
+          where: { id: day.id },
+          data: {
+            driverId: decision.driverId,
+            vehicleId: decision.vehicleId,
+            // A new driver has accepted nothing, so an ACCEPTED day drops back
+            // to ASSIGNED — the same rule bulk assignment follows. A day that
+            // only changed car keeps the acceptance it already has.
+            ...(driverChanged && before.status === 'ACCEPTED'
+              ? { status: 'ASSIGNED' as const }
+              : {}),
+          },
+        });
+        await tx.jobEvent.create({
+          data: {
+            jobId: day.id,
+            type: driverChanged ? 'ASSIGNED' : 'EDITED',
+            actorType: 'USER',
+            actorId: context.userId ?? null,
+            metadata: {
+              fromContract: contractId,
+              ...(driverChanged ? { driverId: decision.driverId } : {}),
+              ...(vehicleChanged ? { vehicleId: decision.vehicleId } : {}),
+            },
+          },
+        });
+        return { entityId: day.id, before, after, result: null };
+      },
+      context,
+    );
+
+    // Telling the driver is best-effort by design: Telegram being unreachable
+    // must not leave the day half-moved in the database.
+    if (driverChanged) {
+      if (day.driverId) await onDriverReplaced(day.id, day.driverId);
+      if (decision.driverId) await onJobAssigned(day.id);
+    } else if (vehicleChanged) {
+      await onVehicleChanged(
+        day.id,
+        registration.get(day.vehicleId ?? '') ?? 'none',
+        registration.get(decision.vehicleId ?? '') ?? 'none',
+      );
+    }
+
+    result.moved += 1;
+  }
+
+  return result;
+}
+
+/** Why this driver and car cannot do that day, or null if they can. */
+async function refuseAssignment(
+  driverId: string | null,
+  vehicleId: string | null,
+  at: Date,
+): Promise<string | null> {
+  if (driverId) {
+    const compliance = await checkAssignmentCompliance(driverId, vehicleId, at);
+    return compliance && !compliance.compliant ? compliance.reasons.join('; ') : null;
+  }
+
+  // No driver on the day, so `checkAssignmentCompliance` has nothing to say —
+  // but a car with a lapsed MOT is still a car with a lapsed MOT.
+  if (!vehicleId) return null;
+
+  const compliance = await isVehicleCompliantAt(vehicleId, at);
+  if (!compliance.compliant) return compliance.reasons.join('; ');
+
+  const availability = await checkVehicleAvailability(vehicleId, at);
+  return availability.ok ? null : availability.message;
+}
+
+async function registrationsFor(
+  ids: Array<string | null>,
+): Promise<Map<string, string>> {
+  const wanted = ids.filter((id): id is string => Boolean(id));
+  if (wanted.length === 0) return new Map();
+
+  const vehicles = await prisma.vehicle.findMany({
+    where: { id: { in: wanted } },
+    select: { id: true, registration: true },
+  });
+  return new Map(vehicles.map((vehicle) => [vehicle.id, vehicle.registration]));
 }
 
 /**

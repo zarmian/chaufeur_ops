@@ -6,9 +6,11 @@ import {
   contractSchema,
   createContract,
   generateContractJobs,
+  reassignContractJobs,
   repriceContractJobs,
   setContractActive,
   updateContract,
+  type ReassignResult,
 } from '@/lib/contracts';
 import type { RepriceScope } from '@/lib/enum-options';
 import { isRedirectError, toFormState, type FormState } from '@/lib/form-state';
@@ -76,6 +78,30 @@ export async function createContractAction(
   redirect(`/contracts/${id}`);
 }
 
+/**
+ * What was moved, and what was not — in one line an operator can act on.
+ *
+ * The days left behind are the whole reason this is said out loud rather than
+ * counted. A car refused for a lapsed MOT and a day somebody put another car
+ * on are both "not moved", and both need a person to decide something.
+ */
+function describe(result: ReassignResult): string {
+  const parts = [
+    `${result.moved} upcoming ${result.moved === 1 ? 'day' : 'days'} moved`,
+  ];
+
+  if (result.skipped.length > 0) {
+    parts.push(
+      `${result.skipped.length} left as ${result.skipped.length === 1 ? 'it was' : 'they were'}: ${result.skipped
+        .slice(0, 5)
+        .map((skip) => `${skip.reference} — ${skip.reason}`)
+        .join('; ')}${result.skipped.length > 5 ? '…' : ''}`,
+    );
+  }
+
+  return parts.join('. ');
+}
+
 /** Only the three the form offers; anything else means "leave them alone". */
 function repriceScopeFrom(value: FormDataEntryValue | null): RepriceScope {
   const text = String(value ?? '');
@@ -92,7 +118,25 @@ export async function updateContractAction(
   try {
     const { audit } = await actingUser('editJobs');
     const parsed = contractSchema.parse(readContractForm(formData));
-    await updateContract(contractId, parsed, audit);
+    const { previous } = await updateContract(contractId, parsed, audit);
+
+    /*
+     * Moving the days not yet started onto the new driver or car.
+     *
+     * Unlike the reprice below, this is on unless the operator turns it off.
+     * A contract's car changing is a change to the arrangement itself — the
+     * days it has already booked against the old one are the point of the
+     * question, not an afterthought — and leaving them behind means a client
+     * watching for a registration that is not coming.
+     */
+    if (formData.get('moveUpcoming') !== null) {
+      const result = await reassignContractJobs(contractId, previous, audit);
+      if (result.moved > 0 || result.skipped.length > 0) {
+        query.set('contractMoved', describe(result));
+        revalidatePath('/jobs');
+        revalidatePath('/dispatch');
+      }
+    }
 
     // Reaching back into days already booked, when the operator asked for it.
     // Off by default — see `repriceContractJobs`.

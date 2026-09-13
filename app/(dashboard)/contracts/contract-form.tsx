@@ -121,6 +121,10 @@ export function ContractForm({
   const errors = state.fields ?? {};
 
   const [weekdays, setWeekdays] = useState<number[]>(values.weekdays);
+  // Held rather than left to the DOM so the form can tell when the crew has
+  // actually moved — the same reason the rates below are.
+  const [driverId, setDriverId] = useState(values.driverId);
+  const [vehicleId, setVehicleId] = useState(values.vehicleId);
   const [dayRate, setDayRate] = useState(values.dayRate);
   const [driverDayRate, setDriverDayRate] = useState(values.driverDayRate);
 
@@ -140,6 +144,9 @@ export function ContractForm({
   // save invites somebody to tick it while changing the pickup address.
   const rateChanged =
     dayRate !== values.dayRate || driverDayRate !== values.driverDayRate;
+
+  const crewChanged =
+    driverId !== values.driverId || vehicleId !== values.vehicleId;
 
   const toggle = (day: number) =>
     setWeekdays((current) =>
@@ -306,7 +313,8 @@ export function ContractForm({
           >
             <FilteredSelect
               {...fieldProps('driverId', errors.driverId)}
-              defaultValue={values.driverId}
+              value={driverId}
+              onChange={setDriverId}
               options={drivers.map((driver) => ({
                 value: driver.id,
                 label: driver.label,
@@ -323,7 +331,8 @@ export function ContractForm({
           >
             <FilteredSelect
               {...fieldProps('vehicleId', errors.vehicleId)}
-              defaultValue={values.vehicleId}
+              value={vehicleId}
+              onChange={setVehicleId}
               options={vehicles.map((vehicle) => ({
                 value: vehicle.id,
                 label: vehicle.label,
@@ -333,6 +342,41 @@ export function ContractForm({
             />
           </FormField>
         </div>
+
+        {offerReprice ? (
+          <div
+            className={`space-y-2 rounded-md border p-3 ${
+              crewChanged ? 'border-dashed' : 'opacity-60'
+            }`}
+            data-testid="move-upcoming"
+          >
+            <label className="flex cursor-pointer items-start gap-2 text-sm font-medium">
+              <input
+                type="checkbox"
+                name="moveUpcoming"
+                // On by default, unlike the reprice below. A contract's car
+                // changing is a change to the arrangement, and the days
+                // already booked against the old one are the point of the
+                // question rather than an afterthought.
+                defaultChecked
+                disabled={!crewChanged}
+                className="mt-0.5"
+              />
+              <span>Move the days not yet started onto them</span>
+            </label>
+            <p className="text-sm text-muted-foreground">
+              {crewChanged
+                ? 'Days already booked are put on the new driver and car, and the driver is told. Days already run, cancelled or under way are left.'
+                : 'Change the driver or the car above to move the days already booked.'}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              A day somebody has already put a different driver or car on keeps
+              it — that was a decision about that day. A car that cannot legally
+              do the job is refused, exactly as it would be on the booking form.
+              Both are listed back to you.
+            </p>
+          </div>
+        ) : null}
       </section>
 
       <section className="space-y-4">

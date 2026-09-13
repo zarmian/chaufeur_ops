@@ -5,6 +5,7 @@ import {
   datesToGenerate,
   describeWeekdays,
   MAX_GENERATE_AHEAD_DAYS,
+  reassignmentFor,
   runsOn,
   weekdayOf,
 } from './contracts';
@@ -215,5 +216,101 @@ describe('contractSchema', () => {
     // A repeating time of day. Held as an instant it would drift by an hour
     // in October and put a driver at the school gates at 06:45.
     expect(contractSchema.parse(valid).startTime).toBe('07:45');
+  });
+});
+
+/**
+ * What a changed contract does to the days it already made.
+ *
+ * Every branch here is a car arriving somewhere, or not. The two that matter
+ * most pull in opposite directions, which is why they are both spelled out:
+ * a day that still follows the contract has to move, or changing the car is
+ * thirty edits by hand; and a day somebody changed themselves has to stay, or
+ * the system quietly undoes a decision made for a reason it cannot see.
+ */
+describe('reassignmentFor', () => {
+  const OLD = { driverId: 'drv-old', vehicleId: 'veh-old' };
+  const NEW = { driverId: 'drv-old', vehicleId: 'veh-new' };
+
+  const day = (overrides: Partial<Parameters<typeof reassignmentFor>[0]> = {}) => ({
+    driverId: 'drv-old',
+    vehicleId: 'veh-old',
+    status: 'ASSIGNED',
+    ...overrides,
+  });
+
+  it('moves a day that still carries the car the contract had', () => {
+    expect(reassignmentFor(day(), NEW, OLD)).toEqual({
+      move: true,
+      driverId: 'drv-old',
+      vehicleId: 'veh-new',
+    });
+  });
+
+  it('moves a day that was never given a car at all', () => {
+    // Nothing to overwrite, so nothing to protect.
+    expect(reassignmentFor(day({ vehicleId: null }), { ...NEW }, { ...OLD, vehicleId: null }))
+      .toEqual({ move: true, driverId: 'drv-old', vehicleId: 'veh-new' });
+  });
+
+  it('leaves a day whose car was changed on the day itself', () => {
+    /*
+     * The rule that will look wrong before it looks right. The usual car goes
+     * in for its MOT on the 14th so that day is put in another; six weeks
+     * later the contract moves cars permanently. Overwriting the 14th undoes
+     * somebody's decision about a booking a client is expecting.
+     */
+    const result = reassignmentFor(day({ vehicleId: 'veh-borrowed' }), NEW, OLD);
+
+    expect(result.move).toBe(false);
+    expect(result).toHaveProperty('reason', 'its car was changed on the day itself');
+  });
+
+  it('leaves a day whose driver was swapped, when the driver is what changed', () => {
+    const result = reassignmentFor(
+      day({ driverId: 'drv-cover' }),
+      { driverId: 'drv-new', vehicleId: 'veh-old' },
+      OLD,
+    );
+
+    expect(result.move).toBe(false);
+    expect(result).toHaveProperty('reason', 'its driver was changed on the day itself');
+  });
+
+  it('does not care who is driving when only the car changed', () => {
+    // A day covered by somebody else still gets the contract's new car: the
+    // cover driver was a decision about the driver, not about the vehicle.
+    expect(reassignmentFor(day({ driverId: 'drv-cover' }), NEW, OLD)).toEqual({
+      move: true,
+      driverId: 'drv-cover',
+      vehicleId: 'veh-new',
+    });
+  });
+
+  it('never touches a day that has run, been called off, or is running now', () => {
+    for (const status of ['COMPLETED', 'CANCELLED', 'NO_SHOW', 'IN_PROGRESS']) {
+      const result = reassignmentFor(day({ status }), NEW, OLD);
+      expect(result.move, `${status} was moved`).toBe(false);
+    }
+  });
+
+  it('says nothing when the contract has not changed crew', () => {
+    // Saving a contract after correcting its notes must not touch a thing.
+    expect(reassignmentFor(day(), OLD, OLD)).toEqual({ move: false, reason: null });
+  });
+
+  it('does nothing to a day already on the new car', () => {
+    // Created after the contract changed. Not worth an audit row, and not
+    // worth a message telling a driver their car changed to what it already is.
+    expect(reassignmentFor(day({ vehicleId: 'veh-new' }), NEW, { ...OLD, vehicleId: 'veh-new' }))
+      .toEqual({ move: false, reason: null });
+  });
+
+  it('takes the car off the days when the contract takes it off', () => {
+    // "Usual vehicle: none" is a real answer, and it has to propagate like
+    // any other — otherwise the only way to clear a car is thirty edits.
+    expect(
+      reassignmentFor(day(), { driverId: 'drv-old', vehicleId: null }, OLD),
+    ).toEqual({ move: true, driverId: 'drv-old', vehicleId: null });
   });
 });

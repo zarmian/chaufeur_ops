@@ -149,6 +149,24 @@ export async function onDriverReplaced(
 }
 
 /**
+ * The same driver, a different car.
+ *
+ * Its own hook rather than part of `onJobEdited`, because the vehicle is not
+ * one of the fields that edit compares — a job's car changing is normally the
+ * driver's own car changing, which they hardly need telling about. A contract
+ * moving to a new car is the opposite: the registration is what the client is
+ * watching the road for, and what the driver has to go and collect.
+ */
+export async function onVehicleChanged(
+  jobId: string,
+  from: string,
+  to: string,
+): Promise<void> {
+  if (from === to) return;
+  await quietly(() => notifyJobChanged(jobId, [{ field: 'Vehicle', from, to }]));
+}
+
+/**
  * What an edit changed, in the driver's terms — spec 5.3.7.
  *
  * Only the fields a driver acts on. A changed internal note or a corrected

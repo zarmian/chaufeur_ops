@@ -43,6 +43,7 @@ export default async function ContractDetailPage({
   const user = await pageRequireCapability('viewJobs');
   const [{ id }, query] = await Promise.all([params, searchParams]);
   const notice = filterValue(query, 'contractNotice');
+  const moved = filterValue(query, 'contractMoved');
 
   const contract = await getContract(id);
   if (!contract) notFound();
@@ -96,6 +97,16 @@ export default async function ContractDetailPage({
       {notice ? (
         <Notice className="mb-6" data-testid="contract-notice">
           {notice}
+        </Notice>
+      ) : null}
+
+      {/* Same reasoning one field along: a day left on the old car because
+          its MOT had lapsed, or because somebody had already put another car
+          on it, is a day that still needs a person. Counting them silently
+          would be the same failure as repricing silently. */}
+      {moved ? (
+        <Notice className="mb-6" data-testid="contract-moved">
+          {moved}
         </Notice>
       ) : null}
 
