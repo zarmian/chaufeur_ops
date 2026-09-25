@@ -3,8 +3,10 @@ import { BrandMark } from '@/components/brand-mark';
 import { getBranding } from '@/lib/branding-store';
 import { formatDateTime } from '@/lib/dates';
 import { getLocaleConfig } from '@/lib/locale-store';
+import { CHAT_CLOSED_TEXT } from '@/lib/tracking-chat';
 import { resolveTracking } from '@/lib/tracking-store';
 import { AutoRefresh } from './auto-refresh';
+import { ChatPanel } from './chat-panel';
 
 /**
  * Where a passenger finds out whether their car is coming.
@@ -107,6 +109,42 @@ export default async function TrackingPage({
               {view.vehicle}
             </p>
           ) : null}
+        </section>
+      ) : null}
+
+      {/*
+        The thread, when there is one to be had.
+
+        Below the car and above the journey details on purpose: a passenger
+        who has just read who is coming is the one who wants to tell them
+        where to come to, and the addresses are reference rather than action.
+
+        A closed thread still shows what was said — somebody who asked a
+        question on the way should not lose the answer on arrival — and says
+        why it is shut rather than simply vanishing, which reads as a fault.
+      */}
+      {page.chat.open ? (
+        <ChatPanel
+          token={token}
+          messages={page.messages}
+          driverName={view.driverName}
+        />
+      ) : page.messages.length > 0 ? (
+        <ChatPanel
+          token={token}
+          messages={page.messages}
+          driverName={view.driverName}
+          closed={CHAT_CLOSED_TEXT[page.chat.reason]}
+        />
+      ) : page.chat.reason === 'TOO_EARLY' ||
+        page.chat.reason === 'DRIVER_UNREACHABLE' ? (
+        <section className="rounded-lg border p-5" data-testid="tracking-chat-closed">
+          <h2 className="text-muted-foreground text-xs tracking-wide uppercase">
+            Message your driver
+          </h2>
+          <p className="text-muted-foreground mt-2 text-sm">
+            {CHAT_CLOSED_TEXT[page.chat.reason]}
+          </p>
         </section>
       ) : null}
 

@@ -47,6 +47,7 @@ describe.skipIf(!DATABASE_AVAILABLE)('passenger tracking links', () => {
   afterEach(async () => {
     if (!raw) return;
     await raw.jobEvent.deleteMany({ where: { jobId: { in: jobIds } } });
+    await raw.jobChatMessage.deleteMany({ where: { jobId: { in: jobIds } } });
     await raw.job.deleteMany({ where: { id: { in: jobIds } } });
     jobIds.length = 0;
   });

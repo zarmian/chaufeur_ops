@@ -101,6 +101,8 @@ export type Callback =
    * driver claim a job in another's name by editing it.
    */
   | { kind: 'offer-accept'; jobId: string }
+  /** Opens the reply box for the passenger's thread on this job. */
+  | { kind: 'chat-reply'; jobId: string }
   | { kind: 'document-type'; documentType: string }
   | { kind: 'expense-kind'; expenseId: string; expenseKind: string }
   | { kind: 'expense-cancel'; expenseId: string };
@@ -128,6 +130,8 @@ export function encodeCallback(callback: Callback): string {
       return `late:${callback.jobId}:${callback.minutes}`;
     case 'offer-accept':
       return `job:${callback.jobId}:offer`;
+    case 'chat-reply':
+      return `job:${callback.jobId}:reply`;
     case 'document-type':
       // The file being filed is held in the conversation, not in the button:
       // an object key does not fit in 64 bytes beside anything else.
@@ -155,6 +159,7 @@ export function decodeCallback(data: string): Callback | null {
     if (verb === 'decline') return { kind: 'decline', jobId: id };
     if (verb === 'late') return { kind: 'late', jobId: id };
     if (verb === 'offer') return { kind: 'offer-accept', jobId: id };
+    if (verb === 'reply') return { kind: 'chat-reply', jobId: id };
     const step = STEP_BY_VERB.get(verb);
     return step ? { kind: 'step', jobId: id, step } : null;
   }

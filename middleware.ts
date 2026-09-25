@@ -64,6 +64,19 @@ const PUBLIC_PREFIXES = [
    * existed and one that has been reissued.
    */
   '/track',
+  /*
+   * The passenger's message box behind that same token.
+   *
+   * Separate from `/track` because a route handler is not a page prefix, and
+   * leaving it off would have middleware redirect an unauthenticated POST to
+   * `/login` — which the browser would follow and the passenger would read as
+   * the message having been sent.
+   *
+   * It guards itself the same way the page does: the token is resolved
+   * through `resolveTracking`, the thread's own rules decide whether it is
+   * open, and it is rate limited per journey.
+   */
+  '/api/track',
 ];
 
 export function middleware(request: NextRequest) {

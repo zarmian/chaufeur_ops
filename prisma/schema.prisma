@@ -797,6 +797,15 @@ model Job {
   /// need one.
   trackingToken String? @unique
 
+  /// When the client was sent the tracking link, two hours before the pickup.
+  ///
+  /// A column rather than a lookup against `ClientMessage`, which records what
+  /// was sent but not which job it was about — a client with two cars on the
+  /// same day would otherwise be sent one link and left guessing which journey
+  /// it followed. It is also what makes the send idempotent: the cron runs
+  /// every few minutes and must never text the same client twice.
+  journeyLinkSentAt DateTime?
+
   /// captured at booking — the commercial agreement
   clientPricePence Int?
   driverPricePence Int?
@@ -865,6 +874,7 @@ model Job {
   stops        JobStop[]
   invoiceLines InvoiceLine[]
   payoutLines  DriverPayoutLine[]
+  chat         JobChatMessage[]
 
   @@index([scheduledAt])
   @@index([status, scheduledAt])
@@ -2003,4 +2013,44 @@ model FlightStatus {
 
   @@unique([flightNumber, scheduledOn])
   @@index([scheduledArrival])
+}
+
+/// Who said it. There are only ever two parties on a journey's thread.
+enum ChatAuthor {
+  PASSENGER
+  DRIVER
+}
+
+/// One message between the passenger holding a tracking link and their driver.
+///
+/// Relayed rather than connected. The passenger types on the tracking page and
+/// the bot delivers it to the driver's Telegram; the driver replies in
+/// Telegram and it appears on the page. Neither ever learns the other's number
+/// or handle, which is the only arrangement compatible with the rest of this
+/// system — an owner-driver's mobile is not ours to hand out, and a tracking
+/// link is forwarded.
+///
+/// Kept against the job rather than against the client, because the
+/// conversation is about this journey and dies with it: the link closes when
+/// the job finishes and the thread closes with it.
+model JobChatMessage {
+  id    String @id @default(cuid())
+  jobId String
+
+  author ChatAuthor
+  /// Trimmed and length-capped at the boundary. Plain text only — this is
+  /// rendered to a passenger's browser and relayed into Telegram markdown.
+  body   String
+
+  /// Set once the relay actually reached the other side. Null means it was
+  /// recorded but never delivered — a driver with no Telegram, a send that
+  /// failed — which is the difference between "they have not replied" and
+  /// "they never heard you", and the passenger is told which.
+  deliveredAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  job Job @relation(fields: [jobId], references: [id])
+
+  @@index([jobId, createdAt])
 }

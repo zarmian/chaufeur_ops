@@ -26,6 +26,7 @@ export type TemplateName =
   | 'booking_confirmation'
   | 'driver_assigned'
   | 'driver_en_route'
+  | 'journey_link'
   | 'invoice'
   | 'payment_reminder';
 
@@ -44,6 +45,11 @@ export const TEMPLATES: Array<{ value: TemplateName; label: string; hint: string
     value: 'driver_en_route',
     label: 'Driver on the way',
     hint: 'When the driver taps On my way.',
+  },
+  {
+    value: 'journey_link',
+    label: 'Tracking link',
+    hint: 'Two hours before the pickup, with the driver, the car and a message box.',
   },
   { value: 'invoice', label: 'Invoice sent', hint: 'Alongside the invoice email.' },
   {
@@ -69,6 +75,7 @@ export const BLANK_MESSAGING: ClientMessagingConfig = {
     booking_confirmation: false,
     driver_assigned: false,
     driver_en_route: false,
+    journey_link: false,
     invoice: false,
     payment_reminder: false,
   },
@@ -91,6 +98,7 @@ export async function getClientMessagingConfig(): Promise<ClientMessagingConfig>
       booking_confirmation: enabled.booking_confirmation === true,
       driver_assigned: enabled.driver_assigned === true,
       driver_en_route: enabled.driver_en_route === true,
+      journey_link: enabled.journey_link === true,
       invoice: enabled.invoice === true,
       payment_reminder: enabled.payment_reminder === true,
     },
@@ -420,6 +428,40 @@ export async function driverEnRoute(
     subject: `${company}: your driver is on the way`,
     body: `${who} is on the way to ${job.pickupText}${eta}. Reference ${job.reference}.`,
     sms: `${company}: ${who} is on the way to ${job.pickupText}${eta}.`,
+  };
+}
+
+/**
+ * The tracking link, two hours out — spec 6.7.
+ *
+ * The one message in this list with something for the client to *do* rather
+ * than read: the page behind it names the driver and the car, and while the
+ * journey is live it carries a box that puts a message on that driver's
+ * phone. So it is deliberately short. Everything it could say is on the page,
+ * and a text that repeats the page is one nobody opens the page from.
+ *
+ * Sent at two hours rather than at booking because that is when the page has
+ * something to show — before then it withholds the crew, and a link tapped
+ * into "your driver will appear here later" is a link nobody taps twice.
+ */
+export async function journeyLink(
+  job: JobForMessage,
+  company: string,
+  url: string,
+) {
+  const when = await formatWhen(job.scheduledAt);
+
+  return {
+    subject: `${company}: your car for ${when}`,
+    body: [
+      `Your car is booked for ${when} from ${job.pickupText}.`,
+      '',
+      `Follow it here, and message your driver if you need to:`,
+      url,
+      '',
+      `Reference: ${job.reference}`,
+    ].join('\n'),
+    sms: `${company}: your car for ${when}. Track it and message your driver: ${url}`,
   };
 }
 

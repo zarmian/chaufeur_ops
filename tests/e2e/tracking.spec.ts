@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { uniqueDigits } from './unique';
+import { uniqueDigits, uniquePhone, uniquePlate } from './unique';
 
 /**
  * The passenger's page, opened the way a passenger opens it.
@@ -24,16 +24,24 @@ const RUN = uniqueDigits(6);
 /**
  * A pickup a few hours from now, as the form's two fields.
  *
- * Inside the link's 24-hour window and comfortably in the future, whatever
- * time of day the suite runs. Booking "tomorrow" put the pickup *outside* the
- * window — the link had not opened yet — which is the rule working and the
- * test asking the wrong question.
+ * Comfortably in the future, whatever time of day the suite runs. Three hours
+ * is deliberately *outside* the two-hour window in which the driver and the
+ * car appear, so this one exercises the page before the crew is shown;
+ * `pickupImminent` below is the other side of that line.
  *
  * Formatted in the install's own timezone, because the form's time field is
  * local and the runner is not.
  */
 function pickupSoon(): { date: string; time: string } {
-  const at = new Date(Date.now() + 3 * 3_600_000);
+  return asFormFields(new Date(Date.now() + 3 * 3_600_000));
+}
+
+/** A pickup inside the two-hour window, where the crew and the box appear. */
+function pickupImminent(): { date: string; time: string } {
+  return asFormFields(new Date(Date.now() + 80 * 60_000));
+}
+
+function asFormFields(at: Date): { date: string; time: string } {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Europe/London',
     year: 'numeric',
@@ -59,15 +67,59 @@ async function signIn(page: Page) {
   await expect(page.getByRole('navigation', { name: 'Main' })).toBeVisible();
 }
 
+/** A compliant driver with a car, so a job can be taken to completion. */
+async function createCompliantDriver(page: Page, name: string) {
+  const plate = uniquePlate('TK');
+  const dateIn = (days: number) => {
+    const date = new Date();
+    date.setDate(date.getDate() + days);
+    return date.toISOString().slice(0, 10);
+  };
+
+  await page.goto('/vehicles/new');
+  await page.getByLabel('Registration').fill(plate);
+  await page.getByLabel('Make').fill('Mercedes-Benz');
+  await page.getByLabel('Model').fill('S-Class');
+  await page.getByLabel('MOT expires').fill(dateIn(400));
+  await page.getByLabel('Insurance expires').fill(dateIn(400));
+  await page.getByLabel('PHV vehicle licence expires').fill(dateIn(400));
+  await page.getByRole('button', { name: 'Add vehicle' }).click();
+  await expect(page.getByRole('heading', { name: plate })).toBeVisible();
+
+  await page.goto('/drivers/new');
+  await page.getByLabel('Name').fill(name);
+  await page.getByLabel('Phone').fill(uniquePhone());
+  await page.getByLabel('DVLA licence expires').fill(dateIn(400));
+  await page.getByLabel('PHV badge expires').fill(dateIn(400));
+  const vehicleOption = await page
+    .locator('#assignedVehicleId option', { hasText: plate })
+    .first()
+    .getAttribute('value');
+  await page.locator('#assignedVehicleId').selectOption(vehicleOption!);
+  await page.getByRole('button', { name: 'Add driver' }).click();
+  await expect(page.getByRole('heading', { name })).toBeVisible();
+}
+
 /** Book a priced job and return the tracking path off its panel. */
-async function bookAndGetTrackingPath(page: Page, pickup: string) {
-  const when = pickupSoon();
+async function bookAndGetTrackingPath(
+  page: Page,
+  pickup: string,
+  when: { date: string; time: string } = pickupSoon(),
+  driverName?: string,
+) {
   await page.goto('/jobs/new');
   await page.getByLabel('Date').fill(when.date);
   await page.getByLabel('Time').fill(when.time);
   await page.getByLabel('Pickup').fill(pickup);
   await page.getByLabel('Destination').fill('Heathrow Terminal 5');
   await page.getByLabel('Client price').fill('145.00');
+  if (driverName) {
+    const value = await page
+      .locator('#driverId option', { hasText: driverName })
+      .first()
+      .getAttribute('value');
+    await page.locator('#driverId').selectOption(value!);
+  }
   await page.getByRole('button', { name: 'Book job' }).click();
 
   const panel = page.getByTestId('tracking-panel');
@@ -137,6 +189,105 @@ test.describe('the passenger tracking page', () => {
       ),
     ).toEqual([]);
 
+    await passenger.close();
+  });
+
+
+  test('holds the crew back until two hours before, then shows them', async ({
+    browser,
+  }) => {
+    /*
+     * The rule the page was rebuilt around. A link sent at booking has to
+     * work — a client who taps it and gets a 404 does not tap the next one —
+     * but until two hours out it says a car is booked and nothing about who
+     * is driving it. The crew can still change, and the fewer hours an
+     * owner-driver's name sits in a forwarded group chat the better.
+     */
+    const staff = await browser.newContext();
+    const staffPage = await staff.newPage();
+    await signIn(staffPage);
+
+    const early = await bookAndGetTrackingPath(
+      staffPage,
+      `Early ${RUN}`,
+      pickupSoon(),
+    );
+    const imminent = await bookAndGetTrackingPath(
+      staffPage,
+      `Imminent ${RUN}`,
+      pickupImminent(),
+    );
+    await staff.close();
+
+    const passenger = await browser.newContext();
+    const page = await passenger.newPage();
+
+    // Three hours out: answers, but says nothing about a driver or a car.
+    expect((await page.goto(early))?.status()).toBe(200);
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+    await expect(page.getByTestId('tracking-car')).toHaveCount(0);
+    await expect(page.getByText(/two hours before/i).first()).toBeVisible();
+
+    // Eighty minutes out: the section exists. Whether it names anybody
+    // depends on a driver being assigned, which this booking has not done —
+    // what is being asserted is that the window, not the page, was the gate.
+    expect((await page.goto(imminent))?.status()).toBe(200);
+    await expect(page.getByText(/two hours before/i)).toHaveCount(0);
+
+    await passenger.close();
+  });
+
+  test('closes the link the moment the journey is finished', async ({
+    browser,
+  }) => {
+    /*
+     * A tracking link is not a receipt. Once the passenger is set down it is
+     * a page naming a driver, a car and two addresses sitting in whatever
+     * chat it was forwarded into — so the driver tapping Completed is what
+     * shuts it, and the thread on it goes too.
+     */
+    const staff = await browser.newContext();
+    const staffPage = await staff.newPage();
+    await signIn(staffPage);
+
+    const driverName = `Finisher ${RUN}`;
+    await createCompliantDriver(staffPage, driverName);
+
+    const path = await bookAndGetTrackingPath(
+      staffPage,
+      `Finishing ${RUN}`,
+      pickupImminent(),
+      driverName,
+    );
+    const jobUrl = staffPage.url();
+
+    const passenger = await browser.newContext();
+    const page = await passenger.newPage();
+    expect((await page.goto(path))?.status()).toBe(200);
+
+    /*
+     * Marked complete from the office, which is what a driver's tap does.
+     * Through the status form rather than the bot, because the rule being
+     * tested is about the job's status and not about how it got there.
+     */
+    await staffPage.goto(jobUrl);
+    for (const label of ['Assigned', 'In progress', 'Completed']) {
+      const before = staffPage.url();
+      await staffPage.locator('#status').selectOption({ label });
+      await Promise.all([
+        staffPage.waitForURL((url) => url.toString() !== before, {
+          timeout: 15_000,
+        }),
+        staffPage.getByRole('button', { name: 'Update status' }).click(),
+      ]);
+    }
+    await expect(staffPage.getByTestId('job-status')).toHaveText('Completed');
+
+    const after = await page.goto(path);
+    expect(after?.status()).toBe(404);
+    await expect(page.getByText(/no longer available/i)).toBeVisible();
+
+    await staff.close();
     await passenger.close();
   });
 

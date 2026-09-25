@@ -1,6 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import { etaForJob, type JobEta } from './eta/store';
 import { prisma } from './prisma';
+import { chatState, type ChatState } from './tracking-chat';
+import { threadFor, type ChatMessage } from './tracking-chat-store';
 import { trackingLinkLive, trackingView, type TrackingView } from './tracking';
 
 /**
@@ -75,6 +77,8 @@ export async function reissueTrackingToken(
 }
 
 export interface TrackingPage {
+  /** The job behind the link, so the page can post to its thread. */
+  jobId: string;
   reference: string;
   view: TrackingView;
   /** Null unless the view asks for one and there is an honest answer. */
@@ -82,6 +86,10 @@ export interface TrackingPage {
   pickupText: string;
   dropoffText: string;
   scheduledAt: Date;
+  /** Whether the passenger may message their driver, and why not. */
+  chat: ChatState;
+  /** The thread so far. Empty until somebody says something. */
+  messages: ChatMessage[];
 }
 
 /**
@@ -109,7 +117,8 @@ export async function resolveTracking(
       scheduledAt: true,
       pickupText: true,
       dropoffText: true,
-      driver: { select: { name: true } },
+      driverId: true,
+      driver: { select: { name: true, telegramChatId: true } },
       vehicle: {
         select: { make: true, model: true, colour: true, registration: true },
       },
@@ -123,17 +132,40 @@ export async function resolveTracking(
   });
 
   if (!job) return null;
-  if (!trackingLinkLive(job.scheduledAt, now)) return null;
+  if (!trackingLinkLive(job, now)) return null;
 
-  const view = trackingView({
-    status: job.status,
-    scheduledAt: job.scheduledAt,
-    pickupText: job.pickupText,
-    dropoffText: job.dropoffText,
-    driver: job.driver,
-    vehicle: job.vehicle,
-    lastEvent: job.events[0]?.type ?? null,
-  });
+  const view = trackingView(
+    {
+      status: job.status,
+      scheduledAt: job.scheduledAt,
+      pickupText: job.pickupText,
+      dropoffText: job.dropoffText,
+      driver: job.driver,
+      vehicle: job.vehicle,
+      lastEvent: job.events[0]?.type ?? null,
+    },
+    now,
+  );
+
+  const chat = chatState(
+    {
+      status: job.status,
+      scheduledAt: job.scheduledAt,
+      driverId: job.driverId,
+      driverReachable: Boolean(job.driver?.telegramChatId),
+    },
+    now,
+  );
+
+  /*
+   * The thread is read only when there is one to read.
+   *
+   * A closed thread still shows what was said — a passenger who asked
+   * something on the way should not lose the answer the moment they arrive —
+   * but a journey that never had a thread costs no query.
+   */
+  const messages =
+    chat.open || job.status !== 'PENDING' ? await threadFor(job.id) : [];
 
   /*
    * The ETA is fetched only when the view asks for it.
@@ -145,11 +177,14 @@ export async function resolveTracking(
   const eta = view.showEta ? await etaForJob(job.id, now) : null;
 
   return {
+    jobId: job.id,
     reference: job.reference,
     view,
     eta,
     pickupText: job.pickupText,
     dropoffText: job.dropoffText,
     scheduledAt: job.scheduledAt,
+    chat,
+    messages,
   };
 }

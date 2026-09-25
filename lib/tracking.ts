@@ -71,6 +71,31 @@ export interface TrackingView {
 }
 
 /**
+ * How long before the pickup the driver is named.
+ *
+ * The link works from the moment it is issued — a passenger checking the night
+ * before is doing exactly what it is for — but until two hours out it says
+ * that a car is booked and nothing about who is driving it.
+ *
+ * Two reasons, and the second is the one that matters. A crew can change: name
+ * a driver at nine in the morning for a six o'clock pickup and any swap
+ * afterwards is a passenger looking for the wrong person. And a link is
+ * forwarded — the fewer hours an owner-driver's name and registration sit in
+ * somebody's group chat, the better.
+ */
+export const DRIVER_SHOWN_HOURS = 2;
+
+export function driverShown(scheduledAt: Date, now: Date = new Date()): boolean {
+  return (
+    now.getTime() >= scheduledAt.getTime() - DRIVER_SHOWN_HOURS * 3_600_000
+  );
+}
+
+/** What the page says while the crew is still being held back. */
+const WAIT_FOR_CREW =
+  'Your driver and car will appear here two hours before your pickup.';
+
+/**
  * `IN_PROGRESS` covers three different things a passenger cares about
  * distinctly: the driver setting off, arriving, and the journey itself. The
  * job's own status cannot tell them apart — the events can.
@@ -111,10 +136,23 @@ export function describeVehicle(
     : vehicle.registration;
 }
 
-export function trackingView(job: TrackingJob): TrackingView {
+export function trackingView(
+  job: TrackingJob,
+  now: Date = new Date(),
+): TrackingView {
   const stage = stageOf(job);
-  const vehicle = describeVehicle(job.vehicle);
-  const driverName = job.driver?.name ?? null;
+
+  /*
+   * The crew, once it is theirs to know.
+   *
+   * Withheld before the two-hour mark even when a driver has been assigned for
+   * days — see `DRIVER_SHOWN_HOURS`. Held back together, because a car with no
+   * driver beside it is the same puzzle for a passenger as a driver with no
+   * car: both invite the call this page exists to prevent.
+   */
+  const shown = driverShown(job.scheduledAt, now);
+  const vehicle = shown ? describeVehicle(job.vehicle) : null;
+  const driverName = shown ? (job.driver?.name ?? null) : null;
 
   const common = { stage, driverName, vehicle };
 
@@ -181,7 +219,9 @@ export function trackingView(job: TrackingJob): TrackingView {
         // position that is their home, their previous job, or nowhere at all,
         // and "42 minutes away" computed from it is a number the passenger
         // will hold us to.
-        detail: 'Your driver will set off in good time.',
+        detail: shown
+          ? 'Your driver will set off in good time.'
+          : WAIT_FOR_CREW,
         showEta: false,
         live: true,
       };
@@ -190,7 +230,9 @@ export function trackingView(job: TrackingJob): TrackingView {
       return {
         ...common,
         headline: 'Your car is booked',
-        detail: 'Your driver will be confirmed shortly.',
+        // Says *when* rather than "shortly", because a passenger who checks
+        // the night before and reads "shortly" checks again in ten minutes.
+        detail: shown ? 'Your driver will be confirmed shortly.' : WAIT_FOR_CREW,
         showEta: false,
         live: true,
       };
@@ -200,22 +242,44 @@ export function trackingView(job: TrackingJob): TrackingView {
 /**
  * Whether a link should still answer at all.
  *
- * A tracking link is not a receipt. Hours after the journey it is a page
+ * A tracking link is not a receipt. Once the journey is over it is a page
  * naming a driver, a car and two addresses, sitting in whatever chat it was
- * forwarded into — so it stops being useful long before it stops being
- * sensitive, and the cheapest way to close that gap is to let it expire.
+ * forwarded into — so it stops being useful the moment the passenger is set
+ * down, and that is when it closes.
  *
- * Generous either side of the booking: a flight can land four hours late, and
- * a passenger checking the night before is doing exactly what the link is for.
+ * **The journey ending is what closes it**, not a clock. The moment the driver
+ * taps Completed the page stops answering and the thread on it goes too. That
+ * is more precise than a fixed window and it is also kinder: a journey running
+ * three hours late keeps working the whole time, where a window would have
+ * shut in the middle of it.
+ *
+ * **A cancellation is the exception, and deliberately.** A job called off an
+ * hour before the pickup leaves somebody standing on a pavement, and "no car
+ * is coming" is the single most valuable thing this page ever says — closing
+ * the link at that moment would take away the answer they most need and send
+ * them to the phone instead, which is the call the page exists to prevent.
+ * The cancelled view names no driver and no car, so a link that keeps
+ * answering carries nothing a finished one would not. It closes at the
+ * backstop like anything else.
+ *
+ * **The clock is only a backstop.** A driver who forgets to tap Completed
+ * would otherwise leave the page live for ever, and "for ever" is the one
+ * answer a forwarded link naming somebody's driver must never have. Generous,
+ * because a flight can land four hours late and the backstop must never be
+ * what ends a journey that is genuinely still running.
  */
-export const TRACKING_OPENS_HOURS = 24;
-export const TRACKING_CLOSES_HOURS = 6;
+export const TRACKING_BACKSTOP_HOURS = 12;
+
+/** Statuses that mean the journey happened and is behind everybody. */
+const FINISHED = ['COMPLETED', 'NO_SHOW'];
 
 export function trackingLinkLive(
-  scheduledAt: Date,
+  job: { status: string; scheduledAt: Date },
   now: Date = new Date(),
 ): boolean {
-  const opens = scheduledAt.getTime() - TRACKING_OPENS_HOURS * 3_600_000;
-  const closes = scheduledAt.getTime() + TRACKING_CLOSES_HOURS * 3_600_000;
-  return now.getTime() >= opens && now.getTime() <= closes;
+  if (FINISHED.includes(job.status)) return false;
+
+  const backstop =
+    job.scheduledAt.getTime() + TRACKING_BACKSTOP_HOURS * 3_600_000;
+  return now.getTime() <= backstop;
 }

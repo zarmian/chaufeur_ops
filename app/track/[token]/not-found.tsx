@@ -10,9 +10,9 @@ import { getBranding } from '@/lib/branding-store';
  * application is a worse answer than the 404 itself.
  *
  * One message for every reason. The link may never have existed, may have
- * been reissued after being forwarded to the wrong person, or may simply be a
- * day past its journey — and saying which would tell somebody working through
- * guesses that they had found a real one.
+ * been reissued after being forwarded to the wrong person, or may belong to a
+ * journey that has finished — and saying which would tell somebody working
+ * through guesses that they had found a real one.
  *
  * Branded, and offering the office, because the useful next step for a real
  * passenger is a phone number rather than an explanation.
@@ -29,7 +29,7 @@ export default async function TrackingNotFound() {
           This link is no longer available
         </h1>
         <p className="text-muted-foreground mt-2 text-sm">
-          Tracking links stop working a few hours after the journey. If you are
+          Tracking links stop working once the journey is over. If you are
           expecting a car, the office can help.
         </p>
       </div>

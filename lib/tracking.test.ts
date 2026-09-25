@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   describeVehicle,
+  driverShown,
   trackingLinkLive,
   trackingView,
   type TrackingJob,
@@ -35,11 +36,17 @@ function job(over: Partial<TrackingJob> = {}): TrackingJob {
   };
 }
 
+/**
+ * A moment inside the two-hour window, so the stage assertions below are about
+ * the stage and not about what time the suite happens to run. Before this
+ * change they passed only because the fixture's pickup was already in the past.
+ */
+const IN_WINDOW = new Date('2026-09-15T07:00:00Z');
+
 describe('trackingView', () => {
   it('says a car is booked before anybody is on it', () => {
     const view = trackingView(
-      job({ status: 'PENDING', driver: null, vehicle: null }),
-    );
+      job({ status: 'PENDING', driver: null, vehicle: null }), IN_WINDOW);
 
     expect(view.stage).toBe('BOOKED');
     expect(view.headline).toBe('Your car is booked');
@@ -53,7 +60,7 @@ describe('trackingView', () => {
      * — and "42 minutes away" computed from it is a promise the passenger
      * will hold the office to.
      */
-    const view = trackingView(job({ status: 'ASSIGNED' }));
+    const view = trackingView(job({ status: 'ASSIGNED' }), IN_WINDOW);
 
     expect(view.stage).toBe('ASSIGNED');
     expect(view.driverName).toBe('Marek Kowalski');
@@ -62,8 +69,7 @@ describe('trackingView', () => {
 
   it('offers an ETA only once the driver is actually moving', () => {
     const view = trackingView(
-      job({ status: 'IN_PROGRESS', lastEvent: 'ON_WAY' }),
-    );
+      job({ status: 'IN_PROGRESS', lastEvent: 'ON_WAY' }), IN_WINDOW);
 
     expect(view.stage).toBe('ON_WAY');
     expect(view.headline).toBe('Your driver is on the way');
@@ -72,8 +78,7 @@ describe('trackingView', () => {
 
   it('tells the passenger what to look for when the car arrives', () => {
     const view = trackingView(
-      job({ status: 'IN_PROGRESS', lastEvent: 'ARRIVED' }),
-    );
+      job({ status: 'IN_PROGRESS', lastEvent: 'ARRIVED' }), IN_WINDOW);
 
     expect(view.stage).toBe('ARRIVED');
     expect(view.headline).toBe('Your car is here');
@@ -86,7 +91,7 @@ describe('trackingView', () => {
   it('stops counting down to the pickup once the passenger is aboard', () => {
     // The ETA this page computes is to the *pickup*, which is now behind
     // them. Left on, it would count down to a place they have left.
-    const view = trackingView(job({ status: 'IN_PROGRESS', lastEvent: 'POB' }));
+    const view = trackingView(job({ status: 'IN_PROGRESS', lastEvent: 'POB' }), IN_WINDOW);
 
     expect(view.stage).toBe('IN_PROGRESS');
     expect(view.headline).toBe('On your way');
@@ -99,15 +104,14 @@ describe('trackingView', () => {
     // cares about the difference; the status column cannot express it.
     const stages = ['ON_WAY', 'ARRIVED', 'POB'].map(
       (lastEvent) =>
-        trackingView(job({ status: 'IN_PROGRESS', lastEvent })).stage,
+        trackingView(job({ status: 'IN_PROGRESS', lastEvent }), IN_WINDOW).stage,
     );
     expect(stages).toEqual(['ON_WAY', 'ARRIVED', 'IN_PROGRESS']);
   });
 
   it('closes down cleanly when the journey is finished', () => {
     const view = trackingView(
-      job({ status: 'COMPLETED', lastEvent: 'COMPLETED' }),
-    );
+      job({ status: 'COMPLETED', lastEvent: 'COMPLETED' }), IN_WINDOW);
 
     expect(view.stage).toBe('COMPLETED');
     expect(view.live).toBe(false);
@@ -117,7 +121,7 @@ describe('trackingView', () => {
   it('shows no car at all against a cancellation', () => {
     // A driver and a registration beside "cancelled" reads as though one is
     // still coming, which is the opposite of what the page is for.
-    const view = trackingView(job({ status: 'CANCELLED' }));
+    const view = trackingView(job({ status: 'CANCELLED' }), IN_WINDOW);
 
     expect(view.stage).toBe('CANCELLED');
     expect(view.headline).toContain('cancelled');
@@ -127,7 +131,7 @@ describe('trackingView', () => {
   });
 
   it('treats a no-show as a cancellation rather than a live journey', () => {
-    expect(trackingView(job({ status: 'NO_SHOW' })).stage).toBe('CANCELLED');
+    expect(trackingView(job({ status: 'NO_SHOW' }), IN_WINDOW).stage).toBe('CANCELLED');
   });
 
   /**
@@ -142,7 +146,7 @@ describe('trackingView', () => {
       ['PENDING', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'].flatMap(
         (status) =>
           [null, 'ON_WAY', 'ARRIVED', 'POB'].map((lastEvent) =>
-            trackingView(job({ status, lastEvent })),
+            trackingView(job({ status, lastEvent }), IN_WINDOW),
           ),
       ),
     );
@@ -197,34 +201,147 @@ describe('describeVehicle', () => {
 
 describe('trackingLinkLive', () => {
   const pickup = new Date('2026-09-15T08:00:00Z');
+  const job = (status: string) => ({ status, scheduledAt: pickup });
 
   it('answers the night before, which is when people check', () => {
-    expect(trackingLinkLive(pickup, new Date('2026-09-14T20:00:00Z'))).toBe(
+    // The link works from the moment it is issued. What it *says* before the
+    // two-hour mark is another question, and `driverShown` decides it.
+    expect(trackingLinkLive(job('ASSIGNED'), new Date('2026-09-14T20:00:00Z'))).toBe(
       true,
     );
   });
 
   it('answers through a long delay', () => {
     // A flight can land four hours late, and the link matters most then.
-    expect(trackingLinkLive(pickup, new Date('2026-09-15T13:00:00Z'))).toBe(
+    expect(trackingLinkLive(job('IN_PROGRESS'), new Date('2026-09-15T13:00:00Z'))).toBe(
       true,
     );
   });
 
-  it('goes quiet once the journey is well past', () => {
+  it('closes the moment the journey is finished', () => {
     /*
-     * A tracking link is not a receipt. Hours later it is a page naming a
-     * driver, a car and two addresses, sitting in whatever chat it was
-     * forwarded into — useless long before it stops being sensitive.
+     * The rule this was rebuilt around. A tracking link is not a receipt:
+     * once the passenger is set down it is a page naming a driver, a car and
+     * two addresses, sitting in whatever chat it was forwarded into. The
+     * driver tapping Completed is what closes it, which is more precise than
+     * any clock — and it closes the thread on the page with it.
      */
-    expect(trackingLinkLive(pickup, new Date('2026-09-16T02:00:00Z'))).toBe(
+    const justAfter = new Date('2026-09-15T08:40:00Z');
+    expect(trackingLinkLive(job('IN_PROGRESS'), justAfter)).toBe(true);
+    expect(trackingLinkLive(job('COMPLETED'), justAfter)).toBe(false);
+    expect(trackingLinkLive(job('NO_SHOW'), justAfter)).toBe(false);
+  });
+
+  it('keeps answering a cancelled journey, which is the point of it', () => {
+    /*
+     * Deliberately not closed. A job called off an hour before the pickup
+     * leaves somebody standing on a pavement, and "no car is coming" is the
+     * most valuable thing this page ever says. The cancelled view names no
+     * driver and no car, so the link carries nothing a finished one would not.
+     */
+    expect(trackingLinkLive(job('CANCELLED'), new Date('2026-09-15T07:00:00Z'))).toBe(
+      true,
+    );
+  });
+
+  it('expires on the backstop when nobody ever finished the job', () => {
+    // A driver who forgets to tap Completed would otherwise leave the page
+    // live for ever, and "for ever" is the one answer a forwarded link naming
+    // somebody's driver must never have.
+    expect(trackingLinkLive(job('IN_PROGRESS'), new Date('2026-09-15T19:30:00Z'))).toBe(
+      true,
+    );
+    expect(trackingLinkLive(job('IN_PROGRESS'), new Date('2026-09-15T21:00:00Z'))).toBe(
+      false,
+    );
+    // …and the backstop applies to a cancellation too.
+    expect(trackingLinkLive(job('CANCELLED'), new Date('2026-09-15T21:00:00Z'))).toBe(
       false,
     );
   });
 
-  it('says nothing before the window opens', () => {
-    expect(trackingLinkLive(pickup, new Date('2026-09-13T08:00:00Z'))).toBe(
-      false,
+  it('answers well before the pickup, however early the link was sent', () => {
+    // There is no longer an opening time. An operator who sends the link at
+    // booking must not hand the client a page that 404s until the day.
+    expect(trackingLinkLive(job('PENDING'), new Date('2026-09-01T08:00:00Z'))).toBe(
+      true,
     );
+  });
+});
+
+describe('driverShown', () => {
+  const pickup = new Date('2026-09-15T08:00:00Z');
+
+  it('holds the crew back until two hours before', () => {
+    /*
+     * Two reasons, and the second is the one that matters. A crew can change:
+     * name a driver at nine in the morning for a six o'clock pickup and any
+     * swap afterwards is a passenger looking for the wrong person. And a link
+     * is forwarded — the fewer hours an owner-driver's name and registration
+     * sit in somebody's group chat, the better.
+     */
+    expect(driverShown(pickup, new Date('2026-09-14T20:00:00Z'))).toBe(false);
+    expect(driverShown(pickup, new Date('2026-09-15T05:59:00Z'))).toBe(false);
+  });
+
+  it('shows them from exactly two hours out', () => {
+    expect(driverShown(pickup, new Date('2026-09-15T06:00:00Z'))).toBe(true);
+  });
+
+  it('keeps showing them once the journey is under way', () => {
+    // The passenger is in the car. Hiding the driver at that point would be
+    // the page disagreeing with the person sitting in front of them.
+    expect(driverShown(pickup, new Date('2026-09-15T08:30:00Z'))).toBe(true);
+  });
+});
+
+describe('the crew on the view', () => {
+  const base = {
+    status: 'ASSIGNED',
+    pickupText: 'The Savoy',
+    dropoffText: 'Heathrow T5',
+    driver: { name: 'Marek Kowalski' },
+    vehicle: {
+      colour: 'Black',
+      make: 'Mercedes-Benz',
+      model: 'S-Class',
+      registration: 'AB12 CDE',
+    },
+    lastEvent: null,
+  };
+  const pickup = new Date('2026-09-15T08:00:00Z');
+
+  it('withholds the driver and the car until two hours before', () => {
+    const view = trackingView(
+      { ...base, scheduledAt: pickup },
+      new Date('2026-09-14T20:00:00Z'),
+    );
+
+    expect(view.driverName).toBeNull();
+    expect(view.vehicle).toBeNull();
+    // …and says when they will appear, rather than "shortly". A passenger who
+    // reads "shortly" the night before checks again in ten minutes.
+    expect(view.detail).toMatch(/two hours before/);
+  });
+
+  it('shows them both once inside the window', () => {
+    const view = trackingView(
+      { ...base, scheduledAt: pickup },
+      new Date('2026-09-15T07:00:00Z'),
+    );
+
+    expect(view.driverName).toBe('Marek Kowalski');
+    expect(view.vehicle).toBe('Black Mercedes-Benz S-Class · AB12 CDE');
+  });
+
+  it('holds them back together, never one without the other', () => {
+    // A car with no driver beside it is the same puzzle for a passenger as a
+    // driver with no car: both invite the call this page exists to prevent.
+    const view = trackingView(
+      { ...base, scheduledAt: pickup },
+      new Date('2026-09-10T08:00:00Z'),
+    );
+
+    expect([view.driverName, view.vehicle]).toEqual([null, null]);
   });
 });

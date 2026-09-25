@@ -5,10 +5,12 @@ import {
   beginConversation,
   cancelExpense,
   currentConversation,
+  endConversation,
   handleExpenseAmount,
   handleReceiptPhoto,
   setExpenseKind,
 } from './expenses';
+import { postFromDriver } from '../tracking-chat-store';
 import {
   alertOps,
   delayKeyboard,
@@ -316,6 +318,27 @@ async function handleMessage(
     }
   }
 
+  if (conversation?.step === 'chat_reply' && text !== '') {
+    const jobId = conversation.context.jobId;
+    if (typeof jobId === 'string') {
+      await endConversation(chatId);
+
+      const result = await postFromDriver(jobId, driver.id, text);
+      await sendMessage(
+        chatId,
+        escapeMarkdown(
+          result.ok
+            ? 'Sent to your passenger.'
+            : result.message,
+        ),
+      );
+      return {
+        kind: 'chat-reply',
+        outcome: result.ok ? 'delivered' : `refused: ${result.message}`,
+      };
+    }
+  }
+
   // Anything else goes to ops rather than into the void: a driver typing
   // "stuck in traffic on the M4" is telling somebody something useful.
   if (text !== '') {
@@ -365,6 +388,27 @@ async function handleCallback(
         ? `refused: ${outcome.message}`
         : `${callback.step} recorded`,
     };
+  }
+
+  if (callback.kind === 'chat-reply') {
+    /*
+     * Opens the reply box rather than taking a reply.
+     *
+     * Telegram has no form, so the pattern is the one the receipt flow
+     * already uses: the tap remembers which journey, and the driver's next
+     * message is the reply. Explicit on both counts — a driver who taps
+     * nothing keeps typing to the office as before, and a driver who taps is
+     * told what will happen to what they type next.
+     */
+    await beginConversation(chatId, 'chat_reply', { jobId: callback.jobId });
+    await answerCallback(queryId, 'Type your reply.');
+    await sendMessage(
+      chatId,
+      escapeMarkdown(
+        'Type your reply and the passenger will see it on their tracking page.',
+      ),
+    );
+    return { kind: 'chat-reply', outcome: 'awaiting reply' };
   }
 
   if (callback.kind === 'offer-accept') {

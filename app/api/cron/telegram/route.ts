@@ -9,6 +9,7 @@ import {
   purgeOldPositions,
   purgeStaleConversations,
 } from '@/lib/telegram/chasing';
+import { sendDueJourneyLinks } from '@/lib/journey-link';
 
 /**
  * `GET /api/cron/telegram` — the bot's scheduled work.
@@ -38,6 +39,7 @@ export async function GET(request: Request) {
     overdue,
     positions,
     conversations,
+    journeyLinks,
   ] = await Promise.allSettled([
     chaseExpiringDocuments(),
     alertUnassignedJobs(),
@@ -46,6 +48,10 @@ export async function GET(request: Request) {
     alertOverdueInvoices(),
     purgeOldPositions(),
     purgeStaleConversations(),
+    // The client's tracking link, two hours out. Here rather than on its own
+    // schedule because it is cheap, and because the cadence this route already
+    // runs at is exactly the resolution it needs.
+    sendDueJourneyLinks(),
   ]);
 
   return NextResponse.json({
@@ -57,6 +63,7 @@ export async function GET(request: Request) {
     overdue: settled(overdue),
     positions: settled(positions),
     conversations: settled(conversations),
+    journeyLinks: settled(journeyLinks),
     ranAt: new Date().toISOString(),
   });
 }

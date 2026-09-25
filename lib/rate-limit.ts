@@ -209,6 +209,21 @@ export const LIMITS = {
   export: { max: 20, windowMinutes: 10 },
   /** Failed webhook authentication. Valid updates are never counted. */
   webhookAuth: { max: 30, windowMinutes: 5 },
+  /**
+   * Messages from a tracking page to a driver's phone.
+   *
+   * The only path in this system where somebody with no account can make a
+   * driver's phone buzz, and the link is forwarded by design — so whoever ends
+   * up holding it can do this. Ten in five minutes is more than a passenger
+   * telling a driver where they are standing will ever need, and far short of
+   * what it takes to make somebody put their phone face down on the day they
+   * most need to see it.
+   *
+   * Counted per journey rather than per IP: the abuse worth stopping is one
+   * driver being buried, and an IP limit would let a forwarded link in a group
+   * chat do exactly that from twenty phones.
+   */
+  trackingChat: { max: 10, windowMinutes: 5 },
 } as const;
 
 export type RateLimitBucket = keyof typeof LIMITS;
