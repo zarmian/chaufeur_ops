@@ -26,7 +26,7 @@ function job(over: Partial<ChatJob> = {}): ChatJob {
     status: 'ASSIGNED',
     scheduledAt: PICKUP,
     driverId: 'drv-1',
-    driverReachable: true,
+    channel: 'telegram',
     ...over,
   };
 }
@@ -84,14 +84,14 @@ describe('chatState', () => {
     });
   });
 
-  it('shuts for a driver who has never linked Telegram, and says so', () => {
+  it('shuts for a driver who cannot be reached at all, and says so', () => {
     /*
      * Said plainly rather than hidden. Roughly a fifth of any fleet never
      * links a bot; a passenger shown nothing assumes the feature is broken,
      * where one told the office can pass a message on rings the office — which
      * is the right outcome.
      */
-    const state = chatState(job({ driverReachable: false }), SOON);
+    const state = chatState(job({ channel: null }), SOON);
 
     expect(state).toEqual({ open: false, reason: 'DRIVER_UNREACHABLE' });
     expect(CHAT_CLOSED_TEXT.DRIVER_UNREACHABLE).toMatch(/office/i);

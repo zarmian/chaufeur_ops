@@ -1,6 +1,11 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { rawPrismaClient } from './raw-prisma';
-import { postFromDriver, postFromPassenger, threadFor } from './tracking-chat-store';
+import {
+  placeInboundText,
+  postFromDriver,
+  postFromPassenger,
+  threadFor,
+} from './tracking-chat-store';
 
 /**
  * The relay between a passenger's page and a driver's phone.
@@ -205,5 +210,172 @@ describe.skipIf(!DATABASE_AVAILABLE)('the passenger–driver relay', () => {
       code: 'INVALID',
     });
     expect(await threadFor(jobId)).toHaveLength(0);
+  });
+});
+
+describe.skipIf(!DATABASE_AVAILABLE)('placing an inbound text', () => {
+  /**
+   * The SMS half of the relay, where the thread has to be inferred.
+   *
+   * The pure decision is `routeInbound`, tested without a database. What only
+   * real rows can show is that the candidates handed to it are the right ones:
+   * this driver's live journeys, with an open thread, and the passenger's last
+   * question on each. Pick those wrongly and the decision is sound but the
+   * answer lands on a stranger's page.
+   */
+  const jobIds: string[] = [];
+  let smsDriverId = '';
+  let made = 0;
+
+  beforeAll(async () => {
+    if (!raw) return;
+    const driver = await raw.driver.create({
+      data: {
+        reference: `SMS-${stamp}`,
+        name: `Texter ${stamp}`,
+        phone: `07700 9${stamp}`,
+        // The column the lookup matches on, normalised the way `lib/text.ts`
+        // does it: `+44…` and `07…` are the same number.
+        normalisedPhone: `077009${stamp}`,
+        status: 'ACTIVE',
+      },
+    });
+    smsDriverId = driver.id;
+  });
+
+  afterEach(async () => {
+    if (!raw) return;
+    await raw.jobChatMessage.deleteMany({ where: { jobId: { in: jobIds } } });
+    await raw.job.deleteMany({ where: { id: { in: jobIds } } });
+    jobIds.length = 0;
+  });
+
+  afterAll(async () => {
+    if (!raw) return;
+    await raw.driver.deleteMany({ where: { id: smsDriverId } });
+  });
+
+  async function jobForSms(over: Record<string, unknown> = {}): Promise<string> {
+    made += 1;
+    const job = await raw!.job.create({
+      data: {
+        reference: `SJ-${stamp}-${made}`,
+        jobType: 'AIRPORT_TRANSFER',
+        status: 'ASSIGNED',
+        scheduledAt: new Date(Date.now() + 3_600_000),
+        pickupText: 'Heathrow Terminal 5',
+        dropoffText: 'The Dorchester',
+        clientPricePence: 14_500,
+        driverPricePence: 9_000,
+        driverId: smsDriverId,
+        ...over,
+      },
+    });
+    jobIds.push(job.id);
+    return job.id;
+  }
+
+  /** A passenger question on the thread, at a given moment. */
+  async function asked(jobId: string, at: Date) {
+    await raw!.jobChatMessage.create({
+      data: {
+        jobId,
+        author: 'PASSENGER',
+        body: 'Which exit are you at?',
+        createdAt: at,
+      },
+    });
+  }
+
+  const text = (body: string, from = `+447700 9${stamp}`) => ({
+    from,
+    body,
+    providerId: `msg-${Math.random().toString(36).slice(2)}`,
+    receivedAt: new Date(),
+  });
+
+  it('puts a reply on the thread the passenger asked in', async () => {
+    const jobId = await jobForSms();
+    await asked(jobId, new Date(Date.now() - 120_000));
+
+    const placed = await placeInboundText(text('Outside door 4'));
+
+    expect(placed.placed).toBe(true);
+    if (placed.placed) expect(placed.jobId).toBe(jobId);
+
+    const thread = await threadFor(jobId);
+    expect(thread.map((m) => m.author)).toEqual(['PASSENGER', 'DRIVER']);
+    expect(thread[1]?.body).toBe('Outside door 4');
+    // The page is the destination, so there is no second hop to fail.
+    expect(thread[1]?.deliveredAt).not.toBeNull();
+  });
+
+  it('matches the driver however their number was written', async () => {
+    // The text arrives in international form; the driver was entered as
+    // `07700…`. Folding them is the whole reason `normalisedPhone` exists.
+    const jobId = await jobForSms();
+    await asked(jobId, new Date(Date.now() - 120_000));
+
+    const placed = await placeInboundText(text('On my way', `0770 09${stamp}`));
+
+    expect(placed.placed).toBe(true);
+  });
+
+  it('gives the office a text from a number that is not a driver', async () => {
+    const placed = await placeInboundText(text('Who is this?', '+447000000001'));
+
+    expect(placed).toMatchObject({ placed: false, reason: 'UNKNOWN_SENDER' });
+  });
+
+  it('gives the office an unprompted text rather than a passenger', async () => {
+    /*
+     * A journey is live but nobody has asked anything, so this is not a reply
+     * to a passenger — it is a driver telling the office something. Showing it
+     * on a tracking page would be the system volunteering a driver's words to
+     * a client who never spoke to them.
+     */
+    await jobForSms();
+
+    const placed = await placeInboundText(text('Stuck on the M4'));
+
+    expect(placed).toMatchObject({ placed: false, reason: 'NO_OPEN_THREAD' });
+  });
+
+  it('gives the office a text it cannot place between two recent questions', async () => {
+    // The branch that stops one client reading another client's answer.
+    const first = await jobForSms();
+    const second = await jobForSms();
+    await asked(first, new Date(Date.now() - 90_000));
+    await asked(second, new Date(Date.now() - 60_000));
+
+    const placed = await placeInboundText(text('Two minutes away'));
+
+    expect(placed).toMatchObject({ placed: false, reason: 'AMBIGUOUS' });
+    expect(await threadFor(first)).toHaveLength(1);
+    expect(await threadFor(second)).toHaveLength(1);
+  });
+
+  it('answers the passenger who asked most recently when the gap is clear', async () => {
+    const older = await jobForSms();
+    const newer = await jobForSms();
+    await asked(older, new Date(Date.now() - 40 * 60_000));
+    await asked(newer, new Date(Date.now() - 60_000));
+
+    const placed = await placeInboundText(text('Nearly there'));
+
+    expect(placed.placed).toBe(true);
+    if (placed.placed) expect(placed.jobId).toBe(newer);
+  });
+
+  it('refuses a text once the journey is over', async () => {
+    // The thread closes with the link. A reply arriving afterwards belongs to
+    // the office, not to a page the passenger can no longer open.
+    const jobId = await jobForSms();
+    await asked(jobId, new Date(Date.now() - 120_000));
+    await raw!.job.update({ where: { id: jobId }, data: { status: 'COMPLETED' } });
+
+    const placed = await placeInboundText(text('Thanks!'));
+
+    expect(placed.placed).toBe(false);
   });
 });

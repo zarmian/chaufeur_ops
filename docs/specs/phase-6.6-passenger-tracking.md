@@ -102,6 +102,39 @@ metres away with no way of being reached.
 7. The thread closes with the link, and is still readable while the page is —
    somebody who asked a question on the way should not lose the answer
 
+## 6.6.7 Reaching a driver who never linked Telegram
+
+Added because the box was shut for roughly a fifth of the fleet, and those
+drivers are not a rounding error — they are the ones the office already has to
+ring on their behalf.
+
+**Acceptance criteria**
+1. Telegram wherever it is linked: free, threaded, and the reply goes through a
+   button the driver chose to press. A text is the fallback, and only where the
+   install has an SMS gateway configured — offering a box that silently cannot
+   send is what the reachability check exists to prevent
+2. Sent through httpSMS, which sends from a SIM in a phone the operator owns.
+   The driver's number is never exposed to the passenger and the passenger's
+   is never exposed to the driver; the office's gateway number sits between
+   them, which is the same arrangement the Telegram relay has
+3. **The outbound text says that a reply will be seen by the passenger.** This
+   is the one path with no Reply button, so everything the driver sends back
+   lands on the page. A driver who does not know that is one sentence from
+   telling a client something meant for the office
+4. An inbound text is placed by inference, and the inference is conservative:
+   only a journey whose thread is already open, only where the passenger has
+   asked something first, and — where two passengers have both just asked —
+   not at all. Recency is a good guess across an hour and a coin toss across
+   ninety seconds, and a wrong guess shows one client another client's driver
+5. A text that cannot be placed goes to the office rather than nowhere. A
+   driver who texts "stuck on the M4" has told somebody something useful
+6. The webhook verifies httpSMS's JWT before it reads the body: the algorithm
+   is pinned, `alg: none` is refused and expiry is checked. Without that,
+   anybody who found the URL could put words in a driver's mouth on a page a
+   client is watching
+7. An event the handler does not act on is a 200 and a no-op, because httpSMS
+   retries a 5xx four times and then gives up
+
 ## 6.6.6 Sending it
 
 **Acceptance criteria**

@@ -2042,6 +2042,14 @@ model JobChatMessage {
   /// rendered to a passenger's browser and relayed into Telegram markdown.
   body   String
 
+  /// How it was carried: `telegram`, `sms`, or null for a driver's reply,
+  /// which arrives at the page directly and has no relay to name.
+  ///
+  /// Recorded because "the driver says he never got it" is a question that
+  /// starts with which phone it went to. `deliveredAt` says whether the relay
+  /// was accepted; this says what accepted it.
+  channel String?
+
   /// Set once the relay actually reached the other side. Null means it was
   /// recorded but never delivered — a driver with no Telegram, a send that
   /// failed — which is the difference between "they have not replied" and

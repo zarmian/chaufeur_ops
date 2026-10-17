@@ -101,7 +101,12 @@ export default async function MessagingSettingsPage({
                 Email: {email.provider === 'none' ? 'not configured' : email.provider}
               </Badge>
               <Badge variant={config.smsProvider === 'none' ? 'secondary' : 'success'}>
-                SMS: {config.smsProvider === 'none' ? 'off' : 'Twilio'}
+                SMS:{' '}
+                {config.smsProvider === 'none'
+                  ? 'off'
+                  : config.smsProvider === 'httpsms'
+                    ? 'httpSMS'
+                    : 'Twilio'}
               </Badge>
             </CardTitle>
           </CardHeader>
@@ -111,7 +116,23 @@ export default async function MessagingSettingsPage({
               <Link href="/settings/email" className="underline">
                 Settings → Email
               </Link>
-              . Text messages need a Twilio account.
+              . Text messages need either a Twilio account or httpSMS, which
+              sends through an Android phone you own.
+            </p>
+
+            {/*
+              The difference stated once, here, because it is an operational
+              choice rather than a technical one and it is made on this screen.
+            */}
+            <p className="text-sm text-muted-foreground">
+              <span className="text-foreground font-medium">httpSMS</span> sends
+              from the SIM in a phone in the office, so texts cost whatever that
+              phone’s tariff costs and arrive from a number people may already
+              recognise. The phone becomes part of the system: flat, out of
+              signal or left at home and nothing sends.{' '}
+              <span className="text-foreground font-medium">Twilio</span> is a
+              carrier — it works whether or not anybody is awake, and bills per
+              message.
             </p>
 
             <div className="grid gap-4 sm:grid-cols-2">
@@ -125,7 +146,8 @@ export default async function MessagingSettingsPage({
                   defaultValue={config.smsProvider}
                 >
                   <option value="none">None — email only</option>
-                  <option value="twilio">Twilio</option>
+                  <option value="twilio">Twilio — a carrier, billed per message</option>
+                  <option value="httpsms">httpSMS — an Android phone you own</option>
                 </Select>
               </div>
 
@@ -165,6 +187,49 @@ export default async function MessagingSettingsPage({
                   autoComplete="off"
                   placeholder={config.smsAccountSet ? '•••••••• (leave blank to keep)' : ''}
                 />
+                <p className="text-muted-foreground mt-1 text-xs">
+                  Twilio only.
+                </p>
+              </div>
+
+              <div>
+                <label htmlFor="smsApiKey" className="mb-1 block text-sm font-medium">
+                  httpSMS API key
+                </label>
+                <Input
+                  id="smsApiKey"
+                  name="smsApiKey"
+                  type="password"
+                  autoComplete="off"
+                  placeholder={config.smsApiKeySet ? '•••••••• (leave blank to keep)' : ''}
+                />
+                <p className="text-muted-foreground mt-1 text-xs">
+                  From httpsms.com → Settings. The “from number” above has to be
+                  the SIM in the gateway phone — httpSMS routes on it.
+                </p>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="smsWebhookSecret"
+                  className="mb-1 block text-sm font-medium"
+                >
+                  httpSMS webhook signing key
+                </label>
+                <Input
+                  id="smsWebhookSecret"
+                  name="smsWebhookSecret"
+                  type="password"
+                  autoComplete="off"
+                  placeholder={config.smsWebhookSet ? '•••••••• (leave blank to keep)' : ''}
+                />
+                <p className="text-muted-foreground mt-1 text-xs">
+                  Needed for drivers to reply. Create a webhook in httpSMS for{' '}
+                  <code>message.phone.received</code> pointing at{' '}
+                  <code>/api/sms/httpsms</code>, and paste its signing key here.
+                  Without it a driver’s text cannot be trusted, so the passenger
+                  never sees it.
+                </p>
               </div>
             </div>
           </CardContent>

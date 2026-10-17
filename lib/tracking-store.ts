@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { etaForJob, type JobEta } from './eta/store';
 import { prisma } from './prisma';
+import { chatChannelFor } from './tracking-chat-store';
 import { chatState, type ChatState } from './tracking-chat';
 import { threadFor, type ChatMessage } from './tracking-chat-store';
 import { trackingLinkLive, trackingView, type TrackingView } from './tracking';
@@ -118,7 +119,7 @@ export async function resolveTracking(
       pickupText: true,
       dropoffText: true,
       driverId: true,
-      driver: { select: { name: true, telegramChatId: true } },
+      driver: { select: { name: true, telegramChatId: true, phone: true } },
       vehicle: {
         select: { make: true, model: true, colour: true, registration: true },
       },
@@ -152,7 +153,13 @@ export async function resolveTracking(
       status: job.status,
       scheduledAt: job.scheduledAt,
       driverId: job.driverId,
-      driverReachable: Boolean(job.driver?.telegramChatId),
+      /*
+       * Telegram where it is linked, a text where it is not — and only where
+       * the install has a gateway configured, which is a setting rather than
+       * a property of the driver. Asked here so the page and the endpoint
+       * behind it cannot disagree about whether the box should be open.
+       */
+      channel: await chatChannelFor(job.driver),
     },
     now,
   );

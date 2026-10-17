@@ -77,6 +77,15 @@ const PUBLIC_PREFIXES = [
    * open, and it is rate limited per journey.
    */
   '/api/track',
+  /*
+   * The office's SMS gateway posting an inbound text.
+   *
+   * Server-to-server with no cookie, like the payment webhooks below it — and
+   * on the same reasoning: left off this list, middleware redirects it to
+   * `/login`, httpSMS records a failure and every driver reply by text is
+   * quietly lost. It verifies its own JWT against the stored signing key.
+   */
+  '/api/sms',
 ];
 
 export function middleware(request: NextRequest) {

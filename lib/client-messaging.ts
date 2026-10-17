@@ -62,6 +62,10 @@ export const TEMPLATES: Array<{ value: TemplateName; label: string; hint: string
 export interface ClientMessagingConfig {
   smsProvider: SmsConfig['provider'];
   smsAccountSet: boolean;
+  /** httpSMS's API key is set. Never the key itself. */
+  smsApiKeySet: boolean;
+  /** A signing key is stored for the inbound webhook. */
+  smsWebhookSet: boolean;
   smsFromNumber: string | null;
   /** Per-template opt-in. Absent means off. */
   enabled: Record<TemplateName, boolean>;
@@ -70,6 +74,8 @@ export interface ClientMessagingConfig {
 export const BLANK_MESSAGING: ClientMessagingConfig = {
   smsProvider: 'none',
   smsAccountSet: false,
+  smsApiKeySet: false,
+  smsWebhookSet: false,
   smsFromNumber: null,
   enabled: {
     booking_confirmation: false,
@@ -86,10 +92,18 @@ export async function getClientMessagingConfig(): Promise<ClientMessagingConfig>
   const stored = (row?.value ?? {}) as Record<string, unknown>;
   const enabled = (stored.enabled ?? {}) as Record<string, unknown>;
 
+  const isSet = (value: unknown) => typeof value === 'string' && value !== '';
+
   return {
-    smsProvider: stored.smsProvider === 'twilio' ? 'twilio' : 'none',
-    smsAccountSet:
-      typeof stored.smsAccountSid === 'string' && stored.smsAccountSid !== '',
+    smsProvider:
+      stored.smsProvider === 'twilio'
+        ? 'twilio'
+        : stored.smsProvider === 'httpsms'
+          ? 'httpsms'
+          : 'none',
+    smsAccountSet: isSet(stored.smsAccountSid),
+    smsApiKeySet: isSet(stored.smsApiKey),
+    smsWebhookSet: isSet(stored.smsWebhookSecret),
     smsFromNumber:
       typeof stored.smsFromNumber === 'string' && stored.smsFromNumber !== ''
         ? stored.smsFromNumber
@@ -106,11 +120,12 @@ export async function getClientMessagingConfig(): Promise<ClientMessagingConfig>
 }
 
 /** The SMS credentials, decrypted. Never call this from anything that renders. */
-async function smsConfig(): Promise<SmsConfig> {
+export async function smsConfig(): Promise<SmsConfig> {
   const row = await prisma.setting.findUnique({ where: { key: KEY } });
   const stored = (row?.value ?? {}) as Record<string, unknown>;
 
-  if (stored.smsProvider !== 'twilio') return DEFAULT_SMS_CONFIG;
+  const provider = stored.smsProvider;
+  if (provider !== 'twilio' && provider !== 'httpsms') return DEFAULT_SMS_CONFIG;
 
   const read = (value: unknown): string | null => {
     if (typeof value !== 'string' || value === '') return null;
@@ -122,9 +137,10 @@ async function smsConfig(): Promise<SmsConfig> {
   };
 
   return {
-    provider: 'twilio',
+    provider,
     accountSid: read(stored.smsAccountSid),
     authToken: read(stored.smsAuthToken),
+    apiKey: read(stored.smsApiKey),
     fromNumber:
       typeof stored.smsFromNumber === 'string' && stored.smsFromNumber !== ''
         ? stored.smsFromNumber
@@ -137,6 +153,16 @@ export interface MessagingInput {
   /** Blank leaves what is stored alone, so saving does not wipe a credential. */
   smsAccountSid: string;
   smsAuthToken: string;
+  /** httpSMS's API key. */
+  smsApiKey: string;
+  /**
+   * The signing key httpSMS puts in the webhook's JWT.
+   *
+   * Stored with the sending credentials because they are one integration, and
+   * without it an inbound text cannot be trusted — which means a driver's
+   * reply cannot be shown to a passenger.
+   */
+  smsWebhookSecret: string;
   smsFromNumber: string;
   enabled: Record<TemplateName, boolean>;
 }
@@ -152,7 +178,11 @@ export async function saveClientMessagingConfig(
   const existing = await prisma.setting.findUnique({ where: { key: KEY } });
   const stored = (existing?.value ?? {}) as Record<string, unknown>;
 
-  const incoming = input.smsAccountSid.trim() !== '' || input.smsAuthToken.trim() !== '';
+  const incoming =
+    input.smsAccountSid.trim() !== '' ||
+    input.smsAuthToken.trim() !== '' ||
+    input.smsApiKey.trim() !== '' ||
+    input.smsWebhookSecret.trim() !== '';
   if (incoming && !encryptionAvailable()) {
     return {
       ok: false,
@@ -171,6 +201,8 @@ export async function saveClientMessagingConfig(
     smsProvider: input.smsProvider,
     smsAccountSid: keep(input.smsAccountSid, stored.smsAccountSid),
     smsAuthToken: keep(input.smsAuthToken, stored.smsAuthToken),
+    smsApiKey: keep(input.smsApiKey, stored.smsApiKey),
+    smsWebhookSecret: keep(input.smsWebhookSecret, stored.smsWebhookSecret),
     smsFromNumber: input.smsFromNumber.trim() || null,
     enabled: input.enabled,
   };
@@ -184,6 +216,18 @@ export async function saveClientMessagingConfig(
       code: 'INCOMPLETE',
       message:
         'Twilio needs an account SID, an auth token and a from number before it can send anything.',
+    };
+  }
+
+  if (
+    input.smsProvider === 'httpsms' &&
+    (!value.smsApiKey || !value.smsFromNumber)
+  ) {
+    return {
+      ok: false,
+      code: 'INCOMPLETE',
+      message:
+        'httpSMS needs an API key and the number of the SIM in the gateway phone. The number has to match the one registered in the app — httpSMS routes on it.',
     };
   }
 

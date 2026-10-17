@@ -34,12 +34,30 @@ export type ChatState =
   | { open: true }
   | { open: false; reason: ChatClosedReason };
 
+/**
+ * How a driver's phone is reached, in the order it is tried.
+ *
+ * `telegram` when they have linked the bot: free, threaded, and the reply
+ * goes through a button they chose to press.
+ *
+ * `sms` when they have not. Roughly a fifth of any fleet never links a bot,
+ * and before this they simply could not be messaged — the passenger was told
+ * to ring the office. It costs a message and it is less precise in one
+ * important way: a text has no Reply button, so **anything** the driver sends
+ * back lands on the passenger's page. The outbound wording has to say so, and
+ * `lib/tracking-chat-inbound.ts` only accepts a reply while a thread is
+ * actually open, which bounds how far a stray text can travel.
+ *
+ * `null` when neither is available.
+ */
+export type ChatChannel = 'telegram' | 'sms';
+
 export interface ChatJob {
   status: string;
   scheduledAt: Date;
   driverId: string | null;
-  /** Whether that driver has linked their Telegram. */
-  driverReachable: boolean;
+  /** How this driver would be reached, or null if they cannot be. */
+  channel: ChatChannel | null;
 }
 
 /**
@@ -57,6 +75,34 @@ export interface ChatJob {
  * the link was forwarded into.
  */
 export function chatState(job: ChatJob, now: Date = new Date()): ChatState {
+  const thread = threadOpen(job, now);
+  if (!thread.open) return thread;
+
+  if (!job.driverId) return { open: false, reason: 'NO_DRIVER' };
+  if (!job.channel) {
+    return { open: false, reason: 'DRIVER_UNREACHABLE' };
+  }
+
+  return { open: true };
+}
+
+/**
+ * Whether the journey's thread is open at all, setting aside who can reach whom.
+ *
+ * The two directions do not ask the same question, and conflating them was a
+ * bug. The passenger's box needs a driver who can be *reached* — a box that
+ * sends nowhere is worse than none. A driver's reply needs no such check:
+ * they are replying, so they were plainly reached, and a text that arrived
+ * proves the gateway exists more convincingly than a settings row does.
+ *
+ * Re-deriving reachability on the way in refused every reply from a driver
+ * whose Telegram was never linked — which is precisely the driver the SMS
+ * fallback exists for.
+ */
+export function threadOpen(
+  job: Pick<ChatJob, 'status' | 'scheduledAt'>,
+  now: Date = new Date(),
+): ChatState {
   if (!trackingLinkLive(job, now)) return { open: false, reason: 'JOURNEY_OVER' };
   if (job.status === 'CANCELLED') return { open: false, reason: 'CANCELLED' };
 
@@ -65,11 +111,6 @@ export function chatState(job: ChatJob, now: Date = new Date()): ChatState {
   // driver who may not be the one who turns up.
   if (!driverShown(job.scheduledAt, now)) {
     return { open: false, reason: 'TOO_EARLY' };
-  }
-
-  if (!job.driverId) return { open: false, reason: 'NO_DRIVER' };
-  if (!job.driverReachable) {
-    return { open: false, reason: 'DRIVER_UNREACHABLE' };
   }
 
   return { open: true };
@@ -85,6 +126,10 @@ export const CHAT_CLOSED_TEXT: Record<ChatClosedReason, string> = {
   // Said plainly rather than hidden. A passenger who is told the office can
   // reach the driver will ring the office, which is the right outcome; one
   // shown nothing assumes the feature is broken.
+  //
+  // Reached far less often now that a driver with no Telegram is texted
+  // instead: this is a driver with neither, or an install with no SMS gateway
+  // configured.
   DRIVER_UNREACHABLE:
     'Your driver cannot be messaged directly. The office can pass anything on.',
 };
