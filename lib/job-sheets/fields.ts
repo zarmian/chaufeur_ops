@@ -1,0 +1,235 @@
+import {
+  cleanAddress,
+  cleanNotes,
+  parseSheetCount,
+  parseSheetDate,
+  parseSheetMoney,
+  parseSheetPhone,
+  parseSheetReference,
+  parseSheetTime,
+} from './parse';
+import { parseFlightNumber } from './flight';
+import { tidyRun, type Placement, type ReadableField } from './types';
+
+/**
+ * The labels agency sheets print, and where each one's value sits.
+ *
+ * This dictionary is the thing that replaces a template per agency. Booking
+ * software is not very imaginative: a sheet says "Pick-up Date", "Collection
+ * Date" or "Date of Travel", and there are perhaps half a dozen wordings in
+ * circulation for each field. Knowing them all means a new agency's sheet
+ * reads correctly the first time it arrives, which matters more here than
+ * anywhere — a white-label install cannot ship a code change per customer's
+ * supplier.
+ *
+ * Order is significant. The first alias that yields a value a parser accepts
+ * wins, so the specific comes before the general: `Trip Total` before `Total`,
+ * `Mb:` before `Mobile`. A label whose box is blank yields nothing and the
+ * search moves on, which is why a sheet with an empty `Trip Total` and a filled
+ * `Total` still finds the price.
+ *
+ * What is deliberately *not* here: bare `Date:` and bare `Time:`. Both appear
+ * on this sample beside `Signature:` at the foot of the page, and on plenty of
+ * sheets as "Booked On". A date read from the wrong box is the single most
+ * expensive mistake this feature can make, so it is read only from a label that
+ * says which date it means.
+ */
+
+export interface FieldAlias {
+  label: string;
+  placement: Placement;
+  /**
+   * Whether the label must begin a line or a column.
+   *
+   * What makes short labels safe. `PU:`, `To:` and `From:` are too common
+   * inside other text to match anywhere, and too useful to leave out.
+   */
+  lineStart?: boolean;
+}
+
+export const BUILT_IN_ALIASES: Record<ReadableField, FieldAlias[]> = {
+  scheduledDate: [
+    { label: 'Pick-up Date:', placement: 'after' },
+    { label: 'Pickup Date:', placement: 'after' },
+    { label: 'Pick Up Date:', placement: 'after' },
+    { label: 'Collection Date:', placement: 'after' },
+    { label: 'Date of Travel:', placement: 'after' },
+    { label: 'Travel Date:', placement: 'after' },
+    { label: 'Journey Date:', placement: 'after' },
+    { label: 'Service Date:', placement: 'after' },
+    { label: 'Pick-up Date', placement: 'column' },
+    { label: 'Date Required', placement: 'after' },
+  ],
+  scheduledTime: [
+    { label: 'Pick-up Time:', placement: 'after' },
+    { label: 'Pickup Time:', placement: 'after' },
+    { label: 'Pick Up Time:', placement: 'after' },
+    { label: 'Collection Time:', placement: 'after' },
+    { label: 'Journey Time:', placement: 'after' },
+    { label: 'Time Required', placement: 'after' },
+    { label: 'Pick-up Time', placement: 'column' },
+  ],
+  pickupText: [
+    { label: 'PU:', placement: 'paragraph', lineStart: true },
+    { label: 'Pick-up Address:', placement: 'paragraph' },
+    { label: 'Pickup Address:', placement: 'paragraph' },
+    { label: 'Pick-up Location:', placement: 'paragraph' },
+    { label: 'Collection Address:', placement: 'paragraph' },
+    { label: 'Pick Up From:', placement: 'paragraph' },
+    { label: 'From:', placement: 'paragraph', lineStart: true },
+    { label: 'Pick-up', placement: 'below', lineStart: true },
+  ],
+  dropoffText: [
+    { label: 'DO:', placement: 'paragraph', lineStart: true },
+    { label: 'Drop-off Address:', placement: 'paragraph' },
+    { label: 'Dropoff Address:', placement: 'paragraph' },
+    { label: 'Drop-off Location:', placement: 'paragraph' },
+    { label: 'Destination Address:', placement: 'paragraph' },
+    { label: 'Destination:', placement: 'paragraph' },
+    { label: 'Drop Off At:', placement: 'paragraph' },
+    { label: 'To:', placement: 'paragraph', lineStart: true },
+    { label: 'Drop-off', placement: 'below', lineStart: true },
+  ],
+  passengerName: [
+    { label: 'Primary Passenger:', placement: 'below' },
+    { label: 'Primary Passenger:', placement: 'after' },
+    { label: 'Lead Passenger:', placement: 'after' },
+    { label: 'Passenger Name:', placement: 'after' },
+    { label: 'Passenger:', placement: 'after' },
+    { label: 'Pax Name:', placement: 'after' },
+    { label: 'Client Name:', placement: 'after' },
+    { label: 'Name of Passenger:', placement: 'after' },
+    { label: 'Passenger Name', placement: 'column' },
+  ],
+  passengerPhone: [
+    { label: 'Mb:', placement: 'after' },
+    { label: 'Mobile:', placement: 'after' },
+    { label: 'Mobile No:', placement: 'after' },
+    { label: 'Passenger Tel:', placement: 'after' },
+    { label: 'Passenger Phone:', placement: 'after' },
+    { label: 'Contact Number:', placement: 'after' },
+    { label: 'Contact Tel:', placement: 'after' },
+    { label: 'Cell:', placement: 'after' },
+  ],
+  passengerCount: [
+    { label: '# of Pax', placement: 'column' },
+    { label: 'No. of Pax', placement: 'column' },
+    { label: 'No of Passengers:', placement: 'after' },
+    { label: 'Passengers:', placement: 'after' },
+    { label: 'Pax:', placement: 'after' },
+    { label: 'Pax', placement: 'column' },
+  ],
+  luggageCount: [
+    { label: '# of Bags', placement: 'column' },
+    { label: 'No. of Bags', placement: 'column' },
+    { label: 'Luggage:', placement: 'after' },
+    { label: 'Bags:', placement: 'after' },
+    { label: 'Suitcases:', placement: 'after' },
+    { label: 'Luggage', placement: 'column' },
+  ],
+  flightNumber: [
+    { label: 'Flight No:', placement: 'after' },
+    { label: 'Flight Number:', placement: 'after' },
+    { label: 'Flight #:', placement: 'after' },
+    { label: 'Flight Details:', placement: 'after' },
+    { label: 'Arrival Flight:', placement: 'after' },
+    { label: 'Inbound Flight:', placement: 'after' },
+    { label: 'Flight:', placement: 'after' },
+    { label: 'Flight No', placement: 'column' },
+    { label: 'Flight', placement: 'column' },
+  ],
+  customerReference: [
+    { label: 'Reservation#', placement: 'after' },
+    { label: 'Reservation No:', placement: 'after' },
+    { label: 'Our Ref #:', placement: 'after' },
+    { label: 'Our Ref:', placement: 'after' },
+    { label: 'Booking Ref:', placement: 'after' },
+    { label: 'Booking Reference:', placement: 'after' },
+    { label: 'Job No:', placement: 'after' },
+    { label: 'Job Ref:', placement: 'after' },
+    { label: 'Order No:', placement: 'after' },
+    { label: 'Reference:', placement: 'after' },
+  ],
+  clientPrice: [
+    { label: 'Trip Total', placement: 'after' },
+    { label: 'Agreed Rate:', placement: 'after' },
+    { label: 'Agreed Price:', placement: 'after' },
+    { label: 'Total Fare:', placement: 'after' },
+    { label: 'Fare:', placement: 'after' },
+    { label: 'Price:', placement: 'after' },
+    { label: 'Rate:', placement: 'after' },
+    { label: 'Total:', placement: 'after' },
+  ],
+  vehicleRequested: [
+    { label: 'Vehicle Type', placement: 'column' },
+    { label: 'Vehicle Type:', placement: 'after' },
+    { label: 'Vehicle Class:', placement: 'after' },
+    { label: 'Vehicle Requested:', placement: 'after' },
+    { label: 'Car Type:', placement: 'after' },
+    { label: 'Vehicle:', placement: 'after' },
+  ],
+  notes: [
+    { label: 'Trip Notes:', placement: 'paragraph' },
+    { label: 'Special Instructions:', placement: 'paragraph' },
+    { label: 'Driver Instructions:', placement: 'paragraph' },
+    { label: 'Notes/Comments', placement: 'paragraph' },
+    { label: 'Notes:', placement: 'paragraph' },
+    { label: 'Comments:', placement: 'paragraph' },
+    { label: 'Remarks:', placement: 'paragraph' },
+    { label: 'Additional Info:', placement: 'paragraph' },
+  ],
+};
+
+/**
+ * How each field's raw text becomes a form value, and what it refuses.
+ *
+ * The parser is also the shape check that keeps a neighbouring column out: the
+ * passenger count's parser wants digits, which is the only reason `# of Pax`
+ * cannot answer with `V Class` from the column beside it.
+ */
+export const PARSERS: Record<ReadableField, (raw: string) => string | null> = {
+  scheduledDate: parseSheetDate,
+  scheduledTime: parseSheetTime,
+  pickupText: cleanAddress,
+  dropoffText: cleanAddress,
+  passengerName: parsePersonName,
+  passengerPhone: parseSheetPhone,
+  passengerCount: parseSheetCount,
+  luggageCount: parseSheetCount,
+  flightNumber: parseFlightNumber,
+  customerReference: parseSheetReference,
+  clientPrice: parseSheetMoney,
+  vehicleRequested: parseVehicleClass,
+  notes: cleanNotes,
+};
+
+/**
+ * A person's name, refusing the things that sit where a name should.
+ *
+ * These boxes are printed whether or not they are filled, and what lands in
+ * them when they are not is a dash, "TBC", or the heading of the column that
+ * followed. A booking whose passenger is called "TBC" reaches a driver's phone
+ * and then an arrivals hall on a name board.
+ */
+function parsePersonName(raw: string): string | null {
+  const value = tidyRun(raw).replace(/^(?:mr|mrs|ms|miss|dr|sir)\.?\s+/i, '');
+
+  if (value.length < 2 || value.length > 80) return null;
+  if (/^(?:tbc|tba|n\/?a|none|unknown|-+)$/i.test(value)) return null;
+  // A name has letters and is not a number or a reference.
+  if (!/[A-Za-z]{2}/.test(value)) return null;
+  if (/^\d/.test(value)) return null;
+
+  return value;
+}
+
+/** What the sheet asked for. Letters first, so a count cannot answer. */
+function parseVehicleClass(raw: string): string | null {
+  const value = tidyRun(raw);
+
+  if (!/^[A-Za-z]/.test(value)) return null;
+  if (value.length > 40) return null;
+  if (/^(?:tbc|tba|n\/?a|none|any)$/i.test(value)) return null;
+
+  return value;
+}
