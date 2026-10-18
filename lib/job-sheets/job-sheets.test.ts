@@ -46,8 +46,8 @@ describe('a Montclares sheet', () => {
       pickupPostcode: 'EC4V 3AD',
       dropoffText: 'Royal Albert hall Kensington Gore, South Kensington London, SW7 2AP',
       dropoffPostcode: 'SW7 2AP',
-      passengerName: 'Shawna Rayford',
-      passengerPhone: '+1 615-635-7516',
+      passengerName: 'Teresa Vaughan',
+      passengerPhone: '+1 615-555-0184',
       passengerCount: '5',
       luggageCount: null,
       flightNumber: null,
@@ -86,14 +86,14 @@ describe('a Montclares sheet', () => {
      * line, so reading rightwards from the first finds the second's label and,
      * without the check, its date.
      */
-    expect(read.draft.passengerName).toBe('Shawna Rayford');
+    expect(read.draft.passengerName).toBe('Teresa Vaughan');
     expect(read.draft.passengerName).not.toContain('Booked On');
   });
 
   it('takes the mobile from the slot that is filled, not the one before it', () => {
-    // The line reads `Hm: Mb: +1 615-635-7516` — home then mobile, with the
+    // The line reads `Hm: Mb: +1 615-555-0184` — home then mobile, with the
     // home number simply absent.
-    expect(read.draft.passengerPhone).toBe('+1 615-635-7516');
+    expect(read.draft.passengerPhone).toBe('+1 615-555-0184');
   });
 
   it('leaves the price empty, because the sheet names none', () => {
@@ -119,7 +119,7 @@ describe('a Montclares sheet', () => {
   it('does not repeat the mobile it already has as a field', () => {
     // The sheet writes the number into the notes as well. A note that
     // duplicates a field is a note nobody reads twice.
-    expect(read.draft.notes).not.toContain('615-635-7516');
+    expect(read.draft.notes).not.toContain('615-555-0184');
   });
 
   it('finds no flight on a sheet that has none', () => {
@@ -537,7 +537,7 @@ describe('the smaller parsers', () => {
 
   it('reads a phone number but not a reference', () => {
     expect(parseSheetPhone('07700 900482')).toBe('07700 900482');
-    expect(parseSheetPhone('+1 615-635-7516')).toBe('+1 615-635-7516');
+    expect(parseSheetPhone('+1 615-555-0184')).toBe('+1 615-555-0184');
     // Short enough to be a job number with punctuation in it.
     expect(parseSheetPhone('30700')).toBeNull();
     expect(parseSheetPhone('n/a')).toBeNull();
@@ -550,7 +550,7 @@ describe('the smaller parsers', () => {
   });
 
   it('drops a phone number a note merely repeats', () => {
-    expect(cleanNotes('cell: 615-635-7516 MUST BE FULL SIZED SUV')).toBe(
+    expect(cleanNotes('cell: 615-555-0184 MUST BE FULL SIZED SUV')).toBe(
       'MUST BE FULL SIZED SUV',
     );
     expect(cleanNotes('   ')).toBeNull();
@@ -585,7 +585,7 @@ describe('cells', () => {
   it('knows a label from a value', () => {
     expect(looksLikeLabel('Booked On:')).toBe(true);
     expect(looksLikeLabel('Reservation#')).toBe(true);
-    expect(looksLikeLabel('Shawna Rayford')).toBe(false);
+    expect(looksLikeLabel('Teresa Vaughan')).toBe(false);
     expect(looksLikeLabel('14 Oct 2026')).toBe(false);
   });
 });

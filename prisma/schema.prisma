@@ -288,6 +288,8 @@ model User {
   createdContracts JobContract[]    @relation("JobContractCreatedBy")
   bulkOperations   BulkOperation[]  @relation("BulkOperationCreatedBy")
   createdRentals   VehicleRental[]  @relation("RentalCreatedBy")
+  createdSheetSenders SheetSender[] @relation("SheetSenderCreatedBy")
+  uploadedJobSheets   JobSheet[]    @relation("JobSheetUploadedBy")
   sessions         Session[]
   telegramLinks    StaffLinkToken[]
 
@@ -409,6 +411,7 @@ model Client {
   credits            UnallocatedCredit[]
   messages           ClientMessage[]
   favouriteLocations ClientFavouriteLocation[]
+  sheetSenders       SheetSender[]
 
   @@index([normalisedName])
   @@index([deletedAt])
@@ -446,8 +449,150 @@ model Account {
   bankTxns  BankTransaction[]
   credits   UnallocatedCredit[]
   rentals   VehicleRental[]
+  sheetSenders SheetSender[]
 
   @@index([deletedAt])
+}
+
+// ------------------------------------------------------------ job sheets
+
+/// A partner agency whose job sheets this install can read.
+///
+/// Rows, not code. Each install meets its own agencies — there is a second
+/// customer already — and shipping a template per supplier would mean a
+/// release every time somebody wins a new account. See `lib/job-sheets`.
+model SheetSender {
+  id   String @id @default(cuid())
+  /// Operator-facing: "Montclares International".
+  name String
+  /// Distinctive text that identifies this sender's sheets, lowercased.
+  ///
+  /// Matched against the whole page, which is why it has to be distinctive:
+  /// recognising the wrong sender bills the wrong company. Their trading name
+  /// is normally enough and appears in their letterhead and their footer.
+  fingerprint String @unique
+
+  /// Who is invoiced for their work.
+  ///
+  /// The agency, not the passenger — booker and client are separate here, and
+  /// for agency work the booker is the one who pays. This is the whole reason
+  /// a sender is worth storing: it is what turns a read sheet into a job that
+  /// can be invoiced to somebody.
+  accountId String?
+  /// Set only where a sender's sheets are always for one end client.
+  clientId  String?
+
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  account   Account?     @relation(fields: [accountId], references: [id])
+  client    Client?      @relation(fields: [clientId], references: [id])
+  createdBy User?        @relation("SheetSenderCreatedBy", fields: [createdById], references: [id])
+  labels    SheetLabel[]
+  sheets    JobSheet[]
+
+  @@index([deletedAt])
+}
+
+/// A label one sender prints, and which field sits next to it.
+///
+/// This is the learning. The built-in dictionary in `lib/job-sheets/fields.ts`
+/// knows the wordings in general circulation; this table knows the ones a
+/// particular agency uses, taught by an operator correcting a field once.
+model SheetLabel {
+  id       String @id @default(cuid())
+  senderId String
+  /// A key of `JobSheetDraft` — "scheduledDate".
+  field    String
+  /// As printed on the page, including its colon: "Uplift On:".
+  label    String
+  placement SheetPlacement
+
+  /// Times this label produced a value the operator kept as it was.
+  confirmed Int @default(0)
+  /// Times the operator changed what it produced.
+  ///
+  /// Kept beside `confirmed` rather than deleting a label that misfires,
+  /// because one correction is not evidence — an operator also corrects a
+  /// value the sheet got wrong. A label is only retired once it is being
+  /// changed more often than it is kept.
+  corrected Int @default(0)
+
+  /// The sheet that taught it, for the audit trail.
+  learnedFromSheetId String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  sender SheetSender @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@unique([senderId, field, label, placement])
+  @@index([senderId, field])
+}
+
+enum SheetPlacement {
+  AFTER
+  BELOW
+  COLUMN
+  PARAGRAPH
+}
+
+/// An uploaded job sheet: the file, the text, and what was read out of it.
+model JobSheet {
+  id String @id @default(cuid())
+
+  /// Blob pathname — never the binary itself.
+  fileKey   String
+  fileName  String
+  mimeType  String
+  sizeBytes Int
+  /// SHA-256 of the bytes.
+  ///
+  /// Agencies resend sheets — an amended pickup, a chased confirmation, a
+  /// forwarded copy — and booking the same journey twice sends two cars. The
+  /// upload recognises a sheet it has already read and offers the job it
+  /// already made.
+  contentHash String
+
+  senderId String?
+
+  /// The text as extracted, kept deliberately.
+  ///
+  /// Two reasons. A label taught later can be applied to the sheets that
+  /// already failed, so teaching is retrospective rather than only helping the
+  /// next one. And when a field turns out wrong weeks later, the page as the
+  /// reader saw it is the only way to tell a bad label from a bad sheet.
+  text String
+  /// What the reader produced, as `JobSheetDraft`.
+  draft Json
+  /// Which label produced each value, as `SheetRead['sources']`.
+  sources Json
+
+  /// The job booked from it, once the operator presses Book.
+  jobId  String?
+  status JobSheetStatus @default(READ)
+
+  uploadedById String?
+  uploadedAt   DateTime  @default(now())
+  deletedAt    DateTime?
+
+  sender     SheetSender? @relation(fields: [senderId], references: [id])
+  job        Job?         @relation(fields: [jobId], references: [id])
+  uploadedBy User?        @relation("JobSheetUploadedBy", fields: [uploadedById], references: [id])
+
+  @@index([contentHash])
+  @@index([senderId])
+  @@index([jobId])
+  @@index([deletedAt])
+}
+
+enum JobSheetStatus {
+  /// Read, not yet booked. The operator is looking at the form.
+  READ
+  BOOKED
+  /// Read and deliberately not booked — a duplicate, or a cancellation.
+  DISCARDED
 }
 
 // ---------------------------------------------------- fleet and drivers
@@ -719,6 +864,13 @@ model Job {
   reference String @unique
   /// maps to a legacy #766 style id when one was imported
   legacyId  Int?   @unique
+  /// The booker's own reference for this job — an agency's reservation number.
+  ///
+  /// Theirs, not ours: `reference` above is what this system calls the job and
+  /// it means nothing to them. This is what their accounts department matches
+  /// an invoice against, so it is carried onto the invoice line. An invoice a
+  /// customer cannot reconcile is one that gets queried instead of paid.
+  customerReference String?
 
   clientId  String?
   accountId String?
@@ -875,6 +1027,7 @@ model Job {
   invoiceLines InvoiceLine[]
   payoutLines  DriverPayoutLine[]
   chat         JobChatMessage[]
+  sheets       JobSheet[]
 
   @@index([scheduledAt])
   @@index([status, scheduledAt])

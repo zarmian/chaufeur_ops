@@ -34,6 +34,14 @@ const nextConfig: NextConfig = {
     '@node-rs/argon2',
     '@sparticuz/chromium',
     'puppeteer-core',
+    /*
+     * `pdfjs-dist` reads a job sheet — see `lib/job-sheets/pdf.ts`. It is the
+     * one dependency here that both renders and parses, and it resolves parts
+     * of itself at runtime rather than through imports a bundler can see. Left
+     * to webpack it is traced as a browser package, which is the wrong half:
+     * the legacy build is the one that runs under Node without a DOM.
+     */
+    'pdfjs-dist',
   ],
 
   /**
