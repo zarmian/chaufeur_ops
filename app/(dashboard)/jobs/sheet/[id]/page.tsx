@@ -5,6 +5,7 @@ import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { loadJobFormOptions } from '@/lib/job-form-data';
+import { REFUSAL_TEXT, type LocatedAddress } from '@/lib/job-sheets/locate';
 import { guessSenderName } from '@/lib/job-sheets/read';
 import { getSheet } from '@/lib/job-sheets/store';
 import { filterValue, type SearchParams } from '@/lib/list-params';
@@ -203,6 +204,13 @@ function SheetReadback({
           sheet.sources as unknown as Record<string, { label: string } | undefined>
         )[key];
 
+        const placed =
+          key === 'pickupText'
+            ? sheet.located.pickup
+            : key === 'dropoffText'
+              ? sheet.located.dropoff
+              : null;
+
         return (
           <div key={key} className="min-w-0">
             <dt className="text-xs uppercase tracking-wide text-muted-foreground">
@@ -211,12 +219,13 @@ function SheetReadback({
             <dd className="mt-0.5 break-words text-sm">
               {value ? (
                 <>
-                  {value}
+                  {placed?.text ?? value}
                   {source ? (
                     <span className="ml-2 text-xs text-muted-foreground">
                       from &ldquo;{source.label}&rdquo;
                     </span>
                   ) : null}
+                  {placed ? <Pinned located={placed} /> : null}
                 </>
               ) : (
                 <span className="text-muted-foreground">
@@ -230,5 +239,34 @@ function SheetReadback({
         );
       })}
     </dl>
+  );
+}
+
+/**
+ * What the address lookup made of this address.
+ *
+ * Said rather than left to be inferred from a map pin that is or is not there.
+ * A job with no coordinates prices off its postcode alone and carries nothing
+ * for a driver's navigation to open, and the operator is the only person who
+ * can do anything about it — but only if they are told, and told which of the
+ * three reasons it is.
+ */
+function Pinned({ located }: { located: LocatedAddress }) {
+  if (located.refused) {
+    return (
+      <span className="mt-0.5 block text-xs text-muted-foreground">
+        No map location — {REFUSAL_TEXT[located.refused]}.
+      </span>
+    );
+  }
+
+  return (
+    <span className="mt-0.5 block text-xs text-muted-foreground">
+      Found on the map
+      {located.postcode ? ` — ${located.postcode}` : ''}
+      {located.text !== located.sheetText
+        ? `. The sheet wrote it as “${located.sheetText}”.`
+        : '.'}
+    </span>
   );
 }

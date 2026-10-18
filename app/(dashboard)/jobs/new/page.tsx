@@ -53,7 +53,10 @@ export default async function NewJobPage({
 
   let values: JobFormValues | undefined;
   if (sheet) {
-    values = { ...BLANK_JOB_VALUES, ...sheetFormValues(sheet.draft, sheet.sender) };
+    values = {
+      ...BLANK_JOB_VALUES,
+      ...sheetFormValues(sheet.draft, sheet.sender, sheet.located),
+    };
   } else if (source) {
     // Spec 6.3.1. A return gets the swap `duplicateDefaults` already knows
     // how to do, plus the one thing a duplicate does not need: a plausible

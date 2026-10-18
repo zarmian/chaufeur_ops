@@ -416,6 +416,8 @@ describe.skipIf(!DATABASE_AVAILABLE)('job series', () => {
           dropoffPostcode: 'TW6 2GA',
           dropoffLat: null,
           dropoffLng: null,
+          pickupLocationId: null,
+          dropoffLocationId: null,
           viaText: null,
           driverId: null,
           vehicleId: null,

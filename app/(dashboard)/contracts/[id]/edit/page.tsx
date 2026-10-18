@@ -5,6 +5,7 @@ import { getContract } from '@/lib/contracts';
 import { toDateOnlyString } from '@/lib/dates';
 import { getLocaleConfig } from '@/lib/locale-store';
 import { pageRequireCapability } from '@/lib/page-guards';
+import { getPlacesConfig } from '@/lib/places/store';
 import { prisma } from '@/lib/prisma';
 import { updateContractAction } from '../../actions';
 import { ContractForm } from '../../contract-form';
@@ -25,7 +26,7 @@ export default async function EditContractPage({
   const contract = await getContract(id);
   if (!contract) notFound();
 
-  const [clients, accounts, drivers, vehicles, locale] = await Promise.all([
+  const [clients, accounts, drivers, vehicles, locale, places] = await Promise.all([
     prisma.client.findMany({
       select: { id: true, name: true },
       orderBy: { name: 'asc' },
@@ -50,6 +51,7 @@ export default async function EditContractPage({
       take: 500,
     }),
     getLocaleConfig(),
+    getPlacesConfig(),
   ]);
 
   return (
@@ -72,6 +74,7 @@ export default async function EditContractPage({
       </Alert>
 
       <ContractForm
+        addressSuggestions={places.provider === 'google' && places.keySet}
         action={updateContractAction.bind(null, contract.id)}
         submitLabel="Save changes"
         offerReprice
@@ -90,7 +93,9 @@ export default async function EditContractPage({
           clientId: contract.clientId ?? '',
           accountId: contract.accountId ?? '',
           pickupText: contract.pickupText,
+          pickupPostcode: contract.pickupPostcode ?? '',
           dropoffText: contract.dropoffText,
+          dropoffPostcode: contract.dropoffPostcode ?? '',
           viaText: contract.viaText ?? '',
           startTime: contract.startTime,
           estimatedMinutes:

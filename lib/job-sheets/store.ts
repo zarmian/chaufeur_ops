@@ -1,9 +1,12 @@
 import { createHash } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
+import { getPlacesConfig } from '../places/store';
+import { resolvePlace, suggestPlaces } from '../places/store';
 import { prisma } from '../prisma';
 import { buildObjectKey, upload } from '../storage';
 import type { FieldAlias } from './fields';
 import { lessonFrom, stillTrusted } from './learn';
+import { applyMatch, type LocatedAddress, type LocatedAddresses } from './locate';
 import { PdfTextError, pdfToText } from './pdf';
 import { readJobSheet } from './read';
 import type {
@@ -128,6 +131,8 @@ export interface StoredSheet {
   id: string;
   read: SheetRead;
   sender: SheetSenderSummary | null;
+  /** What the two addresses resolved to, where a provider is configured. */
+  located: LocatedAddresses;
   /**
    * The sheet this one is a byte-for-byte copy of, if it has been seen.
    *
@@ -172,6 +177,8 @@ export async function storeSheet(file: UploadedSheet): Promise<StoredSheet> {
   const learned = sender ? await learnedAliases(sender.id) : {};
   const read = readJobSheet(text, { learned });
 
+  const located = await locateAddresses(read.draft);
+
   const id = crypto.randomUUID();
   const key = buildObjectKey('sheet', id, file.fileName, SHEET_PREFIX);
   const stored = await upload(file.bytes, key, file.mimeType);
@@ -187,12 +194,72 @@ export async function storeSheet(file: UploadedSheet): Promise<StoredSheet> {
       text,
       draft: read.draft as unknown as Prisma.InputJsonValue,
       sources: read.sources as unknown as Prisma.InputJsonValue,
+      located: located as unknown as Prisma.InputJsonValue,
       uploadedById: file.uploadedById,
     },
     select: { id: true },
   });
 
-  return { id: row.id, read, sender, duplicateOf: seen };
+  return { id: row.id, read, sender, located, duplicateOf: seen };
+}
+
+/**
+ * Look both addresses up, so the job carries a place rather than a line of text.
+ *
+ * An address read off a PDF is whatever somebody at an agency typed. It is
+ * usually good enough to read and not good enough to price or navigate to: no
+ * coordinates at all, and a postcode only if a regular expression could find
+ * one in it. With a Places provider configured, each one is resolved to a
+ * formatted address, a postcode, coordinates and a saved `Location` — and the
+ * sheet's own words are kept beside the answer, never replaced by it.
+ *
+ * Done once, when the sheet is read, rather than each time the form opens: it
+ * costs a lookup, and the answer does not change.
+ *
+ * Never allowed to fail the upload. A provider being down, out of quota or
+ * misconfigured leaves the addresses exactly as the sheet wrote them, which is
+ * the job somebody would have booked anyway.
+ */
+async function locateAddresses(draft: JobSheetDraft): Promise<LocatedAddresses> {
+  const places = await getPlacesConfig();
+
+  /*
+   * Only Google. The fallback provider knows postcodes and nothing else, so
+   * asked for "The Westin London City" it either answers with a postcode that
+   * happens to appear in the text — which the reader already extracted — or
+   * with nothing. There is no answer it can give that is worth a request.
+   */
+  const live = places.provider === 'google' && places.keySet;
+
+  const locate = async (text: string | null): Promise<LocatedAddress | null> => {
+    if (!text) return null;
+    if (!live) return applyMatch(text, null, 'NOT_LOOKED_UP');
+
+    try {
+      const { suggestions } = await suggestPlaces(text, { limit: 1 });
+      const best = suggestions[0];
+      if (!best) return applyMatch(text, null, 'NOT_FOUND');
+
+      const detail = await resolvePlace(best.id);
+      if (!detail) return applyMatch(text, null, 'NOT_FOUND');
+
+      return applyMatch(text, {
+        address: detail.address,
+        postcode: detail.postcode,
+        lat: detail.lat,
+        lng: detail.lng,
+        locationId: detail.locationId,
+      });
+    } catch (error) {
+      console.error('Could not look up a job sheet address', error);
+      return applyMatch(text, null, 'NOT_FOUND');
+    }
+  };
+
+  return {
+    pickup: await locate(draft.pickupText),
+    dropoff: await locate(draft.dropoffText),
+  };
 }
 
 export interface SheetForForm {
@@ -202,6 +269,14 @@ export interface SheetForForm {
   sources: Partial<Record<ReadableField, FieldSource>>;
   missing: string[];
   sender: SheetSenderSummary | null;
+  /**
+   * What the addresses resolved to.
+   *
+   * Empty on a sheet read before a provider was configured, which is why the
+   * form falls back to the draft's own text rather than assuming this is
+   * present.
+   */
+  located: LocatedAddresses;
   jobId: string | null;
 }
 
@@ -234,6 +309,10 @@ export async function getSheet(id: string): Promise<SheetForForm | null> {
     sources,
     missing,
     sender: row.sender,
+    located: (row.located as unknown as LocatedAddresses | null) ?? {
+      pickup: null,
+      dropoff: null,
+    },
     jobId: row.jobId,
   };
 }
@@ -403,12 +482,20 @@ export async function assignSender(
   const learned = await learnedAliases(senderId);
   const read = readJobSheet(row.text, { learned });
 
+  /*
+   * Located again as well, because a learned label can change which text an
+   * address field holds — and a pin left over from the previous reading would
+   * then belong to a different address than the one on the form.
+   */
+  const located = await locateAddresses(read.draft);
+
   await prisma.jobSheet.update({
     where: { id: sheetId },
     data: {
       senderId,
       draft: read.draft as unknown as Prisma.InputJsonValue,
       sources: read.sources as unknown as Prisma.InputJsonValue,
+      located: located as unknown as Prisma.InputJsonValue,
     },
   });
 

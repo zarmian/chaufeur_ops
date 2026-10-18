@@ -8,6 +8,7 @@ import { FilteredSelect } from '@/components/filtered-select';
 import { FormField, fieldProps } from '@/components/form-field';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { AddressField } from '@/components/address-field';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
@@ -31,7 +32,13 @@ export interface ContractFormValues {
   clientId: string;
   accountId: string;
   pickupText: string;
+  /**
+   * Carried on the form because the contract stores it and every day it
+   * generates inherits it — it is what prices a year of jobs by zone.
+   */
+  pickupPostcode: string;
   dropoffText: string;
+  dropoffPostcode: string;
   viaText: string;
   startTime: string;
   estimatedMinutes: string;
@@ -54,7 +61,9 @@ const BLANK: ContractFormValues = {
   clientId: '',
   accountId: '',
   pickupText: '',
+  pickupPostcode: '',
   dropoffText: '',
+  dropoffPostcode: '',
   viaText: '',
   startTime: '09:00',
   estimatedMinutes: '',
@@ -98,6 +107,7 @@ export function ContractForm({
   drivers,
   vehicles,
   offerReprice = false,
+  addressSuggestions = false,
   currency = DEFAULT_CURRENCY,
   locale: localeTag = DEFAULT_LOCALE,
 }: {
@@ -114,6 +124,13 @@ export function ContractForm({
    * contract has no past to reach into.
    */
   offerReprice?: boolean;
+  /**
+   * Whether the address boxes suggest as you type — same rule as the booking
+   * form, and it matters more here. A contract's address is copied onto every
+   * day it generates, so an address resolved once is resolved for a year of
+   * jobs, and one typed loosely is wrong on all of them.
+   */
+  addressSuggestions?: boolean;
   currency?: string;
   locale?: string;
 }) {
@@ -224,10 +241,18 @@ export function ContractForm({
 
         <div className="grid gap-4 sm:grid-cols-2">
           <FormField name="pickupText" label="Pick up" required errors={errors.pickupText}>
-            <Input
-              {...fieldProps('pickupText', errors.pickupText)}
-              defaultValue={values.pickupText}
+            <AddressField
+              name="pickupText"
               required
+              suggest={addressSuggestions}
+              invalid={Boolean(errors.pickupText?.length)}
+              describedBy={
+                errors.pickupText?.length ? 'pickupText-error' : undefined
+              }
+              defaultValue={{
+                text: values.pickupText,
+                postcode: values.pickupPostcode,
+              }}
             />
           </FormField>
           <FormField
@@ -236,10 +261,18 @@ export function ContractForm({
             required
             errors={errors.dropoffText}
           >
-            <Input
-              {...fieldProps('dropoffText', errors.dropoffText)}
-              defaultValue={values.dropoffText}
+            <AddressField
+              name="dropoffText"
               required
+              suggest={addressSuggestions}
+              invalid={Boolean(errors.dropoffText?.length)}
+              describedBy={
+                errors.dropoffText?.length ? 'dropoffText-error' : undefined
+              }
+              defaultValue={{
+                text: values.dropoffText,
+                postcode: values.dropoffPostcode,
+              }}
             />
           </FormField>
         </div>

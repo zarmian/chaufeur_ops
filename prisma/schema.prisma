@@ -566,6 +566,15 @@ model JobSheet {
   text String
   /// What the reader produced, as `JobSheetDraft`.
   draft Json
+  /// What the two addresses resolved to, as `LocatedAddresses`.
+  ///
+  /// Kept beside the draft rather than folded into it, because the draft is
+  /// what the page says and this is what a Places provider made of it. The
+  /// distinction is the point: an operator checking a pre-filled form against
+  /// the sheet in front of them has to be able to see both, and a lookup that
+  /// confidently finds the wrong building is a worse failure than one that
+  /// finds nothing. Null on sheets read before a provider was configured.
+  located Json?
   /// Which label produced each value, as `SheetRead['sources']`.
   sources Json
 

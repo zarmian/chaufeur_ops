@@ -272,6 +272,8 @@ describe('duplicateDefaults', () => {
     dropoffPostcode: 'TW6 2GA',
     dropoffLat: 51.4701,
     dropoffLng: -0.4543,
+    pickupLocationId: 'loc_dorchester',
+    dropoffLocationId: 'loc_t5',
     viaText: null,
     driverId: 'drv_1',
     vehicleId: 'veh_1',

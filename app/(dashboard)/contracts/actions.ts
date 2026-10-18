@@ -36,8 +36,17 @@ function readContractForm(formData: FormData) {
     pickupText: formData.get('pickupText') ?? '',
     dropoffText: formData.get('dropoffText') ?? '',
     viaText: formData.get('viaText') ?? '',
-    pickupPostcode: formData.get('pickupPostcode') ?? '',
-    dropoffPostcode: formData.get('dropoffPostcode') ?? '',
+    /*
+     * Named after the text field they belong to, which is what the address
+     * field posts — the same convention as the booking form.
+     *
+     * These were read as `pickupPostcode` and the form never rendered a field
+     * by that name, so every contract was stored without one. A contract's
+     * postcode is copied onto each day it generates, so a year of jobs priced
+     * by zone had nothing to price on.
+     */
+    pickupPostcode: formData.get('pickupTextPostcode') ?? '',
+    dropoffPostcode: formData.get('dropoffTextPostcode') ?? '',
     startTime: formData.get('startTime') ?? '',
     estimatedMinutes: formData.get('estimatedMinutes') ?? '',
     passengerName: formData.get('passengerName') ?? '',

@@ -76,6 +76,10 @@ export default async function EditJobPage({
           passengerPhone: job.passengerPhone ?? '',
           passengerCount: job.passengerCount ?? '',
           luggageCount: job.luggageCount ?? '',
+          // Carried so that saving an edit does not unlink the saved location
+          // the job already resolved to.
+          pickupLocationId: job.pickupLocationId ?? '',
+          dropoffLocationId: job.dropoffLocationId ?? '',
           flightNumber: job.flightNumber ?? '',
           customerReference: job.customerReference ?? '',
           clientPrice: asPounds(job.clientPricePence),

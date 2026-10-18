@@ -48,6 +48,63 @@ vi.mock('./storage', async (importOriginal) => {
   };
 });
 
+/*
+ * A stubbed Places provider.
+ *
+ * Google is not reachable from a test run and its answers are not ours to
+ * pin a test to. What is under test is what this install does with an answer:
+ * which parts of it reach the job, and — the case that matters — that an
+ * answer naming a different postcode is thrown away whole.
+ *
+ * The stub answers from the query, so one sheet exercises both outcomes: the
+ * pickup is recognised as the airport it is, and the destination comes back
+ * as somewhere in a different postcode entirely.
+ */
+const PLACES: Record<string, { address: string; postcode: string; lat: number; lng: number }> = {
+  gatwick: {
+    address: 'Gatwick Airport (LGW), Horley, Gatwick RH6 0NP, UK',
+    postcode: 'RH6 0NP',
+    lat: 51.1537,
+    lng: -0.1821,
+  },
+  langham: {
+    // Deliberately wrong: a real risk, because "Portland Place" appears in
+    // plenty of addresses and a lookup will confidently pick one of them.
+    address: 'Portland Place, London W1A 1AA, UK',
+    postcode: 'W1A 1AA',
+    lat: 51.5205,
+    lng: -0.1447,
+  },
+};
+
+vi.mock('./places/store', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./places/store')>();
+
+  return {
+    ...actual,
+    getPlacesConfig: async () => ({
+      provider: 'google' as const,
+      keySet: true,
+      country: 'gb',
+      bias: null,
+    }),
+    suggestPlaces: async (query: string) => ({
+      suggestions: [
+        { id: query, primary: query, secondary: '', source: 'google' as const },
+      ],
+      provider: 'google' as const,
+      warning: null,
+    }),
+    resolvePlace: async (id: string) => {
+      const key = /gatwick/i.test(id) ? 'gatwick' : /langham/i.test(id) ? 'langham' : null;
+      if (!key) return null;
+
+      const place = PLACES[key]!;
+      return { label: key, ...place, locationId: null, zoneId: null };
+    },
+  };
+});
+
 const SHEET_PDF = DATABASE_AVAILABLE
   ? readFileSync(join(__dirname, 'job-sheets', '__fixtures__', 'keystone-55120.pdf'))
   : Buffer.alloc(0);
@@ -178,6 +235,62 @@ describe.skipIf(!DATABASE_AVAILABLE)('reading a job sheet end to end', () => {
     expect(values).not.toHaveProperty('driverId');
     // The requested class has nowhere else to go, and it decides which car.
     expect(values.notes).toContain('Vehicle requested: Executive Saloon');
+  });
+
+  it('puts a map location on the address the lookup recognised', async () => {
+    /*
+     * The gap this closes. An address read off a PDF is a line of text: no
+     * coordinates, and a postcode only where a regular expression could find
+     * one. A job booked from it prices off that alone and carries nothing a
+     * driver's navigation can open.
+     */
+    const sheet = await store.getSheet(sheetIds[0]!);
+
+    expect(sheet?.located.pickup).toMatchObject({
+      postcode: 'RH6 0NP',
+      lat: 51.1537,
+      lng: -0.1821,
+      refused: null,
+    });
+    // The sheet's own words are kept whatever the lookup said.
+    expect(sheet?.located.pickup?.sheetText).toBe(
+      'Gatwick South Terminal, Arrivals, Crawley, RH6 0NP',
+    );
+  });
+
+  it('throws away a lookup that answers with a different postcode', async () => {
+    /*
+     * The failure worth paying for. The sheet says W1B 1JA and the lookup
+     * answers W1A 1AA — a different building on a street with a similar name,
+     * which is exactly what a confident address lookup does with a scruffy
+     * address. Taking it would price the job off the wrong zone and drop a
+     * pin a driver would follow.
+     */
+    const sheet = await store.getSheet(sheetIds[0]!);
+
+    expect(sheet?.located.dropoff?.refused).toBe('DIFFERENT_POSTCODE');
+    expect(sheet?.located.dropoff?.lat).toBeNull();
+    // Left exactly as the sheet wrote it, which is the job somebody would
+    // have booked anyway.
+    expect(sheet?.located.dropoff?.text).toBe(
+      'The Langham, 1c Portland Place, London, W1B 1JA',
+    );
+    expect(sheet?.located.dropoff?.postcode).toBe('W1B 1JA');
+  });
+
+  it('carries the pin onto the booking form', async () => {
+    const sheet = await store.getSheet(sheetIds[0]!);
+    const values = formValues.sheetFormValues(
+      sheet!.draft,
+      sheet!.sender,
+      sheet!.located,
+    );
+
+    expect(values.pickupLat).toBe('51.1537');
+    expect(values.pickupPostcode).toBe('RH6 0NP');
+    // And nothing at all for the one that was refused.
+    expect(values.dropoffLat).toBe('');
+    expect(values.dropoffPostcode).toBe('W1B 1JA');
   });
 
   it('recognises the same file sent again', async () => {

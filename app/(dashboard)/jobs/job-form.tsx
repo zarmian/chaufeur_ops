@@ -610,6 +610,7 @@ export function JobForm({
                 postcode: values.pickupPostcode,
                 lat: values.pickupLat,
                 lng: values.pickupLng,
+                locationId: values.pickupLocationId,
               }}
               placeholder={
                 addressSuggestions
@@ -640,6 +641,7 @@ export function JobForm({
                 postcode: values.dropoffPostcode,
                 lat: values.dropoffLat,
                 lng: values.dropoffLng,
+                locationId: values.dropoffLocationId,
               }}
               placeholder={
                 addressSuggestions

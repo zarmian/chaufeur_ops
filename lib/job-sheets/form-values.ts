@@ -1,3 +1,4 @@
+import type { LocatedAddress, LocatedAddresses } from './locate';
 import type { JobSheetDraft } from './types';
 
 /**
@@ -24,8 +25,21 @@ export interface SheetFormValues {
   scheduledTime: string;
   pickupText: string;
   pickupPostcode: string;
+  /*
+   * Coordinates and the saved location, when an address lookup recognised the
+   * place. They are what the booking form's own address field carries, and
+   * what makes a sheet's address worth the same as one somebody picked from
+   * the dropdown — the postcode prices the job, and the pin is what every
+   * distance and mapping feature reads.
+   */
+  pickupLat: string;
+  pickupLng: string;
+  pickupLocationId: string;
   dropoffText: string;
   dropoffPostcode: string;
+  dropoffLat: string;
+  dropoffLng: string;
+  dropoffLocationId: string;
   passengerName: string;
   passengerPhone: string;
   passengerCount: string;
@@ -44,7 +58,11 @@ export interface SheetSenderDefaults {
 export function sheetFormValues(
   draft: JobSheetDraft,
   sender: SheetSenderDefaults | null,
+  located: LocatedAddresses = { pickup: null, dropoff: null },
 ): SheetFormValues {
+  const pickup = address(located.pickup, draft.pickupText, draft.pickupPostcode);
+  const dropoff = address(located.dropoff, draft.dropoffText, draft.dropoffPostcode);
+
   return {
     /*
      * From the sender, never from the page. An agency's sheet names the
@@ -59,10 +77,8 @@ export function sheetFormValues(
     scheduledDate: draft.scheduledDate ?? '',
     scheduledTime: draft.scheduledTime ?? '',
 
-    pickupText: draft.pickupText ?? '',
-    pickupPostcode: draft.pickupPostcode ?? '',
-    dropoffText: draft.dropoffText ?? '',
-    dropoffPostcode: draft.dropoffPostcode ?? '',
+    ...pickup('pickup'),
+    ...dropoff('dropoff'),
 
     passengerName: draft.passengerName ?? '',
     passengerPhone: draft.passengerPhone ?? '',
@@ -103,4 +119,37 @@ function notesWith(draft: JobSheetDraft): string {
   ].filter((part) => part !== '');
 
   return parts.join('\n');
+}
+
+/**
+ * One address, as the form's fields.
+ *
+ * Falls back to what the reader found whenever the lookup was not taken —
+ * which covers an install with no provider, a provider that was down, and a
+ * lookup that answered with a different postcode and was therefore ignored.
+ * In every one of those the job is exactly what it would have been without
+ * any lookup at all, which is why the checks around it can afford to be
+ * strict.
+ */
+function address(
+  located: LocatedAddress | null,
+  text: string | null,
+  postcode: string | null,
+) {
+  const resolved = {
+    text: located?.text ?? text ?? '',
+    postcode: located?.postcode ?? postcode ?? '',
+    lat: located?.lat ?? null,
+    lng: located?.lng ?? null,
+    locationId: located?.locationId ?? null,
+  };
+
+  return <Side extends 'pickup' | 'dropoff'>(side: Side) =>
+    ({
+      [`${side}Text`]: resolved.text,
+      [`${side}Postcode`]: resolved.postcode,
+      [`${side}Lat`]: resolved.lat === null ? '' : String(resolved.lat),
+      [`${side}Lng`]: resolved.lng === null ? '' : String(resolved.lng),
+      [`${side}LocationId`]: resolved.locationId ?? '',
+    }) as Record<`${Side}${'Text' | 'Postcode' | 'Lat' | 'Lng' | 'LocationId'}`, string>;
 }

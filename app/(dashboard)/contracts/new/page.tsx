@@ -2,6 +2,7 @@ import { PageHeader } from '@/components/page-header';
 import { toDateOnlyString } from '@/lib/dates';
 import { getLocaleConfig } from '@/lib/locale-store';
 import { pageRequireCapability } from '@/lib/page-guards';
+import { getPlacesConfig } from '@/lib/places/store';
 import { prisma } from '@/lib/prisma';
 import { createContractAction } from '../actions';
 import { ContractForm } from '../contract-form';
@@ -11,7 +12,7 @@ export const metadata = { title: 'New contract' };
 export default async function NewContractPage() {
   await pageRequireCapability('editJobs');
 
-  const [clients, accounts, drivers, vehicles, locale] = await Promise.all([
+  const [clients, accounts, drivers, vehicles, locale, places] = await Promise.all([
     prisma.client.findMany({
       select: { id: true, name: true },
       orderBy: { name: 'asc' },
@@ -36,6 +37,7 @@ export default async function NewContractPage() {
       take: 500,
     }),
     getLocaleConfig(),
+    getPlacesConfig(),
   ]);
 
   return (
@@ -45,6 +47,7 @@ export default async function NewContractPage() {
         description="A job is created for each day it runs, a couple of weeks ahead. The driver and the car stay free for other work."
       />
       <ContractForm
+        addressSuggestions={places.provider === 'google' && places.keySet}
         action={createContractAction}
         submitLabel="Start the contract"
         cancelHref="/contracts"
@@ -62,7 +65,9 @@ export default async function NewContractPage() {
           clientId: '',
           accountId: '',
           pickupText: '',
+          pickupPostcode: '',
           dropoffText: '',
+          dropoffPostcode: '',
           viaText: '',
           startTime: '09:00',
           estimatedMinutes: '',

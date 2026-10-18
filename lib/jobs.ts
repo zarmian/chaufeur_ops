@@ -1253,6 +1253,8 @@ export function duplicateDefaults(
     dropoffPostcode: string | null;
     dropoffLat: number | null;
     dropoffLng: number | null;
+    pickupLocationId: string | null;
+    dropoffLocationId: string | null;
     viaText: string | null;
     driverId: string | null;
     vehicleId: string | null;
@@ -1284,6 +1286,12 @@ export function duplicateDefaults(
       (options.swap ? job.pickupPostcode : job.dropoffPostcode) ?? '',
     dropoffLat: asField(options.swap ? job.pickupLat : job.dropoffLat),
     dropoffLng: asField(options.swap ? job.pickupLng : job.dropoffLng),
+    // Swapped with the rest of the address, or a return journey would link
+    // the outbound leg's saved location to the destination it came from.
+    pickupLocationId:
+      (options.swap ? job.dropoffLocationId : job.pickupLocationId) ?? '',
+    dropoffLocationId:
+      (options.swap ? job.pickupLocationId : job.dropoffLocationId) ?? '',
     viaText: job.viaText ?? '',
     driverId: job.driverId ?? '',
     vehicleId: job.vehicleId ?? '',

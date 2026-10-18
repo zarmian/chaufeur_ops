@@ -18,10 +18,19 @@ export interface JobFormValues {
   pickupPostcode: string;
   pickupLat: string;
   pickupLng: string;
+  /**
+   * The saved `Location` this address resolved to, when it resolved to one.
+   *
+   * Carried on the form rather than only written when a suggestion is picked,
+   * because otherwise editing a job posts an empty one and silently unlinks
+   * the location it already had.
+   */
+  pickupLocationId: string;
   dropoffText: string;
   dropoffPostcode: string;
   dropoffLat: string;
   dropoffLng: string;
+  dropoffLocationId: string;
   viaText: string;
   driverId: string;
   vehicleId: string;
@@ -71,10 +80,12 @@ export const BLANK_JOB_VALUES: JobFormValues = {
   pickupPostcode: '',
   pickupLat: '',
   pickupLng: '',
+  pickupLocationId: '',
   dropoffText: '',
   dropoffPostcode: '',
   dropoffLat: '',
   dropoffLng: '',
+  dropoffLocationId: '',
   viaText: '',
   driverId: '',
   vehicleId: '',
