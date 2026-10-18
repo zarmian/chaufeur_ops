@@ -766,6 +766,8 @@ export async function addJobLine(
       viaText: true,
       passengerName: true,
       flightNumber: true,
+      // Theirs, for the invoice line's title — it is what they reconcile on.
+      customerReference: true,
       clientPricePence: true,
       // The hourly total, for an as-directed job. Without it this refused
       // every as-directed job as "no client price" and, worse, would have

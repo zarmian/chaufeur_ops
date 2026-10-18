@@ -11,7 +11,7 @@ import {
   parseSheetTime,
   postcodeOf,
 } from './parse';
-import { readJobSheet } from './read';
+import { guessSenderName, readJobSheet } from './read';
 import { cellNear, cellsOf, firstCell, looksLikeLabel, toLines } from './types';
 
 /**
@@ -587,5 +587,47 @@ describe('cells', () => {
     expect(looksLikeLabel('Reservation#')).toBe(true);
     expect(looksLikeLabel('Teresa Vaughan')).toBe(false);
     expect(looksLikeLabel('14 Oct 2026')).toBe(false);
+  });
+});
+
+describe('guessSenderName', () => {
+  it('finds the agency in its own letterhead', () => {
+    /*
+     * The signal is repetition: an agency's name appears in the letterhead and
+     * again in the footer, where a document title appears once. Montclares'
+     * footer runs the name into a licence number — "… Ltd - PCO 010328" — so
+     * the suffix and the registration both have to come off before the two
+     * occurrences count as the same name.
+     */
+    expect(guessSenderName(fixture('montclares-30700.txt'))).toBe(
+      'Montclares International',
+    );
+  });
+
+  it('takes the letterhead when nothing repeats', () => {
+    // "PRESTIGE CARS LONDON - BOOKING CONFIRMATION" is a name and a title on
+    // one line, each appearing once. Position decides, and the letterhead
+    // comes first.
+    expect(guessSenderName(fixture('prestige-88214.txt'))).toBe(
+      'PRESTIGE CARS LONDON',
+    );
+  });
+
+  it('does not offer an address, an email or a label', () => {
+    // It becomes the fingerprint, and a fingerprint that matches the wrong
+    // sheets bills the wrong company.
+    const guess = guessSenderName(
+      [
+        'Pick-up Date:   4 March 2027',
+        '125 Lambs Ln S Rainham',
+        'reservations@example.com',
+      ].join('\n'),
+    );
+
+    expect(guess).toBe('');
+  });
+
+  it('has nothing to offer for a page with no name on it', () => {
+    expect(guessSenderName('Pick-up Date:   4 March 2027')).toBe('');
   });
 });

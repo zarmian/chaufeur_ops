@@ -220,6 +220,15 @@ export const jobSchema = z
     luggageCount: optionalCount,
     flightNumber: z.string().trim().max(20).optional().or(z.literal('')),
 
+    /**
+     * The booker's own reference for this job.
+     *
+     * Theirs, not ours. An agency's reservation number means nothing to this
+     * system and everything to their accounts department, which is why it
+     * reaches the invoice line.
+     */
+    customerReference: z.string().trim().max(60).optional().or(z.literal('')),
+
     clientPricePence: priceField,
     driverPricePence: priceField,
     zeroValueReason: z.string().trim().max(500).optional().or(z.literal('')),
@@ -379,6 +388,8 @@ function toData(input: JobInput, timeZone?: string) {
     zeroValueReason: emptyToNull(input.zeroValueReason),
     vatTreatment: input.vatTreatment ? input.vatTreatment : null,
     rateCardRuleId: input.rateCardRuleId,
+
+    customerReference: emptyToNull(input.customerReference),
 
     notes: emptyToNull(input.notes),
     internalNotes: emptyToNull(input.internalNotes),

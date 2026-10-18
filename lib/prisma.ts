@@ -41,6 +41,8 @@ const SOFT_DELETE_MODELS = new Set([
   'BankTransaction',
   'BankRule',
   'UnallocatedCredit',
+  'SheetSender',
+  'JobSheet',
 ]);
 
 const READ_OPERATIONS = new Set([

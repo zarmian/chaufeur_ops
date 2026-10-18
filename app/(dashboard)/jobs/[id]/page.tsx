@@ -1,4 +1,4 @@
-import { Copy, Pencil, Repeat } from 'lucide-react';
+import { Copy, FileText, Pencil, Repeat } from 'lucide-react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ComplianceBadge } from '@/components/compliance-badge';
@@ -25,6 +25,7 @@ import { JOB_TYPES } from '@/lib/enum-options';
 import { formatGBP } from '@/lib/money';
 import { filterValue, type SearchParams } from '@/lib/list-params';
 import { pageRequireCapability } from '@/lib/page-guards';
+import { prisma } from '@/lib/prisma';
 import { defaultExpenseBearer, resolveEngagement } from '@/lib/engagement';
 import { financeAmountsFrom, jobEconomics } from '@/lib/job-finance';
 import { engagementPeriodsFor } from '@/lib/shift-store';
@@ -72,6 +73,25 @@ export default async function JobDetailPage({
           job.scheduledAt,
         )
       : null;
+
+  /*
+   * The agency sheet this job was read from, if it came from one.
+   *
+   * Worth showing rather than merely storing: when a detail is queried weeks
+   * later — a pickup time, who asked for a full-size SUV — the page the
+   * booking was taken from settles it, and before this the only copy was in
+   * somebody's mailbox.
+   */
+  const sheet = await prisma.jobSheet.findFirst({
+    where: { jobId: job.id },
+    select: {
+      id: true,
+      fileName: true,
+      uploadedAt: true,
+      sender: { select: { name: true } },
+    },
+    orderBy: { uploadedAt: 'desc' },
+  });
 
   const invoice = job.invoiceLines[0]?.invoice ?? null;
 
@@ -261,7 +281,7 @@ export default async function JobDetailPage({
                     the address search actually matched anything. */}
                 <Field label="Pickup">
                   {job.pickupText}
-                  {job.pickupPostcode ? (
+                  {postcodeWorthShowing(job.pickupText, job.pickupPostcode) ? (
                     <span className="text-muted-foreground tabular ml-2 text-xs">
                       {job.pickupPostcode}
                     </span>
@@ -269,7 +289,7 @@ export default async function JobDetailPage({
                 </Field>
                 <Field label="Destination">
                   {job.dropoffText}
-                  {job.dropoffPostcode ? (
+                  {postcodeWorthShowing(job.dropoffText, job.dropoffPostcode) ? (
                     <span className="text-muted-foreground tabular ml-2 text-xs">
                       {job.dropoffPostcode}
                     </span>
@@ -358,7 +378,33 @@ export default async function JobDetailPage({
                 {job.passengerPhone ? (
                   <Field label="Passenger phone">{job.passengerPhone}</Field>
                 ) : null}
+                {job.customerReference ? (
+                  /* The booker's own number for this job. Shown here because
+                     it is what they quote when they ring about it, and ours
+                     means nothing to them. */
+                  <Field label="Their reference">
+                    <span className="tabular">{job.customerReference}</span>
+                  </Field>
+                ) : null}
               </dl>
+
+              {sheet ? (
+                <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg border p-3 text-sm">
+                  <FileText className="size-4 text-muted-foreground" aria-hidden />
+                  <span className="text-muted-foreground">
+                    Booked from {sheet.sender ? `${sheet.sender.name}’s ` : ''}job
+                    sheet
+                  </span>
+                  <a
+                    href={`/api/job-sheets/${sheet.id}/file`}
+                    className="underline"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {sheet.fileName}
+                  </a>
+                </div>
+              ) : null}
 
               {boardToken && job.passengerName ? (
                 <NameBoardPanel
@@ -709,4 +755,24 @@ function flightSummary(flight: {
     return `· scheduled ${formatDateTime(flight.scheduledArrival)}`;
   }
   return '· nothing known';
+}
+
+/**
+ * Whether the resolved postcode adds anything to the address beside it.
+ *
+ * The chip is here for an address somebody typed without one, where the
+ * postcode came from a lookup. An address that already ends in it — which is
+ * every address read off a job sheet, since that is where the postcode was
+ * lifted from — would otherwise print it twice.
+ */
+function postcodeWorthShowing(
+  address: string | null,
+  postcode: string | null,
+): boolean {
+  if (!postcode) return false;
+  if (!address) return true;
+
+  const flat = (value: string) => value.replace(/\s+/g, '').toUpperCase();
+
+  return !flat(address).includes(flat(postcode));
 }

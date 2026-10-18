@@ -1,4 +1,4 @@
-import { Plus } from 'lucide-react';
+import { FileText, Plus } from 'lucide-react';
 import Link from 'next/link';
 import { EmptyState } from '@/components/empty-state';
 import { JobStatusBadge } from '@/components/job-status-badge';
@@ -168,12 +168,23 @@ export default async function JobsPage({
               <Link href="/jobs/series">Recurring</Link>
             </Button>
             {mayEdit ? (
-              <Button asChild>
-                <Link href="/jobs/new">
-                  <Plus aria-hidden />
-                  New job
-                </Link>
-              </Button>
+              <>
+                {/* An agency's PDF, read into the booking form rather than
+                    retyped. Beside New job because it is the same act — the
+                    sheet fills the form in and somebody still presses Book. */}
+                <Button asChild variant="outline">
+                  <Link href="/jobs/sheet">
+                    <FileText aria-hidden />
+                    From a job sheet
+                  </Link>
+                </Button>
+                <Button asChild>
+                  <Link href="/jobs/new">
+                    <Plus aria-hidden />
+                    New job
+                  </Link>
+                </Button>
+              </>
             ) : null}
           </div>
         }

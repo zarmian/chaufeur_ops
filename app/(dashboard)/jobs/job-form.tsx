@@ -33,7 +33,17 @@ import {
   type Quote,
 } from '@/lib/pricing/quote-client';
 import { RepeatFields } from './repeat-fields';
-import { StopsField, type StopValue } from './stops-field';
+import { StopsField } from './stops-field';
+import { BLANK_JOB_VALUES, type JobFormValues } from '@/lib/job-form-values';
+
+/*
+ * The type is re-exported for the pages that already import it from here; the
+ * blank deliberately is not. A plain object re-exported through a
+ * `'use client'` module reaches a Server Component as a client reference
+ * rather than the object, so a server-side pre-fill must import it from
+ * `@/lib/job-form-values` directly.
+ */
+export type { JobFormValues };
 
 /**
  * The booking form.
@@ -48,86 +58,6 @@ import { StopsField, type StopValue } from './stops-field';
  * back to a spreadsheet. But it takes a deliberate second click, and the
  * warning says exactly what the consequence is.
  */
-
-export interface JobFormValues {
-  clientId: string;
-  accountId: string;
-  jobType: string;
-  scheduledDate: string;
-  scheduledTime: string;
-  pickupText: string;
-  pickupPostcode: string;
-  pickupLat: string;
-  pickupLng: string;
-  dropoffText: string;
-  dropoffPostcode: string;
-  dropoffLat: string;
-  dropoffLng: string;
-  viaText: string;
-  driverId: string;
-  vehicleId: string;
-  passengerName: string;
-  passengerPhone: string;
-  passengerCount: number | string;
-  luggageCount: number | string;
-  flightNumber: string;
-  clientPrice: string;
-  driverPrice: string;
-  /** Empty follows the booker. */
-  vatTreatment: string;
-  customerHours: string;
-  customerRate: string;
-  minimumHours: string;
-  /** One day of a standing contract, charged at a day rate. */
-  customerDays: string;
-  customerDayRate: string;
-  minimumDays: string;
-  driverDays: string;
-  driverDayRate: string;
-  shiftId: string;
-  stops: StopValue[];
-  notes: string;
-  internalNotes: string;
-}
-
-const BLANK: JobFormValues = {
-  clientId: '',
-  accountId: '',
-  jobType: 'TRANSFER',
-  scheduledDate: '',
-  scheduledTime: '',
-  pickupText: '',
-  pickupPostcode: '',
-  pickupLat: '',
-  pickupLng: '',
-  dropoffText: '',
-  dropoffPostcode: '',
-  dropoffLat: '',
-  dropoffLng: '',
-  viaText: '',
-  driverId: '',
-  vehicleId: '',
-  passengerName: '',
-  passengerPhone: '',
-  passengerCount: '',
-  luggageCount: '',
-  flightNumber: '',
-  clientPrice: '',
-  driverPrice: '',
-  vatTreatment: '',
-  customerHours: '',
-  customerRate: '',
-  minimumHours: '',
-  customerDays: '',
-  customerDayRate: '',
-  minimumDays: '',
-  driverDays: '',
-  driverDayRate: '',
-  shiftId: '',
-  stops: [],
-  notes: '',
-  internalNotes: '',
-};
 
 export interface JobFormOption {
   id: string;
@@ -148,7 +78,7 @@ export interface VehicleOption extends JobFormOption {
 
 export function JobForm({
   action,
-  values = BLANK,
+  values = BLANK_JOB_VALUES,
   submitLabel,
   cancelHref,
   clients,
@@ -160,6 +90,7 @@ export function JobForm({
   jobId,
   allowRepeat = false,
   returnOfJobId,
+  sheetId,
   inSeries = false,
   currency = DEFAULT_CURRENCY,
   locale: localeTag = DEFAULT_LOCALE,
@@ -209,6 +140,16 @@ export function JobForm({
   allowRepeat?: boolean;
   /** The outbound leg this booking returns from — spec 6.3.2. */
   returnOfJobId?: string;
+  /**
+   * The agency sheet this booking was read from.
+   *
+   * Carried so that pressing Book attaches the PDF to the job and lets the
+   * reader learn from anything that had to be typed in by hand. Posted as a
+   * hidden field rather than held in the URL, because the form may be
+   * submitted after a validation failure and a lost sheet id means a job with
+   * no paperwork against it.
+   */
+  sheetId?: string;
   /** This job came from a recurring series, so offer the reach — spec 6.3.5. */
   inSeries?: boolean;
 }) {
@@ -536,6 +477,10 @@ export function JobForm({
 
       {/* Spec 6.3.2. Constant for the life of the form, so a plain hidden
           input is safe here — nothing rewrites it after render. */}
+      {sheetId ? (
+        <input type="hidden" name="sheetId" value={sheetId} readOnly />
+      ) : null}
+
       {returnOfJobId ? (
         <input type="hidden" name="returnOfJobId" value={returnOfJobId} readOnly />
       ) : null}
@@ -575,6 +520,19 @@ export function JobForm({
               }))}
               emptyLabel="No account"
               searchLabel="Search accounts"
+            />
+          </FormField>
+
+          <FormField
+            name="customerReference"
+            label="Their reference"
+            hint="The booker's own number for this job. Shown on their invoice."
+            errors={errors.customerReference}
+          >
+            <Input
+              {...fieldProps('customerReference', errors.customerReference)}
+              defaultValue={values.customerReference}
+              placeholder="e.g. 30700"
             />
           </FormField>
 

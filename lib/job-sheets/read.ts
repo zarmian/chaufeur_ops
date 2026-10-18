@@ -4,7 +4,10 @@ import { postcodeOf } from './parse';
 import {
   EMPTY_DRAFT,
   REQUIRED,
+  cellsOf,
   findBy,
+  looksLikeLabel,
+  tidyRun,
   toLines,
   type FieldSource,
   type JobSheetDraft,
@@ -143,4 +146,65 @@ function inferJobType(draft: JobSheetDraft, text: string): string {
   }
 
   return 'TRANSFER';
+}
+
+/**
+ * A guess at who sent the sheet, from its own letterhead.
+ *
+ * Only ever a suggestion in a box an operator checks. It exists because the
+ * alternative is an empty field on a page that is already asking somebody to
+ * do administration before they can book a car, and because the name is also
+ * the fingerprint — so a bad guess left unchecked would claim another agency's
+ * sheets, and recognising the wrong sender bills the wrong company.
+ *
+ * The signal is repetition. An agency's name appears in the letterhead and
+ * again in the footer; a document title like "BOOKING CONFIRMATION" appears
+ * once. Where nothing repeats, the earliest candidate wins, which is the
+ * letterhead.
+ */
+export function guessSenderName(text: string): string {
+  const counts = new Map<string, { name: string; count: number; first: number }>();
+  let position = 0;
+
+  for (const line of toLines(text)) {
+    for (const cell of cellsOf(line)) {
+      // A footer runs the name into a registration — "… Ltd - PCO 010328".
+      for (const piece of cell.text.split(/\s+[-–]\s+/)) {
+        position += 1;
+        const name = tidyCompany(piece);
+        if (!name) continue;
+
+        const key = name.toLowerCase();
+        const seen = counts.get(key);
+        if (seen) seen.count += 1;
+        else counts.set(key, { name, count: 1, first: position });
+      }
+    }
+  }
+
+  const best = [...counts.values()].sort(
+    (left, right) => right.count - left.count || left.first - right.first,
+  )[0];
+
+  return best?.name ?? '';
+}
+
+/** A cell that could be a company's name, with its corporate suffix removed. */
+function tidyCompany(raw: string): string | null {
+  const value = tidyRun(raw).replace(
+    /[,.]?\s+(?:Ltd|Limited|LLP|PLC|Inc|LLC)\.?$/i,
+    '',
+  );
+
+  if (value.length < 6 || value.length > 50) return null;
+  if (looksLikeLabel(value)) return null;
+  // A name carries no digits, no address punctuation and no email.
+  if (/[\d@:#/]/.test(value)) return null;
+
+  const words = value.split(/\s+/);
+  if (words.length < 2 || words.length > 5) return null;
+
+  // Each word capitalised, or the whole thing set in capitals as a letterhead
+  // usually is.
+  return words.every((word) => /^[A-Z&][A-Za-z&']*$/.test(word)) ? value : null;
 }

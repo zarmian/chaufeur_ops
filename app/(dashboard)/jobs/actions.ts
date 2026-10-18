@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 import { isRedirectError, toFormState, type FormState } from '@/lib/form-state';
 import { financeSchema, toFinanceData } from '@/lib/job-finance';
 import { createJob, jobSchema, updateJob } from '@/lib/jobs';
+import { sheetBooked } from '@/lib/job-sheets/store';
 import { withAudit } from '@/lib/audit';
 import { getLocaleConfig } from '@/lib/locale-store';
 import { actingUser } from '@/lib/request-context';
@@ -68,6 +69,7 @@ function readJobForm(formData: FormData) {
     passengerCount: formData.get('passengerCount') ?? '',
     luggageCount: formData.get('luggageCount') ?? '',
     flightNumber: formData.get('flightNumber') ?? '',
+    customerReference: formData.get('customerReference') ?? '',
     // The form asks for pounds; the schema converts to pence.
     clientPricePence: formData.get('clientPrice') ?? '',
     driverPricePence: formData.get('driverPrice') ?? '',
@@ -144,6 +146,36 @@ export async function createJobAction(
           await linkReturn(outbound, id, audit);
         } catch (linkError) {
           console.error('Could not link the return journey', linkError);
+        }
+      }
+
+      /*
+       * The agency sheet this was read from, if any. Same rule as the return
+       * link above and for the same reason: a job whose sheet is not attached
+       * is a missing document on a page, where a failure here that took the
+       * booking with it is a lost fare.
+       *
+       * This is also where the reader learns. Anything the operator had to
+       * type in by hand is a label the sheet's sender uses and this install
+       * did not know — see `lib/job-sheets/learn.ts`.
+       */
+      const sheetId = String(formData.get('sheetId') ?? '').trim();
+      if (sheetId) {
+        try {
+          await sheetBooked(sheetId, id, {
+            scheduledDate: input.scheduledDate,
+            scheduledTime: input.scheduledTime,
+            pickupText: input.pickupText,
+            dropoffText: input.dropoffText,
+            passengerName: input.passengerName,
+            passengerPhone: input.passengerPhone,
+            passengerCount: asText(input.passengerCount),
+            luggageCount: asText(input.luggageCount),
+            flightNumber: input.flightNumber,
+            customerReference: input.customerReference,
+          });
+        } catch (sheetError) {
+          console.error('Could not attach the job sheet', sheetError);
         }
       }
 
@@ -308,4 +340,14 @@ export async function deleteJobAction(
   }
   revalidatePath('/jobs');
   redirect('/jobs');
+}
+
+/**
+ * A number back as the string the form held.
+ *
+ * `lessonFrom` compares like with like — both sides the form's own values —
+ * and the schema has already turned a count into a number by this point.
+ */
+function asText(value: number | null | undefined): string {
+  return value === null || value === undefined ? '' : String(value);
 }

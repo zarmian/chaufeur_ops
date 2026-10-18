@@ -63,9 +63,23 @@ export function jobLineText(job: {
   viaText?: string | null;
   passengerName?: string | null;
   flightNumber?: string | null;
+  customerReference?: string | null;
 }): string[] {
   return [
-    `${jobTypeLabel(job.jobType)} · ${job.reference}`,
+    /*
+     * The booker's own reference goes in the title, beside ours.
+     *
+     * Ours identifies the job in this system and means nothing to them;
+     * theirs is the number their accounts department matches the line
+     * against. An invoice a customer cannot reconcile is one that gets
+     * queried rather than paid, and for an agency sending thirty jobs a
+     * month that is thirty queries.
+     */
+    [
+      jobTypeLabel(job.jobType),
+      job.reference,
+      ...(job.customerReference ? [`your ref ${job.customerReference}`] : []),
+    ].join(' · '),
     formatDateTime(job.scheduledAt),
     `Pick up: ${job.pickupText}`,
     ...(job.viaText ? [`Via: ${job.viaText}`] : []),
@@ -96,8 +110,9 @@ export interface JobLineInput {
     pickupText: string;
     dropoffText: string;
     viaText?: string | null;
-    passengerName?: string | null;
+      passengerName?: string | null;
     flightNumber?: string | null;
+    customerReference?: string | null;
     vatTreatment?: VatTreatment | null;
     account?: { vatTreatment?: VatTreatment | null } | null;
     client?: { vatTreatment?: VatTreatment | null } | null;

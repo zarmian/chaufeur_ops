@@ -63,7 +63,19 @@ export async function pdfToText(bytes: Uint8Array): Promise<string> {
   let document;
   try {
     document = await pdfjs.getDocument({
-      data: bytes,
+      /*
+       * A copy, because `getDocument` takes ownership of what it is given:
+       * the buffer is transferred and comes back detached, with a byteLength
+       * of zero.
+       *
+       * The caller still needs these bytes — they are the file that gets
+       * stored against the job — and the first version of this handed the
+       * same array to storage afterwards. It uploaded an empty object: the
+       * sheet was read correctly, the job was right, and the PDF behind it
+       * was nothing. Found by the integration test asserting the uploaded
+       * size, which is the only reason it is not in production.
+       */
+      data: new Uint8Array(bytes),
       // A job sheet needs none of these, and each is a way for a document to
       // reach outside itself or to run.
       isEvalSupported: false,
