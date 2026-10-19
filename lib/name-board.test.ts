@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   canHaveNameBoard,
   escapeHtml,
+  nameBoardLive,
   nameBoardDocument,
   nameBoardPath,
   nameScale,
@@ -50,6 +51,46 @@ describe('who gets a board', () => {
     expect(canHaveNameBoard({ passengerName: '   ' })).toBe(false);
     // Whitespace that is not a space, which a paste can easily leave behind.
     expect(canHaveNameBoard({ passengerName: '\t\n' })).toBe(false);
+  });
+});
+
+describe('whether the board is live', () => {
+  const STATUSES = [
+    'DRAFT',
+    'PENDING',
+    'ASSIGNED',
+    'ACCEPTED',
+    'IN_PROGRESS',
+    'COMPLETED',
+    'NO_SHOW',
+  ];
+
+  it('is live on every status except cancelled', () => {
+    /*
+     * A draft included, deliberately. A provisional booking still has somebody
+     * to meet, and an office that cannot print the board until the job is
+     * confirmed ends up printing it in a hurry at six in the morning.
+     */
+    for (const status of STATUSES) {
+      expect(
+        nameBoardLive({ passengerName: 'Mr Ali', status }),
+        `a board should be live on a ${status} job`,
+      ).toBe(true);
+    }
+  });
+
+  it('stops the moment the job is called off', () => {
+    // Not about the job: about the driver. A live board for a journey that is
+    // not happening is somebody stood in a lobby holding up a name for nobody.
+    expect(nameBoardLive({ passengerName: 'Mr Ali', status: 'CANCELLED' })).toBe(
+      false,
+    );
+  });
+
+  it('is never live without a name, whatever the status', () => {
+    for (const status of [...STATUSES, 'CANCELLED']) {
+      expect(nameBoardLive({ passengerName: null, status })).toBe(false);
+    }
   });
 });
 

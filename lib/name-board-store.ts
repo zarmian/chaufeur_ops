@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { endOfZonedDay, startOfZonedDay } from './dates';
 import { getLocaleConfig } from './locale-store';
-import { canHaveNameBoard, normaliseName } from './name-board';
+import { canHaveNameBoard, nameBoardLive, normaliseName } from './name-board';
 import { prisma } from './prisma';
 
 /**
@@ -97,15 +97,55 @@ export async function resolveNameBoard(token: string): Promise<NameBoard | null>
     },
   });
 
-  if (!job || !canHaveNameBoard(job)) return null;
-  // A board for a job that is not happening is a driver stood in a lobby for
-  // nobody. The link stops working the moment it is called off.
-  if (job.status === 'CANCELLED') return null;
+  // Every status resolves, including a draft — a provisional booking still
+  // has somebody to meet. Cancelled does not: a board for a job that is not
+  // happening is a driver stood in a lobby for nobody.
+  if (!job || !nameBoardLive(job)) return null;
 
   return {
     jobId: job.id,
     reference: job.reference,
     name: normaliseName(job.passengerName),
+  };
+}
+
+/**
+ * One job's board, or why there is not one.
+ *
+ * `resolveNameBoard` answers an unauthenticated request and so deliberately
+ * says nothing about why it found nothing. This answers the office, which is
+ * signed in and is entitled to the reason — and needs it, because the two
+ * reasons call for opposite actions: a missing name is something to go and
+ * add, and a cancelled job is something to leave alone.
+ */
+export type NameBoardLookup =
+  | { state: 'ok'; board: NameBoard }
+  | { state: 'no-name' }
+  | { state: 'cancelled' }
+  | { state: 'no-job' };
+
+export async function nameBoardForJob(jobId: string): Promise<NameBoardLookup> {
+  const job = await prisma.job.findUnique({
+    where: { id: jobId },
+    select: { id: true, reference: true, passengerName: true, status: true },
+  });
+
+  if (!job) return { state: 'no-job' };
+  if (!canHaveNameBoard(job)) return { state: 'no-name' };
+  if (!nameBoardLive(job)) return { state: 'cancelled' };
+
+  // Minted here rather than before the checks, so a job that cannot have a
+  // live board never acquires a token it would not use.
+  const token = await issueNameBoardToken(job.id);
+  if (!token) return { state: 'no-name' };
+
+  return {
+    state: 'ok',
+    board: {
+      jobId: job.id,
+      reference: job.reference,
+      name: normaliseName(job.passengerName),
+    },
   };
 }
 

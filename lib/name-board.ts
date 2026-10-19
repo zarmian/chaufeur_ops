@@ -50,6 +50,26 @@ export function canHaveNameBoard(job: BoardJob): boolean {
   return normaliseName(job.passengerName) !== '';
 }
 
+/**
+ * Whether that board works *now*.
+ *
+ * Every status can have one, including a draft: a provisional booking still
+ * has somebody to meet, and an office that cannot print the board until the
+ * job is confirmed prints it in a hurry at six in the morning instead.
+ *
+ * Cancelled is the one exception, and it is about the driver rather than the
+ * job: a live board for a journey that is not happening is somebody stood in
+ * a lobby holding up a name for nobody.
+ *
+ * Separate from `canHaveNameBoard` because they answer different questions at
+ * different times. One asks whether this job is the kind of thing that has a
+ * board, which never changes; the other asks whether the link in a driver's
+ * hand still resolves, which changes the moment somebody calls the job off.
+ */
+export function nameBoardLive(job: BoardJob & { status: string }): boolean {
+  return canHaveNameBoard(job) && job.status !== 'CANCELLED';
+}
+
 /** Collapsed whitespace, trimmed. What is actually shown. */
 export function normaliseName(name: string | null | undefined): string {
   return (name ?? '').replace(/\s+/g, ' ').trim();

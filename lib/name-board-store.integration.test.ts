@@ -2,6 +2,7 @@ import { rawPrismaClient } from './raw-prisma';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   issueNameBoardToken,
+  nameBoardForJob,
   nameBoardsForDay,
   reissueNameBoardToken,
   resolveNameBoard,
@@ -146,6 +147,83 @@ describe.skipIf(!DATABASE_AVAILABLE)('name board links', () => {
 
     await raw!.job.update({ where: { id: jobId }, data: { status: 'CANCELLED' } });
     expect(await resolveNameBoard(token!)).toBeNull();
+  });
+
+  it('works on a draft, like every other status', async () => {
+    /*
+     * A draft is a provisional booking and still has somebody to meet. An
+     * office that cannot print the board until the job is confirmed prints it
+     * in a hurry at six in the morning instead, which is the thing this
+     * feature exists to stop.
+     */
+    for (const status of ['DRAFT', 'PENDING', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED']) {
+      const jobId = await makeJob({ status, passengerName: `Pat ${status}` });
+      const token = await issueNameBoardToken(jobId);
+
+      expect(token, `a ${status} job should get a link`).not.toBeNull();
+      expect(
+        (await resolveNameBoard(token!))?.name,
+        `a ${status} job's link should resolve`,
+      ).toBe(`Pat ${status}`);
+    }
+  });
+
+  it('prints a draft in the day’s stack too', async () => {
+    const jobId = await makeJob({
+      status: 'DRAFT',
+      passengerName: `Draft Stack ${stamp}`,
+      hour: 7,
+    });
+
+    const boards = await nameBoardsForDay(DAY);
+    expect(boards.map((board) => board.jobId)).toContain(jobId);
+  });
+
+  describe('why the office cannot print one', () => {
+    /*
+     * The unauthenticated board deliberately says nothing about why it found
+     * nothing. The office is entitled to the reason, and needs it, because the
+     * two reasons call for opposite actions: a missing name is something to go
+     * and add, and a cancelled job is something to leave alone.
+     *
+     * This replaced a single message reading "a name board needs an airport
+     * transfer with a passenger name on it" — left behind when the board was
+     * widened to every job type, and worse than out of date: it told an
+     * operator to relabel the job, which changes how it prices and triples the
+     * free waiting allowance.
+     */
+    it('says a draft is fine', async () => {
+      const jobId = await makeJob({ status: 'DRAFT', jobType: 'AS_DIRECTED' });
+      const found = await nameBoardForJob(jobId);
+
+      expect(found.state).toBe('ok');
+    });
+
+    it('says when the job has nobody named on it', async () => {
+      const jobId = await makeJob({ passengerName: null });
+
+      expect((await nameBoardForJob(jobId)).state).toBe('no-name');
+    });
+
+    it('says when the job was called off', async () => {
+      const jobId = await makeJob({ status: 'CANCELLED' });
+
+      expect((await nameBoardForJob(jobId)).state).toBe('cancelled');
+    });
+
+    it('does not mint a token for a job that cannot have a live board', async () => {
+      // A cancelled job acquiring a token it will never use is harmless and
+      // untidy; it also makes the column a poor signal of what was issued.
+      const jobId = await makeJob({ status: 'CANCELLED' });
+      await nameBoardForJob(jobId);
+
+      const job = await raw!.job.findUnique({ where: { id: jobId } });
+      expect(job?.nameBoardToken).toBeNull();
+    });
+
+    it('says when there is no such job', async () => {
+      expect((await nameBoardForJob('does-not-exist')).state).toBe('no-job');
+    });
   });
 
   it('takes an old link out of circulation when reissued', async () => {

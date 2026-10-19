@@ -19,6 +19,7 @@ import { checkAssignmentCompliance, getJob } from '@/lib/jobs';
 import { formatDate, formatDateTime } from '@/lib/dates';
 import { buildTimeline, ACTOR_LABELS } from '@/lib/job-events';
 import { allowedTransitions, hasPriceOrReason } from '@/lib/job-status';
+import { nameBoardLive } from '@/lib/name-board';
 import { issueNameBoardToken } from '@/lib/name-board-store';
 import { issueTrackingToken } from '@/lib/tracking-store';
 import { JOB_TYPES } from '@/lib/enum-options';
@@ -411,6 +412,7 @@ export default async function JobDetailPage({
                   token={boardToken}
                   jobId={job.id}
                   passengerName={job.passengerName}
+                  live={nameBoardLive(job)}
                 />
               ) : null}
 

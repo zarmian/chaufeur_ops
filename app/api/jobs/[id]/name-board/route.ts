@@ -1,7 +1,7 @@
 import { withErrorHandling } from '@/lib/api';
 import { requireCapability } from '@/lib/authz';
 import { nameBoardDocument } from '@/lib/name-board';
-import { resolveNameBoard, issueNameBoardToken } from '@/lib/name-board-store';
+import { nameBoardForJob } from '@/lib/name-board-store';
 import { tryRenderPdf } from '@/lib/pdf';
 
 /**
@@ -22,23 +22,40 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
+/** Said to the office, which can act on each of them differently. */
+const REFUSALS = {
+  'no-name': 'A name board is the passenger\u2019s name, so this job needs one before it can have a board.',
+  cancelled: 'This job has been cancelled, so its board has stopped working.',
+  'no-job': 'No such job.',
+} as const;
+
 export const GET = withErrorHandling(
   async (_request: Request, context: { params: Promise<{ id: string }> }) => {
     await requireCapability('viewJobs');
     const { id } = await context.params;
 
-    // Through the token rather than reading the job directly, so printing a
-    // board and opening one go down the same path — including the checks
-    // that it is an airport transfer with a passenger on it.
-    const token = await issueNameBoardToken(id);
-    const board = token ? await resolveNameBoard(token) : null;
+    /*
+     * The same checks the screen board goes through, so the printed sheet and
+     * the driver's phone cannot disagree about whether there is a board.
+     *
+     * The reason comes back with the answer, because this caller is the
+     * office and the two reasons call for opposite actions. The message used
+     * to say a board "needs an airport transfer with a passenger name on it",
+     * which was left behind when the board was widened to every job type —
+     * and was worse than merely out of date: it told an operator to relabel
+     * the job, which changes how it prices and triples the free waiting
+     * allowance.
+     */
+    const found = await nameBoardForJob(id);
 
-    if (!board) {
-      return new Response(
-        'A name board needs an airport transfer with a passenger name on it.',
-        { status: 404, headers: { 'Content-Type': 'text/plain; charset=utf-8' } },
-      );
+    if (found.state !== 'ok') {
+      return new Response(REFUSALS[found.state], {
+        status: 404,
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+      });
     }
+
+    const { board } = found;
 
     /*
      * No footer, which is what keeps the margins at zero.
