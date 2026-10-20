@@ -2,11 +2,11 @@ import { headers } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { apiError } from '@/lib/api';
 import { requireCapability } from '@/lib/authz';
+import { disbursementFrom, treatmentFrom } from '@/lib/invoice-lines';
 import { editLines, type LineEdit } from '@/lib/invoice-store';
-import { parseMoney, tryParseMoney } from '@/lib/money';
+import { parseMoney } from '@/lib/money';
 import { ForbiddenError, UnauthenticatedError } from '@/lib/permissions';
 import { clientIpFrom } from '@/lib/rate-limit';
-import { VAT_TREATMENTS, type VatTreatment } from '@/lib/vat';
 
 /**
  * `POST /api/invoices/:id/lines` — edit a draft's lines, spec 4.3.7.
@@ -65,32 +65,6 @@ export async function POST(
   });
 }
 
-/** The treatments the form may send. Anything else falls back to the default. */
-function treatmentField(value: FormDataEntryValue | null): VatTreatment {
-  const text = String(value ?? '');
-  return VAT_TREATMENTS.some((option) => option.value === text)
-    ? (text as VatTreatment)
-    : 'STANDARD';
-}
-
-/**
- * The pass-through part, which is blank far more often than it is set.
- *
- * A blank means "none", not "unparseable" — and a value larger than the line
- * is refused by clamping rather than by an error, because a negative taxable
- * fare would compute tax backwards.
- */
-function disbursementField(
-  value: FormDataEntryValue | null,
-  amountPence: number,
-): number {
-  const text = String(value ?? '').trim();
-  if (text === '') return 0;
-  const parsed = tryParseMoney(text) ?? 0;
-  if (amountPence < 0) return Math.max(parsed, amountPence);
-  return Math.min(Math.max(0, parsed), amountPence);
-}
-
 function parseEdit(form: FormData): LineEdit | null {
   const intent = String(form.get('intent') ?? '');
   const lineId = String(form.get('lineId') ?? '');
@@ -104,11 +78,8 @@ function parseEdit(form: FormData): LineEdit | null {
         kind: 'add',
         description,
         amountPence,
-        disbursementPence: disbursementField(
-          form.get('disbursement'),
-          amountPence,
-        ),
-        vatTreatment: treatmentField(form.get('vatTreatment')),
+        disbursementPence: disbursementFrom(String(form.get('disbursement') ?? ''), amountPence),
+        vatTreatment: treatmentFrom(String(form.get('vatTreatment') ?? '')),
       };
     }
     case 'update': {
@@ -119,11 +90,8 @@ function parseEdit(form: FormData): LineEdit | null {
         lineId,
         description,
         amountPence,
-        disbursementPence: disbursementField(
-          form.get('disbursement'),
-          amountPence,
-        ),
-        vatTreatment: treatmentField(form.get('vatTreatment')),
+        disbursementPence: disbursementFrom(String(form.get('disbursement') ?? ''), amountPence),
+        vatTreatment: treatmentFrom(String(form.get('vatTreatment') ?? '')),
       };
     }
     case 'remove':

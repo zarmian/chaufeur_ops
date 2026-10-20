@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   buildJobLine,
   buildRentalLine,
+  disbursementFrom,
   jobLineText,
   splitLineText,
+  treatmentFrom,
 } from './invoice-lines';
 
 /**
@@ -252,5 +254,50 @@ describe('buildRentalLine', () => {
       amountPence: 20_000,
     });
     expect(line.disbursementPence).toBe(0);
+  });
+});
+
+describe('reading a line off a form', () => {
+  /*
+   * Shared by the draft's line editor and the invoice raised without a job.
+   * They have to agree: a line that taxes differently depending on which form
+   * created it is a document disagreeing with itself.
+   */
+  it('takes a treatment the form is allowed to send', () => {
+    expect(treatmentFrom('INCLUSIVE')).toBe('INCLUSIVE');
+    expect(treatmentFrom('EXEMPT')).toBe('EXEMPT');
+  });
+
+  it('falls back to the default for anything else', () => {
+    // A hand-posted form, or a select rendered before a treatment was retired.
+    expect(treatmentFrom('')).toBe('STANDARD');
+    expect(treatmentFrom('ZERO_RATED_PROBABLY')).toBe('STANDARD');
+  });
+
+  it('treats a blank disbursement as none', () => {
+    // Blank is the common case by far, and it means "none" rather than
+    // "unreadable".
+    expect(disbursementFrom('', 5000)).toBe(0);
+    expect(disbursementFrom('   ', 5000)).toBe(0);
+  });
+
+  it('reads a disbursement inside the line', () => {
+    expect(disbursementFrom('12.50', 5000)).toBe(1250);
+  });
+
+  it('clamps one larger than the line rather than refusing it', () => {
+    // A taxable part below zero would compute tax backwards, which is worse
+    // than quietly capping a figure somebody mistyped and can see on screen.
+    expect(disbursementFrom('80.00', 5000)).toBe(5000);
+    expect(disbursementFrom('-5.00', 5000)).toBe(0);
+  });
+
+  it('handles a credit line, where the signs are the other way round', () => {
+    expect(disbursementFrom('-12.50', -5000)).toBe(-1250);
+    expect(disbursementFrom('-80.00', -5000)).toBe(-5000);
+  });
+
+  it('treats an unreadable figure as none rather than throwing', () => {
+    expect(disbursementFrom('forty quid', 5000)).toBe(0);
   });
 });

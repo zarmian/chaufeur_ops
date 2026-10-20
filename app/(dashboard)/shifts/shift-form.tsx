@@ -25,11 +25,21 @@ export function ShiftForm({
   drivers,
   vehicles,
   cancelHref,
+  worked = false,
 }: {
   action: (state: FormState, formData: FormData) => Promise<FormState>;
   drivers: Array<{ id: string; label: string }>;
   vehicles: Array<{ id: string; label: string }>;
   cancelHref: string;
+  /**
+   * Whether this is work already done rather than a driver clocking on.
+   *
+   * The same fields either way plus an end time, so one form rather than two
+   * that drift: the rate box, the break and the engagement fallback all have
+   * to behave identically, and they are the parts that decide what somebody
+   * is paid.
+   */
+  worked?: boolean;
 }) {
   const [state, formAction] = useActionState(action, INITIAL_FORM_STATE);
   const errors = state.fields ?? {};
@@ -77,6 +87,21 @@ export function ShiftForm({
           />
         </FormField>
 
+        {worked ? (
+          <FormField
+            name="endedAt"
+            label="Clocked off"
+            required
+            errors={errors.endedAt}
+          >
+            <Input
+              {...fieldProps('endedAt', errors.endedAt)}
+              type="datetime-local"
+              required
+            />
+          </FormField>
+        ) : null}
+
         <FormField
           name="breakMinutes"
           label="Unpaid break (minutes)"
@@ -110,7 +135,7 @@ export function ShiftForm({
       </FormField>
 
       <div className="flex items-center gap-3 border-t pt-6">
-        <StartShiftButton />
+        {worked ? <RecordShiftButton /> : <StartShiftButton />}
         <Button asChild variant="ghost">
           <Link href={cancelHref}>Cancel</Link>
         </Button>
@@ -121,6 +146,10 @@ export function ShiftForm({
 
 function StartShiftButton() {
   return <SubmitButton label="Start the shift" pendingLabel="Starting…" />;
+}
+
+function RecordShiftButton() {
+  return <SubmitButton label="Record the shift" pendingLabel="Recording…" />;
 }
 
 /**

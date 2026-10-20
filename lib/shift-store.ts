@@ -1,16 +1,20 @@
 import { z } from 'zod';
 import { withAudit, type AuditContext } from './audit';
 import { engagementAt, type EngagementPeriod } from './engagement';
+import { toUTC } from './dates';
+import { getLocaleConfig } from './locale-store';
 import { prisma } from './prisma';
 import { formatReference } from './references';
 import {
+  SHIFT_REFERENCE_PAD,
+  SHIFT_REFERENCE_PREFIX,
   canCloseShift,
   canOpenShift,
+  canRecordShift,
   paidMinutes,
   shiftPayPence,
   shiftProfit,
-  SHIFT_REFERENCE_PAD,
-  SHIFT_REFERENCE_PREFIX,
+  shiftsOverlap,
   type ShiftRefusal,
 } from './shifts';
 import { financeAmountsFrom, jobEconomics } from './job-finance';
@@ -21,6 +25,9 @@ import { emptyToNull } from './text';
  * the part that touches Postgres and writes the audit trail.
  */
 
+/** What an `<input type="datetime-local">` sends. Matched before `toUTC`. */
+const LOCAL_DATETIME_PATTERN = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?$/;
+
 export const openShiftSchema = z.object({
   driverId: z.string().trim().min(1, 'Choose a driver'),
   vehicleId: z
@@ -28,11 +35,25 @@ export const openShiftSchema = z.object({
     .trim()
     .optional()
     .transform((value) => (value === undefined || value === '' ? null : value)),
+  /*
+   * Kept as the wall-clock string the browser sent, not turned into a Date
+   * here.
+   *
+   * `new Date('2026-10-13T08:00')` reads a datetime-local value in the
+   * *server's* timezone, which on a deployment is UTC — so an operator typing
+   * eight o'clock in British Summer Time had nine o'clock stored, and the
+   * shift then read back an hour out. Harmless-looking, and not: these times
+   * are a timesheet, and a shift spanning the night the clocks change would
+   * have paid the wrong number of hours.
+   *
+   * The conversion needs the configured timezone, which is a database read,
+   * so it happens in the store rather than in a synchronous schema.
+   */
   startedAt: z
     .string()
     .trim()
     .min(1, 'Enter when the shift started')
-    .transform((value) => new Date(value)),
+    .regex(LOCAL_DATETIME_PATTERN, 'That start time was not understood'),
   breakMinutes: z.coerce.number().int().min(0).max(24 * 60).default(0),
   /** Blank falls back to the driver's engagement rate. */
   hourlyRatePence: z
@@ -45,6 +66,24 @@ export const openShiftSchema = z.object({
 });
 
 export type OpenShiftInput = z.infer<typeof openShiftSchema>;
+
+/**
+ * A shift that has already been worked, entered after the fact.
+ *
+ * The same fields as opening one, plus the end — which is what makes it a
+ * record of work rather than a clock-on. Somebody forgets to start a shift,
+ * or a driver is told to cover at short notice and nobody is at a desk, and
+ * before this there was no way to enter the day at all.
+ */
+export const recordShiftSchema = openShiftSchema.extend({
+  endedAt: z
+    .string()
+    .trim()
+    .min(1, 'Enter when the shift ended')
+    .regex(LOCAL_DATETIME_PATTERN, 'That end time was not understood'),
+});
+
+export type RecordShiftInput = z.infer<typeof recordShiftSchema>;
 
 async function nextShiftReference(): Promise<string> {
   const rows = await prisma.$queryRaw<Array<{ max: number | null }>>`
@@ -89,6 +128,9 @@ export async function openShift(
   input: OpenShiftInput,
   context: AuditContext,
 ): Promise<{ ok: true; id: string; reference: string } | (ShiftRefusal & { ok: false })> {
+  const { timeZone } = await getLocaleConfig();
+  const startedAt = toUTC(input.startedAt, timeZone);
+
   const existing = await prisma.driverShift.findFirst({
     where: { driverId: input.driverId, endedAt: null },
     select: { reference: true, startedAt: true },
@@ -100,7 +142,7 @@ export async function openShift(
   let rate = input.hourlyRatePence;
   if (rate === null) {
     const periods = await engagementPeriodsFor(input.driverId);
-    rate = engagementAt(periods, input.startedAt)?.hourlyRatePence ?? null;
+    rate = engagementAt(periods, startedAt)?.hourlyRatePence ?? null;
   }
 
   if (rate === null) {
@@ -123,7 +165,100 @@ export async function openShift(
           reference,
           driverId: input.driverId,
           vehicleId: input.vehicleId,
-          startedAt: input.startedAt,
+          startedAt,
+          breakMinutes: input.breakMinutes,
+          hourlyRatePence,
+          notes: emptyToNull(input.notes),
+        },
+      });
+      return {
+        entityId: created.driverId,
+        after: created,
+        result: { ok: true as const, id: created.id, reference: created.reference },
+      };
+    },
+    context,
+  );
+}
+
+/**
+ * Enter a shift that has already been worked.
+ *
+ * Deliberately not `openShift` with an end date on it. Opening a shift asks
+ * "may this driver clock on", whose answer is the one-open-shift rule; this
+ * asks "did this happen, and has it been entered already", which is a
+ * different question with a different answer. A driver on shift this
+ * afternoon may perfectly well have worked last Tuesday, and refusing that
+ * would make the feature useless for the drivers who work most.
+ *
+ * The rate is resolved at the *start* of the recorded shift, not today, so
+ * entering March's work next week pays March's rate.
+ */
+export async function recordShift(
+  input: RecordShiftInput,
+  context: AuditContext,
+): Promise<{ ok: true; id: string; reference: string } | (ShiftRefusal & { ok: false })> {
+  const { timeZone } = await getLocaleConfig();
+  const startedAt = toUTC(input.startedAt, timeZone);
+  const endedAt = toUTC(input.endedAt, timeZone);
+
+  /*
+   * Every shift this driver has that could collide.
+   *
+   * Narrowed in SQL to the ones that could possibly overlap and then decided
+   * in `shiftsOverlap`, so the rule lives in one testable place: an open
+   * shift has no end for SQL to compare against, and treating "no end" as
+   * "forever" is the conservative reading the pure function already holds.
+   */
+  const candidates = await prisma.driverShift.findMany({
+    where: {
+      driverId: input.driverId,
+      OR: [{ endedAt: null }, { endedAt: { gt: startedAt } }],
+      startedAt: { lt: endedAt },
+    },
+    select: { reference: true, startedAt: true, endedAt: true },
+    orderBy: { startedAt: 'asc' },
+  });
+
+  const clash =
+    candidates.find((candidate) =>
+      shiftsOverlap(candidate, { startedAt, endedAt }),
+    ) ?? null;
+
+  const allowed = canRecordShift(
+    { startedAt, endedAt, breakMinutes: input.breakMinutes },
+    { now: new Date(), clash },
+  );
+  if (!allowed.ok) return allowed;
+
+  let rate = input.hourlyRatePence;
+  if (rate === null) {
+    const periods = await engagementPeriodsFor(input.driverId);
+    rate = engagementAt(periods, startedAt)?.hourlyRatePence ?? null;
+  }
+
+  if (rate === null) {
+    return {
+      ok: false,
+      message:
+        'No hourly rate for this driver at that date. Add a hired engagement, or enter a rate for this shift.',
+    };
+  }
+
+  const reference = await nextShiftReference();
+  const hourlyRatePence = rate;
+
+  return withAudit(
+    'Driver',
+    'update',
+    async (tx) => {
+      const created = await tx.driverShift.create({
+        data: {
+          reference,
+          driverId: input.driverId,
+          vehicleId: input.vehicleId,
+          startedAt,
+          endedAt,
           breakMinutes: input.breakMinutes,
           hourlyRatePence,
           notes: emptyToNull(input.notes),
@@ -141,10 +276,20 @@ export async function openShift(
 
 export async function closeShift(
   shiftId: string,
-  endedAt: Date,
+  /** The wall-clock string the form sent — converted here, see `openShift`. */
+  endedAtLocal: string,
   breakMinutes: number,
   context: AuditContext,
 ): Promise<ShiftRefusal> {
+  const { timeZone } = await getLocaleConfig();
+
+  let endedAt: Date;
+  try {
+    endedAt = toUTC(endedAtLocal, timeZone);
+  } catch {
+    return { ok: false, message: 'That end time was not understood' };
+  }
+
   const shift = await prisma.driverShift.findUnique({
     where: { id: shiftId },
     select: { id: true, driverId: true, startedAt: true, endedAt: true },

@@ -41,7 +41,7 @@ export async function POST(
       } else {
         const result = await closeShift(
           id,
-          new Date(endedAtRaw),
+          endedAtRaw,
           Number(form.get('breakMinutes') ?? 0),
           audit,
         );

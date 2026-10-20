@@ -1,4 +1,4 @@
-import { Plus } from 'lucide-react';
+import { ClipboardCheck, Plus } from 'lucide-react';
 import Link from 'next/link';
 import { EmptyState } from '@/components/empty-state';
 import { ListToolbar } from '@/components/list-toolbar';
@@ -53,12 +53,22 @@ export default async function ShiftsPage({
         description="Hired drivers are paid for time, not per job. A shift may cover several jobs, or none."
         actions={
           mayEdit ? (
-            <Button asChild>
-              <Link href="/shifts/new">
-                <Plus aria-hidden />
-                Start a shift
-              </Link>
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              {/* Hours already worked — somebody forgot to clock on, or a
+                  driver covered at short notice with nobody at a desk. */}
+              <Button asChild variant="outline">
+                <Link href="/shifts/record">
+                  <ClipboardCheck aria-hidden />
+                  Record a past shift
+                </Link>
+              </Button>
+              <Button asChild>
+                <Link href="/shifts/new">
+                  <Plus aria-hidden />
+                  Start a shift
+                </Link>
+              </Button>
+            </div>
           ) : null
         }
       />
@@ -79,15 +89,23 @@ export default async function ShiftsPage({
       {rows.length === 0 ? (
         <EmptyState
           title={filters.openOnly ? 'No open shifts' : 'No shifts yet'}
-          description="Start a shift when a hired driver clocks on. Owner-drivers are paid per job and need none."
+          description="Start a shift when a hired driver clocks on, or record one that has already been worked. Owner-drivers are paid per job and need none."
           action={
             mayEdit ? (
-              <Button asChild>
-                <Link href="/shifts/new">
-                  <Plus aria-hidden />
-                  Start a shift
-                </Link>
-              </Button>
+              <div className="flex flex-wrap justify-center gap-2">
+                <Button asChild variant="outline">
+                  <Link href="/shifts/record">
+                    <ClipboardCheck aria-hidden />
+                    Record a past shift
+                  </Link>
+                </Button>
+                <Button asChild>
+                  <Link href="/shifts/new">
+                    <Plus aria-hidden />
+                    Start a shift
+                  </Link>
+                </Button>
+              </div>
             ) : null
           }
         />

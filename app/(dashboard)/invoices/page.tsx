@@ -1,4 +1,4 @@
-import { Download, Plus } from 'lucide-react';
+import { Download, Plus, Receipt } from 'lucide-react';
 import Link from 'next/link';
 import { EmptyState } from '@/components/empty-state';
 import { ListToolbar } from '@/components/list-toolbar';
@@ -99,12 +99,22 @@ export default async function InvoicesPage({
               </Link>
             </Button>
             {can(user, 'editInvoices') ? (
-              <Button asChild>
-                <Link href="/invoices/new">
-                  <Plus aria-hidden />
-                  New invoice
-                </Link>
-              </Button>
+              <>
+                {/* Work that never went through dispatch — a management fee,
+                    a cancellation charge, a commission. */}
+                <Button asChild variant="outline">
+                  <Link href="/invoices/ad-hoc">
+                    <Receipt aria-hidden />
+                    Without a job
+                  </Link>
+                </Button>
+                <Button asChild>
+                  <Link href="/invoices/new">
+                    <Plus aria-hidden />
+                    New invoice
+                  </Link>
+                </Button>
+              </>
             ) : null}
           </div>
         }
@@ -150,12 +160,20 @@ export default async function InvoicesPage({
                 <Link href="/invoices">Clear filters</Link>
               </Button>
             ) : can(user, 'editInvoices') ? (
-              <Button asChild>
-                <Link href="/invoices/new">
-                  <Plus aria-hidden />
-                  New invoice
-                </Link>
-              </Button>
+              <div className="flex flex-wrap justify-center gap-2">
+                <Button asChild variant="outline">
+                  <Link href="/invoices/ad-hoc">
+                    <Receipt aria-hidden />
+                    Without a job
+                  </Link>
+                </Button>
+                <Button asChild>
+                  <Link href="/invoices/new">
+                    <Plus aria-hidden />
+                    New invoice
+                  </Link>
+                </Button>
+              </div>
             ) : null
           }
         />

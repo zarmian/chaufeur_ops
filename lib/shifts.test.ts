@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
   canCloseShift,
   canOpenShift,
+  canRecordShift,
   formatShiftLength,
   isOpen,
   paidMinutes,
   paidMinutesTo,
   shiftPayPence,
   shiftProfit,
+  shiftsOverlap,
 } from './shifts';
 
 /**
@@ -233,5 +235,188 @@ describe('formatShiftLength', () => {
 
   it('says so when the shift is still running', () => {
     expect(formatShiftLength(null)).toBe('Still open');
+  });
+});
+
+describe('recording a shift that has already been worked', () => {
+  const NOW = new Date('2026-10-20T18:00:00Z');
+  const at = (iso: string) => new Date(iso);
+
+  const worked = {
+    startedAt: at('2026-10-13T08:00:00Z'),
+    endedAt: at('2026-10-13T16:00:00Z'),
+    breakMinutes: 30,
+  };
+
+  it('accepts a shift worked last week', () => {
+    /*
+     * The whole point. Until now a shift could only be created at the moment
+     * it started, so a day somebody forgot to clock on for could not be
+     * entered at all.
+     */
+    expect(canRecordShift(worked, { now: NOW, clash: null })).toEqual({ ok: true });
+  });
+
+  it('does not care that the driver is clocked on right now', () => {
+    /*
+     * The one-open-shift rule is about whether somebody may clock on. It has
+     * nothing to say about work that has already happened — a driver on shift
+     * this afternoon may perfectly well have worked last Tuesday — and
+     * applying it here would make the feature useless for exactly the drivers
+     * who work most.
+     */
+    const openNow = {
+      reference: 'SHF-000001',
+      startedAt: at('2026-10-20T06:00:00Z'),
+      endedAt: null,
+    };
+
+    expect(
+      canRecordShift(worked, { now: NOW, clash: null }),
+      'last week cannot collide with a shift that opened this morning',
+    ).toEqual({ ok: true });
+    expect(shiftsOverlap(worked, openNow)).toBe(false);
+  });
+
+  it('refuses a shift that has not finished yet', () => {
+    // A claim that work is done, made about work that is not.
+    const result = canRecordShift(
+      { ...worked, endedAt: at('2026-10-21T16:00:00Z') },
+      { now: NOW, clash: null },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.message).toMatch(/has not finished yet/);
+  });
+
+  it('refuses a shift that ends before it starts', () => {
+    const result = canRecordShift(
+      { ...worked, endedAt: at('2026-10-13T07:00:00Z') },
+      { now: NOW, clash: null },
+    );
+
+    expect(result.ok).toBe(false);
+  });
+
+  it('refuses a shift of no length at all', () => {
+    // Recording a finished shift of zero minutes is always a mistyped date;
+    // unlike closing one, where clocking straight off again is plausible.
+    const result = canRecordShift(
+      { ...worked, endedAt: worked.startedAt },
+      { now: NOW, clash: null },
+    );
+
+    expect(result.ok).toBe(false);
+  });
+
+  it('catches a mistyped year', () => {
+    /*
+     * The failure backdating introduces. Entering a shift as it happens is
+     * bounded by the clock; entering last Tuesday's is bounded by nothing,
+     * and a year typed wrong pays a driver for three hundred and sixty-five
+     * days.
+     */
+    const result = canRecordShift(
+      { startedAt: at('2025-10-13T08:00:00Z'), endedAt: at('2026-10-13T16:00:00Z'), breakMinutes: 0 },
+      { now: NOW, clash: null },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.message).toMatch(/Check the dates/);
+  });
+
+  it('refuses a break longer than the shift', () => {
+    const result = canRecordShift(
+      { ...worked, breakMinutes: 9 * 60 },
+      { now: NOW, clash: null },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.message).toMatch(/break is longer/);
+  });
+
+  it('refuses a shift that collides with one already recorded', () => {
+    /*
+     * The check that has to exist before backdating can. The same Tuesday
+     * entered twice pays the driver twice, a payout is built from shifts, and
+     * nothing downstream would notice.
+     */
+    const result = canRecordShift(worked, {
+      now: NOW,
+      clash: {
+        reference: 'SHF-000042',
+        startedAt: at('2026-10-13T12:00:00Z'),
+        endedAt: at('2026-10-13T20:00:00Z'),
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.message).toMatch(/SHF-000042/);
+  });
+});
+
+describe('shiftsOverlap', () => {
+  const span = (from: string, to: string | null) => ({
+    startedAt: new Date(from),
+    endedAt: to === null ? null : new Date(to),
+  });
+
+  it('sees two shifts sharing time', () => {
+    expect(
+      shiftsOverlap(
+        span('2026-10-13T08:00:00Z', '2026-10-13T16:00:00Z'),
+        span('2026-10-13T12:00:00Z', '2026-10-13T20:00:00Z'),
+      ),
+    ).toBe(true);
+  });
+
+  it('sees one shift wholly inside another', () => {
+    expect(
+      shiftsOverlap(
+        span('2026-10-13T08:00:00Z', '2026-10-13T20:00:00Z'),
+        span('2026-10-13T12:00:00Z', '2026-10-13T14:00:00Z'),
+      ),
+    ).toBe(true);
+  });
+
+  it('lets one end where the next begins', () => {
+    // Handing a car over at the top of the hour is the normal case, not a
+    // clash.
+    expect(
+      shiftsOverlap(
+        span('2026-10-13T08:00:00Z', '2026-10-13T14:00:00Z'),
+        span('2026-10-13T14:00:00Z', '2026-10-13T20:00:00Z'),
+      ),
+    ).toBe(false);
+  });
+
+  it('treats an open shift as running on forever', () => {
+    /*
+     * Conservative on purpose: those hours are still being counted, so
+     * anything starting after it began would be paid twice.
+     */
+    expect(
+      shiftsOverlap(
+        span('2026-10-20T06:00:00Z', null),
+        span('2026-10-25T09:00:00Z', '2026-10-25T17:00:00Z'),
+      ),
+    ).toBe(true);
+
+    // But a day that finished before it opened is untouched.
+    expect(
+      shiftsOverlap(
+        span('2026-10-20T06:00:00Z', null),
+        span('2026-10-13T09:00:00Z', '2026-10-13T17:00:00Z'),
+      ),
+    ).toBe(false);
+  });
+
+  it('sees nothing between two separate days', () => {
+    expect(
+      shiftsOverlap(
+        span('2026-10-13T08:00:00Z', '2026-10-13T16:00:00Z'),
+        span('2026-10-14T08:00:00Z', '2026-10-14T16:00:00Z'),
+      ),
+    ).toBe(false);
   });
 });

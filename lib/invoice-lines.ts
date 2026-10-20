@@ -1,9 +1,11 @@
 import { formatDateTime } from './dates';
 import { unitCharge } from './job-finance';
+import { tryParseMoney } from './money';
 import { RATE_TYPE_UNIT } from './rentals';
 import {
   disbursementPenceOf,
   resolveVatTreatment,
+  VAT_TREATMENTS,
   type VatTreatment,
 } from './vat';
 
@@ -235,4 +237,37 @@ export function buildRentalLine(input: RentalLineInput): BuiltLine {
     quantityUnit: straightforward ? `${unit}s` : null,
     unitPricePence: straightforward ? rental.ratePence : null,
   };
+}
+
+/* ------------------------------------------------------------------ *
+ * Reading a line off a form
+ *
+ * Here rather than in a route handler, because two routes now build a
+ * line — the draft's own editor and the invoice raised without a job —
+ * and their answers have to match. A line that taxes differently
+ * depending on which form created it is a document disagreeing with
+ * itself.
+ * ------------------------------------------------------------------ */
+
+/** The treatments a form may send. Anything else falls back to the default. */
+export function treatmentFrom(value: string): VatTreatment {
+  return VAT_TREATMENTS.some((option) => option.value === value)
+    ? (value as VatTreatment)
+    : 'STANDARD';
+}
+
+/**
+ * The pass-through part of a line, which is blank far more often than set.
+ *
+ * A blank means "none", not "unparseable" — and a value larger than the line
+ * is handled by clamping rather than by an error, because a negative taxable
+ * fare would compute tax backwards.
+ */
+export function disbursementFrom(value: string, amountPence: number): number {
+  const text = value.trim();
+  if (text === '') return 0;
+
+  const parsed = tryParseMoney(text) ?? 0;
+  if (amountPence < 0) return Math.max(parsed, amountPence);
+  return Math.min(Math.max(0, parsed), amountPence);
 }
