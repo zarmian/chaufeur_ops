@@ -396,6 +396,22 @@ export function FinanceForm({
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
           Driver settlement
         </h2>
+
+        {paidByShift ? (
+          <p
+            className="rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground"
+            data-testid="settled-by-shift"
+          >
+            Settled through{' '}
+            <Link href={`/shifts/${paidByShift.id}`} className="underline">
+              {paidByShift.reference}
+            </Link>
+            , not against this job — the payout pays the shift, so nothing here
+            records what the driver received. Whatever it says, it is not the
+            answer to whether they have been paid.
+          </p>
+        ) : null}
+
         <div className="grid gap-4 sm:grid-cols-2">
           <FormField
             name="driverPayStatus"
@@ -404,7 +420,7 @@ export function FinanceForm({
           >
             <Select
               {...fieldProps('driverPayStatus', errors.driverPayStatus)}
-              disabled={readOnly}
+              disabled={readOnly || Boolean(paidByShift)}
               value={live.driverPayStatus}
               onChange={(event) => set('driverPayStatus')(event.target.value)}
             >
@@ -423,7 +439,7 @@ export function FinanceForm({
           >
             <Select
               {...fieldProps('driverPayMethod', errors.driverPayMethod)}
-              disabled={readOnly}
+              disabled={readOnly || Boolean(paidByShift)}
               value={live.driverPayMethod}
               onChange={(event) => set('driverPayMethod')(event.target.value)}
             >
@@ -440,7 +456,7 @@ export function FinanceForm({
             <Input
               {...fieldProps('driverPaidAt', errors.driverPaidAt)}
               type="date"
-              disabled={readOnly}
+              disabled={readOnly || Boolean(paidByShift)}
               value={live.driverPaidAt}
               onChange={(event) => set('driverPaidAt')(event.target.value)}
             />
@@ -451,7 +467,7 @@ export function FinanceForm({
           <Textarea
             {...fieldProps('paymentNotes', errors.paymentNotes)}
             rows={2}
-            disabled={readOnly}
+            disabled={readOnly || Boolean(paidByShift)}
             value={live.paymentNotes}
             onChange={(event) => set('paymentNotes')(event.target.value)}
           />

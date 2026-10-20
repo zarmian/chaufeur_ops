@@ -582,6 +582,32 @@ describe('toFinanceData on a job the shift pays for', () => {
     expect(data.grossProfitPence).toBe(20000);
   });
 
+  it('leaves the settlement columns untouched rather than resetting them', () => {
+    /*
+     * The trap in disabling the section. A disabled select posts nothing, the
+     * schema fills the gap with UNPAID, and saving the panel on a job whose
+     * driver was paid weeks ago would quietly mark them unpaid.
+     *
+     * `undefined` is Prisma's "leave this column alone" on an update and "use
+     * the default" on a create, which is exactly the pair wanted.
+     */
+    const data = toFinanceData(
+      { ...posted, driverPayStatus: 'UNPAID' as const },
+      { paidByShift: true },
+    );
+
+    expect(data.driverPayStatus).toBeUndefined();
+    expect(data.driverPayMethod).toBeUndefined();
+    expect(data.driverPaidAt).toBeUndefined();
+    expect(data.paymentNotes).toBeUndefined();
+  });
+
+  it('still writes settlement on a job no shift covers', () => {
+    const data = toFinanceData({ ...posted, driverPayStatus: 'FULLY_PAID' as const });
+
+    expect(data.driverPayStatus).toBe('FULLY_PAID');
+  });
+
   it('keeps it on a job no shift covers', () => {
     const data = toFinanceData(posted);
 

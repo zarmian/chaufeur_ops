@@ -272,7 +272,7 @@ export function toFinanceData(
 
   const totals = calculateFinance(input);
 
-  return {
+  const base = {
     baseFarePence: input.baseFarePence,
     waitTimePence: input.waitTimePence,
     waitMinutesBilled: input.waitMinutesBilled,
@@ -295,11 +295,38 @@ export function toFinanceData(
     totalClientPence: totals.totalClientPence,
     totalCostsPence: totals.totalCostsPence,
     grossProfitPence: totals.grossProfitPence,
+  };
 
-    driverPayStatus: input.driverPayStatus,
-    driverPayMethod: input.driverPayMethod ? input.driverPayMethod : null,
-    driverPaidAt: input.driverPaidAt ? new Date(`${input.driverPaidAt}T00:00:00Z`) : null,
-    paymentNotes: emptyToNull(input.paymentNotes),
+  /*
+   * Settlement is left untouched when a shift pays for the time, rather than
+   * written back as whatever the form happened to send.
+   *
+   * Untouched rather than cleared, and this is the trap: a disabled select
+   * posts nothing, the schema fills the gap with `UNPAID`, and saving the
+   * panel on a job whose driver was paid weeks ago would quietly mark them
+   * unpaid.
+   *
+   * There is nothing for an operator to set here anyway. A shift-covered job
+   * produces no payout line of its own — the shift does — so this job's
+   * settlement is never what records that the driver was paid.
+   */
+  const settled = !options.paidByShift;
+
+  return {
+    ...base,
+    /*
+     * `undefined` rather than a value, which is Prisma's "leave this column
+     * alone" on an update and "use the default" on a create. Exactly the two
+     * things wanted, and the reason it is not simply set to UNPAID.
+     */
+    driverPayStatus: settled ? input.driverPayStatus : undefined,
+    driverPayMethod: settled ? (input.driverPayMethod || null) : undefined,
+    driverPaidAt: settled
+      ? input.driverPaidAt
+        ? new Date(`${input.driverPaidAt}T00:00:00Z`)
+        : null
+      : undefined,
+    paymentNotes: settled ? emptyToNull(input.paymentNotes) : undefined,
   };
 }
 

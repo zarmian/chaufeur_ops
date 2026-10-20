@@ -317,6 +317,33 @@ describe.skipIf(!DATABASE_AVAILABLE)('recording a worked shift', () => {
       expect(job.shiftId).toBe(earlier.id);
     });
 
+    it('leaves a job the driver has already been paid for', async () => {
+      /*
+       * Attaching clears the job's driver cost, which on a job genuinely paid
+       * per-job would erase the record of money that changed hands and leave
+       * the payout it came from pointing at a line worth nothing. Whatever
+       * the hours say, that payment happened.
+       */
+      const paid = await makeJob({ day: 10, hour: 10, driverPaymentPence: 8000 });
+      await raw!.jobFinance.update({
+        where: { jobId: paid },
+        data: { driverPayStatus: 'FULLY_PAID', driverPaidAt: new Date() },
+      });
+
+      const result = await recordShift(
+        { ...base, driverId, startedAt: at(10, 8), endedAt: at(10, 16) },
+        {},
+      );
+      expect(result.ok).toBe(true);
+
+      const job = await raw!.job.findUniqueOrThrow({
+        where: { id: paid },
+        select: { shiftId: true, finance: true },
+      });
+      expect(job.shiftId).toBeNull();
+      expect(job.finance?.driverPaymentPence, 'the payment record stands').toBe(8000);
+    });
+
     it('skips a job that was cancelled', async () => {
       const called_off = await makeJob({ day: 8, hour: 10, status: 'CANCELLED' });
 

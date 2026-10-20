@@ -324,6 +324,15 @@ export async function attachJobsToShift(
       deletedAt: null,
       status: { not: 'CANCELLED' },
       scheduledAt: { gte: shift.startedAt, lt: shift.endedAt },
+      /*
+       * And not one the driver has already been settled for.
+       *
+       * Attaching clears the job's driver cost, which on a job that was
+       * genuinely paid per-job would erase the record of money that actually
+       * changed hands — and leave the payout it came from pointing at a line
+       * worth nothing. Whatever the hours say, that payment happened.
+       */
+      OR: [{ finance: null }, { finance: { driverPayStatus: 'UNPAID' } }],
     },
     select: { id: true, finance: true },
   });
