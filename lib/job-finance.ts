@@ -232,10 +232,44 @@ export function prefillFromBooking(job: {
 }
 
 /**
+ * The driver-cost fields, emptied.
+ *
+ * A job worked on a shift carries no driver cost of its own: the driver was
+ * paid for the hours, once, and `shiftProfit` already subtracts that pay from
+ * the revenue of the jobs the shift covered. Leaving a figure here as well
+ * charges the same work twice — once against the job's gross profit and again
+ * against the shift's — and the two reports then disagree about the same day.
+ *
+ * All five, not just the payment: the hourly and daily pairs are driver cost
+ * by another route, and zeroing one of three ways to say the same thing is
+ * how a number survives.
+ */
+export function withoutDriverCost<T extends FinanceAmounts>(amounts: T): T {
+  return {
+    ...amounts,
+    driverPaymentPence: 0,
+    driverHours: null,
+    driverRatePence: 0,
+    driverDays: null,
+    driverDayRatePence: 0,
+  };
+}
+
+/**
  * Turn validated form input into the row to persist, with totals recomputed
  * here rather than trusted from the caller.
+ *
+ * `paidByShift` is applied here rather than left to the form, because a
+ * disabled input is a courtesy and not a control: a disabled field posts
+ * nothing, but a hand-made request posts whatever it likes, and this is the
+ * number that decides a driver's pay and the job's profit.
  */
-export function toFinanceData(input: FinanceInput) {
+export function toFinanceData(
+  input: FinanceInput,
+  options: { paidByShift?: boolean } = {},
+) {
+  if (options.paidByShift) input = withoutDriverCost(input);
+
   const totals = calculateFinance(input);
 
   return {

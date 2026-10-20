@@ -8,6 +8,7 @@ import { createJob, jobSchema, updateJob } from '@/lib/jobs';
 import { sheetBooked } from '@/lib/job-sheets/store';
 import { withAudit } from '@/lib/audit';
 import { getLocaleConfig } from '@/lib/locale-store';
+import { prisma } from '@/lib/prisma';
 import { actingUser } from '@/lib/request-context';
 import {
   applySeriesEdit,
@@ -265,7 +266,21 @@ export async function saveFinanceAction(
   try {
     const { audit } = await actingUser('editJobFinances');
     const parsed = financeSchema.parse(readFinanceForm(formData));
-    const data = toFinanceData(parsed);
+
+    /*
+     * Whether a shift already pays for this driver's time.
+     *
+     * Read from the job rather than taken from the form. The panel disables
+     * the driver-cost boxes when a shift covers the job, but a disabled input
+     * is a courtesy and not a control — and this is the number that decides
+     * both the job's profit and what the driver is owed.
+     */
+    const job = await prisma.job.findUnique({
+      where: { id: jobId },
+      select: { shiftId: true },
+    });
+
+    const data = toFinanceData(parsed, { paidByShift: Boolean(job?.shiftId) });
 
     // A reason means somebody is deliberately replacing what the driver's
     // taps produced. Stamped here so the automatic calculation stops writing

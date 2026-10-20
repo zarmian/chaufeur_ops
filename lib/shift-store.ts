@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { withAudit, type AuditContext } from './audit';
 import { engagementAt, type EngagementPeriod } from './engagement';
@@ -17,7 +18,12 @@ import {
   shiftsOverlap,
   type ShiftRefusal,
 } from './shifts';
-import { financeAmountsFrom, jobEconomics } from './job-finance';
+import {
+  calculateFinance,
+  financeAmountsFrom,
+  jobEconomics,
+  withoutDriverCost,
+} from './job-finance';
 import { emptyToNull } from './text';
 
 /**
@@ -264,6 +270,17 @@ export async function recordShift(
           notes: emptyToNull(input.notes),
         },
       });
+
+      // In the same transaction as the shift: a shift that exists without its
+      // jobs attached is one where every job still carries a driver fee the
+      // shift is also paying.
+      await attachJobsToShift(tx, {
+        id: created.id,
+        driverId: created.driverId,
+        startedAt,
+        endedAt,
+      });
+
       return {
         entityId: created.driverId,
         after: created,
@@ -272,6 +289,94 @@ export async function recordShift(
     },
     context,
   );
+}
+
+/**
+ * Put the driver's jobs from that stretch onto the shift.
+ *
+ * The other half of recording a shift. A shift entered after the fact covers
+ * work that was booked before the shift existed, so nothing could have linked
+ * the two at the time — and without the link every one of those jobs still
+ * carries its own driver fee, which is then charged again as shift pay. The
+ * same day costed twice, in two reports that disagree.
+ *
+ * Only jobs that are nobody else's. A job already on a shift is left alone
+ * rather than moved: whoever put it there knew something, and silently
+ * reassigning work between two drivers' pay is not a thing to do without
+ * being asked.
+ *
+ * Cancelled jobs are skipped — a journey that did not happen was not worked,
+ * whatever the driver's hours say.
+ *
+ * Any driver cost already recorded against an attached job is cleared and its
+ * totals recomputed. Leaving it would mean a figure that is no longer counted
+ * still sitting in the panel and still subtracting from that job's profit,
+ * which is the worst of both readings.
+ */
+export async function attachJobsToShift(
+  tx: Prisma.TransactionClient,
+  shift: { id: string; driverId: string; startedAt: Date; endedAt: Date },
+): Promise<string[]> {
+  const jobs = await tx.job.findMany({
+    where: {
+      driverId: shift.driverId,
+      shiftId: null,
+      deletedAt: null,
+      status: { not: 'CANCELLED' },
+      scheduledAt: { gte: shift.startedAt, lt: shift.endedAt },
+    },
+    select: { id: true, finance: true },
+  });
+
+  if (jobs.length === 0) return [];
+
+  await tx.job.updateMany({
+    where: { id: { in: jobs.map((job) => job.id) } },
+    data: { shiftId: shift.id },
+  });
+
+  for (const job of jobs) {
+    if (!job.finance) continue;
+
+    const cleared = withoutDriverCost({
+      baseFarePence: job.finance.baseFarePence,
+      waitTimePence: job.finance.waitTimePence,
+      extraChargesPence: job.finance.extraChargesPence,
+      customerHours: decimalOrNull(job.finance.customerHours),
+      customerRatePence: job.finance.customerRatePence,
+      customerDays: decimalOrNull(job.finance.customerDays),
+      customerDayRatePence: job.finance.customerDayRatePence,
+      driverPaymentPence: job.finance.driverPaymentPence,
+      fuelCostPence: job.finance.fuelCostPence,
+      otherExpensesPence: job.finance.otherExpensesPence,
+      driverHours: decimalOrNull(job.finance.driverHours),
+      driverRatePence: job.finance.driverRatePence,
+      driverDays: decimalOrNull(job.finance.driverDays),
+      driverDayRatePence: job.finance.driverDayRatePence,
+    });
+
+    const totals = calculateFinance(cleared);
+
+    await tx.jobFinance.update({
+      where: { jobId: job.id },
+      data: {
+        driverPaymentPence: 0,
+        driverHours: null,
+        driverRatePence: 0,
+        driverDays: null,
+        driverDayRatePence: 0,
+        totalCostsPence: totals.totalCostsPence,
+        grossProfitPence: totals.grossProfitPence,
+      },
+    });
+  }
+
+  return jobs.map((job) => job.id);
+}
+
+/** A Prisma `Decimal` column as the number the finance arithmetic wants. */
+function decimalOrNull(value: Prisma.Decimal | null): number | null {
+  return value === null ? null : Number(value);
 }
 
 export async function closeShift(
@@ -311,6 +416,20 @@ export async function closeShift(
         where: { id: shiftId },
         data: { endedAt, breakMinutes },
       });
+
+      /*
+       * Now, because only now is the stretch known. An open shift has no end
+       * to measure against, so a job booked during it could only be attached
+       * by hand from the booking form — and the ones nobody remembered to
+       * attach are exactly the ones that would be paid for twice.
+       */
+      await attachJobsToShift(tx, {
+        id: shiftId,
+        driverId: shift.driverId,
+        startedAt: shift.startedAt,
+        endedAt,
+      });
+
       return { entityId: shift.driverId, before, after, result: null };
     },
     context,

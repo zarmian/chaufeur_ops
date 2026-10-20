@@ -1,17 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_FREE_WAIT_MINUTES,
   billableWaitMinutes,
   billedDays,
   billedHours,
   calculateFinance,
   contractDays,
-  DEFAULT_FREE_WAIT_MINUTES,
   financeSchema,
   freeWaitMinutesFor,
   hourlyCharge,
   jobEconomics,
   prefillFromBooking,
   toFinanceData,
+  withoutDriverCost,
 } from './job-finance';
 
 /**
@@ -478,5 +479,114 @@ describe('contractDays', () => {
     expect(
       contractDays(at('2026-07-31T09:00:00Z'), at('2026-07-27T09:00:00Z')),
     ).toBe(1);
+  });
+});
+
+describe('a job whose driver is paid by a shift', () => {
+  const worked = {
+    baseFarePence: 20000,
+    driverPaymentPence: 8000,
+    fuelCostPence: 1500,
+    driverHours: 4,
+    driverRatePence: 1800,
+  };
+
+  it('carries no driver cost of its own', () => {
+    /*
+     * The driver was paid for the hours, once. `shiftProfit` already
+     * subtracts that pay from the revenue of the jobs the shift covered, so a
+     * figure here as well charges the same work twice — against the job and
+     * against the shift — and the two reports disagree about the same day.
+     */
+    const cleared = withoutDriverCost(worked);
+
+    expect(cleared.driverPaymentPence).toBe(0);
+    expect(cleared.driverHours).toBeNull();
+    expect(cleared.driverRatePence).toBe(0);
+  });
+
+  it('keeps everything that is not the driver', () => {
+    // The car still burned fuel and the client still owes the fare.
+    const cleared = withoutDriverCost(worked);
+
+    expect(cleared.baseFarePence).toBe(20000);
+    expect(cleared.fuelCostPence).toBe(1500);
+  });
+
+  it('clears the daily pair as well as the hourly one', () => {
+    /*
+     * Three ways to say the same cost, and zeroing one of them is how a
+     * number survives: a contract day rate is driver cost by another route.
+     */
+    const cleared = withoutDriverCost({
+      ...worked,
+      driverDays: 2,
+      driverDayRatePence: 15000,
+    });
+
+    expect(cleared.driverDays).toBeNull();
+    expect(cleared.driverDayRatePence).toBe(0);
+  });
+
+  it('leaves the gross profit as the job alone earned', () => {
+    const before = calculateFinance(worked);
+    const after = calculateFinance(withoutDriverCost(worked));
+
+    // £80 payment and 4h at £18 both gone; the £15 of fuel stays.
+    expect(before.totalCostsPence).toBe(8000 + 1500 + 7200);
+    expect(after.totalCostsPence).toBe(1500);
+    expect(after.grossProfitPence).toBe(20000 - 1500);
+  });
+});
+
+describe('toFinanceData on a job the shift pays for', () => {
+  const posted = {
+    baseFarePence: 20000,
+    waitTimePence: 0,
+    waitMinutesBilled: 0,
+    extraChargesPence: 0,
+    extraChargesNotes: '',
+    customerHours: null,
+    customerRatePence: 0,
+    customerDays: null,
+    customerDayRatePence: 0,
+    driverPaymentPence: 8000,
+    fuelCostPence: 0,
+    otherExpensesPence: 0,
+    expenseNotes: '',
+    driverHours: 4,
+    driverRatePence: 1800,
+    driverDays: null,
+    driverDayRatePence: 0,
+    driverPayStatus: 'UNPAID' as const,
+    driverPayMethod: '' as const,
+    driverPaidAt: '',
+    paymentNotes: '',
+    zeroValueReason: '',
+    waitOverrideReason: '',
+  };
+
+  it('ignores a driver cost that arrives anyway', () => {
+    /*
+     * The panel disables these boxes, and a disabled input is a courtesy
+     * rather than a control: it posts nothing, but a hand-made request posts
+     * whatever it likes. This is the number that decides both the job's
+     * profit and what a driver is owed, so the refusal lives on the server.
+     */
+    const data = toFinanceData(posted, { paidByShift: true });
+
+    expect(data.driverPaymentPence).toBe(0);
+    expect(data.driverHours).toBeNull();
+    expect(data.driverRatePence).toBe(0);
+    expect(data.totalCostsPence).toBe(0);
+    expect(data.grossProfitPence).toBe(20000);
+  });
+
+  it('keeps it on a job no shift covers', () => {
+    const data = toFinanceData(posted);
+
+    expect(data.driverPaymentPence).toBe(8000);
+    // £80 plus four hours at £18.
+    expect(data.totalCostsPence).toBe(8000 + 7200);
   });
 });

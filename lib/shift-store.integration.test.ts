@@ -67,6 +67,8 @@ describe.skipIf(!DATABASE_AVAILABLE)('recording a worked shift', () => {
 
   afterAll(async () => {
     if (!raw) return;
+    await raw.jobFinance.deleteMany({ where: { job: { driverId } } });
+    await raw.job.deleteMany({ where: { reference: { startsWith: `JOB-${stamp}-` } } });
     await raw.driverShift.deleteMany({ where: { driverId } });
     await raw.driver.deleteMany({ where: { id: driverId } });
     await raw.$disconnect();
@@ -209,6 +211,144 @@ describe.skipIf(!DATABASE_AVAILABLE)('recording a worked shift', () => {
       paidMinutes({ ...shift, breakMinutes: 0 }),
       'three hours worked, not four',
     ).toBe(180);
+  });
+
+  describe('the jobs worked during it', () => {
+    /*
+     * A shift entered after the fact covers work booked before the shift
+     * existed, so nothing could have linked the two at the time. Without the
+     * link every one of those jobs still carries its own driver fee, which is
+     * then charged again as shift pay — the same day costed twice, in two
+     * reports that disagree.
+     */
+    async function makeJob(input: {
+      hour: number;
+      day?: number;
+      status?: string;
+      driverPaymentPence?: number;
+      shiftId?: string;
+      assigned?: boolean;
+    }) {
+      const job = await raw!.job.create({
+        data: {
+          reference: `JOB-${stamp}-${Math.random().toString(36).slice(2, 7)}`,
+          jobType: 'TRANSFER',
+          status: (input.status ?? 'COMPLETED') as never,
+          scheduledAt: new Date(`${at(input.day ?? 6, input.hour)}:00Z`),
+          pickupText: 'The Savoy',
+          dropoffText: 'Heathrow T5',
+          driverId: input.assigned === false ? null : driverId,
+          shiftId: input.shiftId ?? null,
+          clientPricePence: 20000,
+          driverPricePence: input.driverPaymentPence ?? 0,
+        },
+        select: { id: true },
+      });
+
+      if (input.driverPaymentPence) {
+        await raw!.jobFinance.create({
+          data: {
+            jobId: job.id,
+            baseFarePence: 20000,
+            driverPaymentPence: input.driverPaymentPence,
+            totalClientPence: 20000,
+            totalCostsPence: input.driverPaymentPence,
+            grossProfitPence: 20000 - input.driverPaymentPence,
+          },
+        });
+      }
+
+      return job.id;
+    }
+
+    it('attaches the driver’s jobs from that stretch, and clears their driver cost', async () => {
+      const inside = await makeJob({ hour: 10, driverPaymentPence: 8000 });
+      const outside = await makeJob({ hour: 20, driverPaymentPence: 8000 });
+
+      const result = await recordShift(
+        { ...base, driverId, startedAt: at(6, 8), endedAt: at(6, 16) },
+        {},
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+
+      const attached = await raw!.job.findUniqueOrThrow({
+        where: { id: inside },
+        select: { shiftId: true, finance: true },
+      });
+      expect(attached.shiftId).toBe(result.id);
+
+      // The figure is not merely ignored downstream — it is cleared, and the
+      // job's own profit recomputed. A number that is no longer counted but
+      // still sitting in the panel is the worst of both readings.
+      expect(attached.finance?.driverPaymentPence).toBe(0);
+      expect(attached.finance?.grossProfitPence).toBe(20000);
+
+      const untouched = await raw!.job.findUniqueOrThrow({
+        where: { id: outside },
+        select: { shiftId: true, finance: true },
+      });
+      expect(untouched.shiftId, 'eight in the evening is not in an 08:00–16:00 shift').toBeNull();
+      expect(untouched.finance?.driverPaymentPence).toBe(8000);
+    });
+
+    it('leaves a job that is already on another shift alone', async () => {
+      const earlier = await recordShift(
+        { ...base, driverId, startedAt: at(7, 8), endedAt: at(7, 12) },
+        {},
+      );
+      expect(earlier.ok).toBe(true);
+      if (!earlier.ok) return;
+
+      const spoken = await makeJob({ day: 7, hour: 13, shiftId: earlier.id });
+
+      const later = await recordShift(
+        { ...base, driverId, startedAt: at(7, 12), endedAt: at(7, 18) },
+        {},
+      );
+      expect(later.ok).toBe(true);
+
+      const job = await raw!.job.findUniqueOrThrow({
+        where: { id: spoken },
+        select: { shiftId: true },
+      });
+      // Whoever put it there knew something, and moving work between two
+      // drivers' pay is not a thing to do without being asked.
+      expect(job.shiftId).toBe(earlier.id);
+    });
+
+    it('skips a job that was cancelled', async () => {
+      const called_off = await makeJob({ day: 8, hour: 10, status: 'CANCELLED' });
+
+      const result = await recordShift(
+        { ...base, driverId, startedAt: at(8, 8), endedAt: at(8, 16) },
+        {},
+      );
+      expect(result.ok).toBe(true);
+
+      const job = await raw!.job.findUniqueOrThrow({
+        where: { id: called_off },
+        select: { shiftId: true },
+      });
+      // A journey that did not happen was not worked, whatever the hours say.
+      expect(job.shiftId).toBeNull();
+    });
+
+    it('skips a job nobody was assigned to', async () => {
+      const unassigned = await makeJob({ day: 9, hour: 10, assigned: false });
+
+      const result = await recordShift(
+        { ...base, driverId, startedAt: at(9, 8), endedAt: at(9, 16) },
+        {},
+      );
+      expect(result.ok).toBe(true);
+
+      const job = await raw!.job.findUniqueOrThrow({
+        where: { id: unassigned },
+        select: { shiftId: true },
+      });
+      expect(job.shiftId).toBeNull();
+    });
   });
 
   it('pays the rate in force when the shift was worked, not today’s', async () => {

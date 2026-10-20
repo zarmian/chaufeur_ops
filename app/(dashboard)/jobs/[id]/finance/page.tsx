@@ -42,6 +42,10 @@ export default async function JobFinancePage({
         cancelHref={`/jobs/${job.id}`}
         readOnly={readOnly}
         waitMinutesFromEvents={waitMinutesFromEvents(job.events)}
+        // A hired driver paid for the hours carries no driver cost per job.
+        paidByShift={
+          job.shift ? { id: job.shift.id, reference: job.shift.reference } : null
+        }
         autoWait={
           finance?.waitAutoCalculatedAt || finance?.waitOverriddenById
             ? {

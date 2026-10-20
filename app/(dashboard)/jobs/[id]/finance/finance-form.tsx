@@ -67,6 +67,7 @@ export function FinanceForm({
   readOnly = false,
   waitMinutesFromEvents,
   autoWait = null,
+  paidByShift = null,
 }: {
   action: (state: FormState, formData: FormData) => Promise<FormState>;
   values: FinanceFormValues;
@@ -86,6 +87,20 @@ export function FinanceForm({
    * one deliberate action and a reason.
    */
   autoWait?: { explanation: string; overriddenBy: string | null } | null;
+  /**
+   * The shift that already pays for this driver's time, if one does.
+   *
+   * Its presence is what turns the driver-cost boxes off. A hired driver is
+   * paid for the hours once — `shiftProfit` subtracts that pay from the
+   * revenue of the jobs the shift covered — so a figure here as well charges
+   * the same work twice, against the job and against the shift, and the two
+   * reports then disagree about the same day.
+   *
+   * The shift is named and linked rather than the fields merely going grey.
+   * "Why can I not type in this box" is a question somebody will otherwise
+   * ask the office, and the answer is one click away.
+   */
+  paidByShift?: { id: string; reference: string } | null;
 }) {
   const [state, formAction] = useActionState(action, INITIAL_FORM_STATE);
   const errors = state.fields ?? {};
@@ -129,6 +144,7 @@ export function FinanceForm({
     name: keyof FinanceFormValues & string,
     label: string,
     hint?: string,
+    locked = false,
   ) => (
     <FormField name={name} label={label} hint={hint} errors={errors[name]}>
       <Input
@@ -136,7 +152,7 @@ export function FinanceForm({
         type="number"
         min={0}
         step={1}
-        disabled={readOnly}
+        disabled={readOnly || locked}
         value={String(live[name] ?? 0)}
         onChange={(event) => set(name)(event.target.value)}
       />
@@ -292,11 +308,29 @@ export function FinanceForm({
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
           Costs
         </h2>
+        {paidByShift ? (
+          <p
+            className="rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground"
+            data-testid="paid-by-shift"
+          >
+            The driver is paid for this time on{' '}
+            <Link href={`/shifts/${paidByShift.id}`} className="underline">
+              {paidByShift.reference}
+            </Link>
+            , so this job carries no driver cost of its own. Counting it here
+            as well would charge the same hours twice — once against the job
+            and again against the shift.
+          </p>
+        ) : null}
+
         <div className="grid gap-4 sm:grid-cols-2">
           {money(
             'driverPaymentPence',
             'Driver payment',
-            'Pre-filled from the booking driver price.',
+            paidByShift
+              ? 'Paid by the shift.'
+              : 'Pre-filled from the booking driver price.',
+            Boolean(paidByShift),
           )}
           {money('fuelCostPence', 'Fuel')}
           {money('otherExpensesPence', 'Other expenses')}
@@ -308,12 +342,17 @@ export function FinanceForm({
             <Input
               {...fieldProps('driverHours', errors.driverHours)}
               inputMode="decimal"
-              disabled={readOnly}
+              disabled={readOnly || Boolean(paidByShift)}
               value={live.driverHours}
               onChange={(event) => set('driverHours')(event.target.value)}
             />
           </FormField>
-          {money('driverRatePence', 'Driver hourly rate')}
+          {money(
+            'driverRatePence',
+            'Driver hourly rate',
+            undefined,
+            Boolean(paidByShift),
+          )}
         </div>
         <FormField name="expenseNotes" label="Expense notes" errors={errors.expenseNotes}>
           <Textarea
