@@ -1,4 +1,10 @@
-import { BUILT_IN_ALIASES, PARSERS, type FieldAlias } from './fields';
+import {
+  BUILT_IN_ALIASES,
+  PARSERS,
+  aliasesFor,
+  type FieldAlias,
+  type SheetSource,
+} from './fields';
 import { findFlightInText, looksLikeAirport } from './flight';
 import { postcodeOf } from './parse';
 import {
@@ -37,6 +43,19 @@ export interface ReadOptions {
    * recorded against the sender, and the next sheet reads it without help.
    */
   learned?: Partial<Record<ReadableField, FieldAlias[]>>;
+  /**
+   * Whether this text was printed by software or typed by a person.
+   *
+   * Decides how far the vocabulary can be trusted — see `SheetSource`. A
+   * printed sheet carries every field it has whether or not it was filled, so
+   * a bare `Date:` is as likely to be the one beside `Signature:` as the
+   * pickup date. Somebody typing a booking types one date.
+   *
+   * Defaults to `sheet`, which is the stricter reading: a caller that has not
+   * thought about it gets the one that refuses rather than the one that
+   * guesses.
+   */
+  source?: SheetSource;
 }
 
 /**
@@ -57,8 +76,10 @@ export function readJobSheet(text: string, options: ReadOptions = {}): SheetRead
   const draft: JobSheetDraft = { ...EMPTY_DRAFT };
   const sources: Partial<Record<ReadableField, FieldSource>> = {};
 
+  const source = options.source ?? 'sheet';
+
   for (const field of Object.keys(BUILT_IN_ALIASES) as ReadableField[]) {
-    const aliases = [...(options.learned?.[field] ?? []), ...BUILT_IN_ALIASES[field]];
+    const aliases = aliasesFor(field, source, options.learned?.[field]);
     const parse = PARSERS[field];
 
     for (const alias of aliases) {
