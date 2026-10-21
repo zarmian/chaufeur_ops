@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { readJobSheet } from './read';
 
@@ -161,5 +163,81 @@ describe('what a message still refuses', () => {
       'the pickup time',
       'the destination',
     ]);
+  });
+});
+
+describe('a real confirmation, as this office writes it', () => {
+  /*
+   * The fixture is the shape of an actual message from the team's group, with
+   * every name, number, registration and the company itself replaced. The
+   * shape is what matters and the shape is exact: the blank `Contact:` under
+   * the passenger, the filled one under the chauffeur, the missing space
+   * after `PICK UP:`, the date written all in numbers, and the time on its
+   * own line under it.
+   */
+  const message = readFileSync(
+    join(__dirname, '__fixtures__', 'confirmation-message.txt'),
+    'utf8',
+  );
+
+  const read = readJobSheet(message, { source: 'message', dateOrder: 'DMY' });
+
+  it('reads the whole booking', () => {
+    expect(read.missing).toEqual([]);
+    expect(read.draft).toMatchObject({
+      scheduledDate: '2026-10-20',
+      scheduledTime: '13:15',
+      pickupText: '14 Pembroke Gardens W8 6HS',
+      pickupPostcode: 'W8 6HS',
+      dropoffText: 'Northfleet freight depot, woolwich London, SE18 6AN',
+      dropoffPostcode: 'SE18 6AN',
+      passengerName: 'Adeyemi',
+      customerReference: 'AC-00412',
+      clientPrice: '100.00',
+      vehicleRequested: 'Mercedes-Benz V-Class',
+      jobType: 'TRANSFER',
+    });
+  });
+
+  it('does not give the chauffeur’s mobile as the passenger’s', () => {
+    /*
+     * The one the real message got wrong, and the reason blocks exist.
+     *
+     * `Contact:` appears twice — blank under `Passenger:`, filled under
+     * `CHAUFFEUR:`. Reading rightwards found the blank one, moved on, and
+     * took the driver's. That is not merely the wrong field: `lib/tracking.ts`
+     * withholds a driver's number from the passenger on purpose, so a
+     * forwarded link does not leave an owner-driver's mobile with a client.
+     * This would have handed it over as the client's own contact.
+     */
+    expect(read.draft.passengerPhone).toBeNull();
+    expect(JSON.stringify(read.draft)).not.toContain('07700900461');
+  });
+
+  it('refuses the date when nobody has said which way round it is', () => {
+    /*
+     * `20-10-2026` is only readable because this source has declared itself
+     * day-first. Without that it is indistinguishable from a month-first
+     * date, and a booking a month out is worse than a blank field.
+     */
+    const guessing = readJobSheet(message, { source: 'message' });
+
+    expect(guessing.draft.scheduledDate).toBeNull();
+    expect(guessing.missing).toContain('the pickup date');
+  });
+
+  it('keeps the price out of the notes', () => {
+    /*
+     * The message ends `Note:` and then `Pay:£100 all in` on the line below,
+     * with no space after that colon. Without noticing the second label, the
+     * note carries a figure nobody will ever read as money and the price
+     * stays empty.
+     */
+    expect(read.draft.notes).toBeNull();
+    expect(read.sources.clientPrice?.label).toBe('Pay:');
+  });
+
+  it('takes the passenger from the passenger line, not the chauffeur line', () => {
+    expect(read.draft.passengerName).toBe('Adeyemi');
   });
 });

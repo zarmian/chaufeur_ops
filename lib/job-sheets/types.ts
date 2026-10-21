@@ -274,7 +274,13 @@ export function looksLikeLabel(value: string): boolean {
  * booking a driver would be sent to a street that does not exist.
  */
 export function carriesLabel(value: string): boolean {
-  return /^[A-Za-z][A-Za-z0-9 .#/()'&+-]{0,24}[:#]\s+\S/.test(value.trim());
+  /*
+   * The space after the colon is optional, because people do not type one.
+   * A real confirmation ends "Note:" and then "Pay:£100 all in" on the line
+   * below — without this the price is read as the note, and then the note
+   * field carries a figure nobody will see as money.
+   */
+  return /^[A-Za-z][A-Za-z0-9 .#/()'&+-]{0,24}[:#]\s*\S/.test(value.trim());
 }
 
 /** The cell a position on a line falls inside. */
@@ -292,10 +298,12 @@ function cellHolding(line: SheetLine, at: number): SheetCell | null {
  * Finding a labelled value
  * ------------------------------------------------------------------ */
 
-interface Found {
+export interface Found {
   value: string;
   /** Where the label itself began, which is the column a value wraps in. */
   column: number;
+  /** Which line it was found on, so a caller can tell what came before it. */
+  line: number;
 }
 
 /**
@@ -340,8 +348,15 @@ function labelSites(
        * in a colon is free to sit inside a cell, because its value is what
        * follows it there.
        */
+      /*
+       * A label ending in a space is exempt from the whole-cell rule, because
+       * the space already does what the rule is for: it cannot match inside a
+       * longer word. "At " is how a time reads on the line under a date, and
+       * "Sat 13:15" would otherwise swallow it — which `lineStart` prevents,
+       * since the match there is not at the start of a line or a cell.
+       */
       const whole =
-        /[:#]$/.test(label) ||
+        /[:#\s]$/.test(label) ||
         cellHolding(lines[index]!, at)?.text.toLowerCase() === needle;
 
       if ((!lineStart || ownCell) && whole) sites.push({ index, at });
@@ -388,7 +403,7 @@ export function valueAfter(
     const value = cellAfter(line, site.at + label.length);
 
     if (value && !looksLikeLabel(value)) {
-      out.push({ value, column: site.at });
+      out.push({ value, column: site.at, line: site.index });
     }
   }
 
@@ -418,7 +433,7 @@ export function valueBelow(
     ) {
       const value = cellNear(lines[below]!, site.at, slack);
       if (value && !looksLikeLabel(value) && !carriesLabel(value)) {
-        out.push({ value, column: site.at });
+        out.push({ value, column: site.at, line: site.index });
         break;
       }
     }
@@ -453,7 +468,7 @@ export function valueUnder(
     ) {
       const value = cellNear(lines[below]!, site.at, slack);
       if (value && !looksLikeLabel(value) && !carriesLabel(value)) {
-        out.push({ value, column: site.at });
+        out.push({ value, column: site.at, line: site.index });
       }
     }
   }
@@ -499,7 +514,7 @@ export function paragraphAfter(
     }
 
     const joined = tidyRun(parts.join(' '));
-    if (joined !== '') out.push({ value: joined, column: site.at });
+    if (joined !== '') out.push({ value: joined, column: site.at, line: site.index });
   }
 
   return out;

@@ -6,7 +6,7 @@ import {
   type SheetSource,
 } from './fields';
 import { findFlightInText, looksLikeAirport } from './flight';
-import { postcodeOf } from './parse';
+import { parseSheetDate, postcodeOf, type DateOrder } from './parse';
 import {
   EMPTY_DRAFT,
   REQUIRED,
@@ -18,6 +18,7 @@ import {
   type FieldSource,
   type JobSheetDraft,
   type ReadableField,
+  type SheetLine,
   type SheetRead,
 } from './types';
 
@@ -56,6 +57,15 @@ export interface ReadOptions {
    * guesses.
    */
   source?: SheetSource;
+  /**
+   * Which way round this source writes an all-numeric date.
+   *
+   * No default, deliberately. Unset, `20-10-2026` is still refused, because
+   * on a sheet from an agency nobody has configured it genuinely cannot be
+   * told from `10-20-2026`. Set, it is read — an office's own template is
+   * written the same way every time, and somebody can simply say which.
+   */
+  dateOrder?: DateOrder;
 }
 
 /**
@@ -91,7 +101,12 @@ export function readJobSheet(text: string, options: ReadOptions = {}): SheetRead
       );
 
       const hit = candidates
-        .map((found) => parse(found.value))
+        .filter((found) => found.line < boundary(lines, alias.notAfter))
+        .map((found) =>
+          field === 'scheduledDate'
+            ? parseSheetDate(found.value, options.dateOrder)
+            : parse(found.value),
+        )
         .find((value): value is string => value !== null);
 
       if (hit !== undefined) {
@@ -109,6 +124,24 @@ export function readJobSheet(text: string, options: ReadOptions = {}): SheetRead
   );
 
   return { draft, missing, sources };
+}
+
+/**
+ * The line a field's own block ends at, or the end of the text.
+ *
+ * Cheap enough to recompute per alias — these are a few dozen lines — and
+ * keeping it a function of the text rather than state means a template whose
+ * blocks appear in a different order needs no special case.
+ */
+function boundary(lines: SheetLine[], notAfter: string[] | undefined): number {
+  if (!notAfter || notAfter.length === 0) return lines.length;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const text = lines[index]!.text.toLowerCase();
+    if (notAfter.some((label) => text.includes(label.toLowerCase()))) return index;
+  }
+
+  return lines.length;
 }
 
 /**

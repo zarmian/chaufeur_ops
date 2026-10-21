@@ -48,6 +48,22 @@ export interface FieldAlias {
    * inside other text to match anywhere, and too useful to leave out.
    */
   lineStart?: boolean;
+  /**
+   * Labels that end the part of the text this field may be read from.
+   *
+   * Templates are written in blocks — the passenger, then the car, then the
+   * chauffeur — and the same word means different things in different blocks.
+   * A real confirmation carries `Contact:` twice: once under `Passenger:`,
+   * blank because nobody had the client's number, and once under
+   * `CHAUFFEUR:`. Reading rightwards for a passenger's phone found the blank
+   * one, moved on, and took the driver's.
+   *
+   * That is worse than a wrong field. `lib/tracking.ts` withholds a driver's
+   * number from the passenger on purpose — a forwarded link should not leave
+   * an owner-driver's mobile with a client — and this would have handed it
+   * over as the passenger's own contact.
+   */
+  notAfter?: string[];
 }
 
 /**
@@ -220,6 +236,17 @@ export const BUILT_IN_ALIASES: Record<ReadableField, FieldAlias[]> = {
  * the operator fills the gap once and the label is learned against that
  * source — see `lib/job-sheets/learn.ts`.
  */
+/**
+ * Where a template stops talking about the passenger and starts on the
+ * chauffeur.
+ *
+ * Every field above this line is the client's; everything below is the
+ * driver's. Without it a blank `Contact:` under `Passenger:` falls through to
+ * the filled one under `CHAUFFEUR:`, and the driver's mobile is stored as the
+ * passenger's.
+ */
+const DRIVER_BLOCK = ['CHAUFFEUR:', 'Driver:', 'Driver name:'];
+
 export const MESSAGE_ALIASES: Partial<Record<ReadableField, FieldAlias[]>> = {
   scheduledDate: [
     { label: 'Date of travel:', placement: 'after' },
@@ -232,6 +259,9 @@ export const MESSAGE_ALIASES: Partial<Record<ReadableField, FieldAlias[]>> = {
     { label: 'Pickup Time:', placement: 'after' },
     { label: 'Pick up time:', placement: 'after' },
     { label: 'Time:', placement: 'after', lineStart: true },
+    // "At 13:15" on its own line, with no colon — how a time reads when
+    // somebody has already written the date on the line above.
+    { label: 'At ', placement: 'after', lineStart: true },
     { label: 'Pickup:', placement: 'after', lineStart: true },
     { label: 'At:', placement: 'after', lineStart: true },
   ],
@@ -259,26 +289,30 @@ export const MESSAGE_ALIASES: Partial<Record<ReadableField, FieldAlias[]>> = {
      * shape of bug as `Pick-up` matching inside `Pick-up Date:`, and the same
      * fix.
      */
-    { label: 'Name:', placement: 'after', lineStart: true },
+    { label: 'Name:', placement: 'after', lineStart: true, notAfter: DRIVER_BLOCK },
   ],
   passengerPhone: [
-    { label: 'Contact:', placement: 'after', lineStart: true },
-    { label: 'Tel:', placement: 'after', lineStart: true },
+    { label: 'Contact:', placement: 'after', lineStart: true, notAfter: DRIVER_BLOCK },
+    { label: 'Tel:', placement: 'after', lineStart: true, notAfter: DRIVER_BLOCK },
     // `Flight Number:` contains it. The phone parser happens to refuse a
     // flight code for being too short, but that is luck rather than a rule.
-    { label: 'Number:', placement: 'after', lineStart: true },
+    { label: 'Number:', placement: 'after', lineStart: true, notAfter: DRIVER_BLOCK },
   ],
   customerReference: [
+    { label: 'Job ID:', placement: 'after' },
+    { label: 'Job no:', placement: 'after' },
     { label: 'Ref:', placement: 'after', lineStart: true },
     { label: 'Job:', placement: 'after', lineStart: true },
   ],
   clientPrice: [
     { label: 'Charge:', placement: 'after' },
     { label: 'Quoted:', placement: 'after' },
+    { label: 'Pay:', placement: 'after', lineStart: true },
   ],
   // `Vehicle:` is already in the printed-sheet list, which every source tries.
   vehicleRequested: [{ label: 'Car:', placement: 'after', lineStart: true }],
   notes: [
+    { label: 'Special notes:', placement: 'paragraph' },
     { label: 'Notes:', placement: 'paragraph' },
     { label: 'Note:', placement: 'paragraph' },
     { label: 'Info:', placement: 'paragraph' },

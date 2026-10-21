@@ -25,14 +25,50 @@ const MONTHS: Record<string, string> = {
  * than guessed at. A month written in words is the one form that cannot be
  * read two ways, and it is what agency software overwhelmingly prints.
  */
-export function parseSheetDate(value: string | null): string | null {
+export type DateOrder = 'DMY' | 'MDY';
+
+/**
+ * `20-10-2026`, once somebody has said which way round it is.
+ *
+ * The blanket refusal of all-numeric dates was never "numeric dates are bad".
+ * It was "I cannot tell which number is the month", which is true of a PDF
+ * from an agency nobody has set up and false of a template this office writes
+ * itself. Told the order, the reader can read them; told nothing, it still
+ * refuses, which is why the parameter has no default.
+ */
+export function parseNumericDate(
+  value: string,
+  order: DateOrder,
+): string | null {
+  const match = /\b(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})\b/.exec(value);
+  if (!match) return null;
+
+  const [, first, second, rawYear] = match as unknown as [
+    string, string, string, string,
+  ];
+
+  const day = order === 'DMY' ? first : second;
+  const month = order === 'DMY' ? second : first;
+
+  // A two-digit year is this century. A chauffeur booking is not from 1926.
+  const year = rawYear.length === 2 ? `20${rawYear}` : rawYear;
+
+  return isoIfReal(year, month.padStart(2, '0'), day.padStart(2, '0'));
+}
+
+export function parseSheetDate(
+  value: string | null,
+  order?: DateOrder,
+): string | null {
   if (!value) return null;
 
   const match =
     /\b(\d{1,2})(?:st|nd|rd|th)?[\s-]+([A-Za-z]{3,})[\s-]+(\d{4})\b/.exec(value) ??
     // "Oct 14 2026", which US-configured software prints.
     /\b([A-Za-z]{3,})[\s-]+(\d{1,2})(?:st|nd|rd|th)?,?[\s-]+(\d{4})\b/.exec(value);
-  if (!match) return null;
+
+  // All numbers. Readable only if the source has said which way round.
+  if (!match) return order ? parseNumericDate(value, order) : null;
 
   // The two orders put the day and the month in different capture slots.
   const dayFirst = /^\d/.test(match[1]!);
@@ -43,13 +79,23 @@ export function parseSheetDate(value: string | null): string | null {
   const month = MONTHS[monthWord.slice(0, 3).toLowerCase()];
   if (!month) return null;
 
-  const iso = `${year}-${month}-${day.padStart(2, '0')}`;
+  return isoIfReal(year, month, day.padStart(2, '0'));
+}
 
-  // A real calendar day, so `31 Feb` is refused rather than rolled forward
-  // into March by a Date constructor being helpful.
+/**
+ * `YYYY-MM-DD`, if those three numbers are a day that exists.
+ *
+ * Checked rather than trusted, so `31 Feb` is refused instead of being rolled
+ * forward into March by a Date constructor being helpful — which would be a
+ * booking silently moved to the wrong day.
+ */
+function isoIfReal(year: string, month: string, day: string): string | null {
+  const iso = `${year}-${month}-${day}`;
+
   const parsed = new Date(`${iso}T00:00:00.000Z`);
   if (Number.isNaN(parsed.getTime())) return null;
   if (parsed.getUTCDate() !== Number(day)) return null;
+  if (parsed.getUTCMonth() + 1 !== Number(month)) return null;
 
   return iso;
 }
